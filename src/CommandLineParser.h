@@ -61,6 +61,7 @@ namespace Epoch
 			int mn_NonInterpreted;
 			int mn_Switches;
 			int mn_PairCount;
+			string mn_command_line;
 
 
 		protected:

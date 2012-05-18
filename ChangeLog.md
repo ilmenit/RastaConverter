@@ -40,3 +40,23 @@ RastaConverterBeta2  2012-04-21  ilmenit
 7. 64bit version can be created, but I haven't seen any boost with that.
 8. Multiprocessing won't increase the speed. The slowest part is execution of
   raster program and it can't be parallelized.
+
+RastaConverterBeta3  2012-04-26  ilmenit
+----------------------------------------
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__125#entry2509434
+
+RastaConverter Beta3 attached. Big improvements in optimization heuristics and
+"continue" option are two main features in this version.  Tomorrow I'm going on
+holidays for 10 days so I publish it without other promised features.
+
+* New dithering algorithms
+* Changed command line parameters for dithering
+* Improved mutation heuristics (more accurate)
+* Changed default init behavior from smart to random
+* Improved random initialization
+* Preview for the destination picture and rescaled source picture
+* On big enough desktops displayed pictures in the app have proper proportions
+* Resuming of optimization added
+* Conversion in Beta3 is MUCH faster than in Beta2 and overal picture quality
+  is better.

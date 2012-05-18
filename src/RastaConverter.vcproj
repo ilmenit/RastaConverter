@@ -190,11 +190,11 @@
 				>
 			</File>
 			<File
-				RelativePath=".\cycle_map.c"
+				RelativePath=".\main.cpp"
 				>
 			</File>
 			<File
-				RelativePath=".\main.cpp"
+				RelativePath=".\rasta.cpp"
 				>
 			</File>
 			<File
@@ -216,7 +216,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\cycle_map.h"
+				RelativePath=".\rasta.h"
 				>
 			</File>
 			<File

@@ -1,3 +1,6 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
 #include <vector>
 #include <string>
 #include "FreeImage.h"
@@ -12,16 +15,30 @@ enum e_init_type {
 	E_INIT_RANDOM,
 	E_INIT_SMART,
 	E_INIT_EMPTY,
+	E_INIT_LESS,
 };
+
+enum e_dither_type {
+	E_DITHER_NONE,
+	E_DITHER_FLOYD,
+	E_DITHER_CHESS,
+	E_DITHER_SIMPLE,
+	E_DITHER_2D,
+	E_DITHER_JARVIS,
+};
+
 
 struct Configuration {
 	std::string input_file;
 	std::string output_file;
 	std::string palette_file;
+	std::string command_line;
 
 	bool border;
-	bool dither;
-	double dither_level;
+	bool euclid;
+	bool continue_processing;
+
+	e_dither_type dither;
 	int width;
 	int height;
 	FREE_IMAGE_FILTER rescale_filter;
@@ -29,9 +46,8 @@ struct Configuration {
 
 	CommandLineParser parser; 
 
-	Configuration(Configuration &a)
-	{
-		*this=a;
-	}
-	Configuration(int argc, char *argv[]);
+	void ProcessCmdLine();
+	void Process(int argc, char *argv[]);
 };
+
+#endif

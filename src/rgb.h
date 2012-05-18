@@ -1,3 +1,6 @@
+#ifndef RGB_H
+#define RGB_H
+
 struct rgb {
 	unsigned char b;
 	unsigned char g;
@@ -13,9 +16,9 @@ struct rgb {
 };
 
 struct rgb_error {
-	int b;
-	int g;
-	int r;
+	double b;
+	double g;
+	double r;
 	bool operator==(const rgb &ar)
 	{
 		if (r==ar.r && g==ar.g && b==ar.b)
@@ -30,3 +33,5 @@ struct rgb_error {
 		r=0;
 	}
 };
+
+#endif

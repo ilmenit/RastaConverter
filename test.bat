@@ -1,1 +1,2 @@
-start RastaConverter.exe test.png /filter=box /h=200
+start RastaConverter.exe test.png /dither=chess
+rem RastaConverter.exe /continue

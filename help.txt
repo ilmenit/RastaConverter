@@ -22,10 +22,16 @@ Command line options:
 
 /i=Input File
   File to process. All the formats of the FreeImage library supported, including JPG, PNG, GIF and BMP.
+  Warning: it is not possible to load 16 colors pictures (4 bits per pixel). Increase the color depth first
+  using other graphics program.
 
 /h=Output Height
   Default: 240.
-  Generated file height. The speed of the optimization process depends on the height. 
+  Generated file height. The speed of the optimization process depends on the height.
+  
+/continue
+  Continue previously stopped process. Currently it uses previously generated files (output*.*) therefore
+  be careful not to overwrite them with other instance of RastaConverter. 
 
 /pal=Palette File
   Default: Palettes\altirra.act
@@ -34,11 +40,12 @@ Command line options:
   Converting GFX from C64 it is usually better to use: /pal=Palettes\laoo.act     
   You can also use shorcuts: /pal=laoo and the converter will try to load palette from 'Palettes\laoo.act'
   
-/cdither
-  Use Chessboard dithering - typical 8bit dithering technique
-
- /dither
-  Use Floyd–Steinberg dithering - more "random" than chessboard dithering
+/dither=Dithering Type
+  Possible dithering types are: chess, floyd, 2d, jarvis, simple
+  'chess' is Chessboard Dithering - typical 8bit dithering technique
+  'floyd' is Floyd–Steinberg dithering - more "random" than chessboard dithering
+  '2d' and 'simple' are between chess and floyd.
+  'jarvis' dithering is more artistic
 
 /noborder
   This option allows RastaConverter to use one more sprite that covers overscan borders. 

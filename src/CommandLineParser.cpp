@@ -16,13 +16,6 @@ liable for any damage caused due to use of this code even if incidental.
 
 #include<algorithm>
 
-// for set window text
-namespace my_allegro {
-#include <allegro.h>
-}
-
-#include <winalleg.h>
-
 namespace Epoch
 {
 	namespace Foundation
@@ -46,12 +39,12 @@ namespace Epoch
 
 		void CommandLineParser::parse(int argc, char *argv[])
 		{
-			string cmd_line;
 			for(int i = 1; i < argc; i++) // skip filename, then pick each space seperated pair
 			{
 				string token = argv[i];
-				cmd_line+=" ";
-				cmd_line+=token;
+				if (i!=1)
+					mn_command_line+=" ";
+				mn_command_line+=token;
 
 				if(token[0] != '/'){	// non interpreted
 					mn_NonInterpreted++;
@@ -88,7 +81,6 @@ namespace Epoch
 
 
 			}
-			SetWindowTextA( win_get_window(),	cmd_line.c_str());
 		}
 
 		string CommandLineParser::getValue(string name, string defaultValue) 

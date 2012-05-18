@@ -1,6 +1,8 @@
 #include "config.h"
 #include "string_conv.h"
 
+#include <list>
+
 using namespace std;
 
 extern int solutions;
@@ -9,11 +11,53 @@ void ShowHelp();
 void error(char *e);
 void error(char *e, int i);
 
-Configuration::Configuration(int argc, char *argv[])
+void Configuration::ProcessCmdLine()
 {
-	dither_level=0.5;
+	string cmd=command_line;
+	vector <char *> args;
+	list <string> args_str;
+	list <string>::iterator it;
 
+	args_str.push_back("/");
+	it=args_str.begin();
+	args.push_back( (char *) (it->c_str()) ); // UGLY casting
+	int params=1;
+
+	size_t pos;
+	string current_cmd;
+	for (pos=0;pos<=cmd.size();++pos)
+	{
+		if (pos<cmd.size() && cmd[pos]!=' ')
+		{
+			current_cmd+=cmd[pos];			
+		}
+		else
+		{
+			args_str.push_back(current_cmd);
+			++it;
+			args.push_back( (char *) (it->c_str()) ); // UGLY casting
+			current_cmd.clear();
+			++params;
+		}
+	}
+
+	if (params>1)
+		Process(params,&args[0]);
+}
+
+void Configuration::Process(int argc, char *argv[])
+{
 	parser.parse(argc, argv);
+
+	if (parser.switchExists("continue"))
+	{
+		continue_processing=true;
+		return;
+	}
+	else
+		continue_processing=false;
+
+	command_line=parser.mn_command_line;
 
 	input_file = parser.getValue("i","NoFileName");
 	output_file = parser.getValue("o","output.png");
@@ -24,8 +68,27 @@ Configuration::Configuration(int argc, char *argv[])
 	else
 		border=true;
 
+	if (parser.switchExists("euclid"))
+		euclid=true;
+	else
+		euclid=false;
+
 	if (parser.switchExists("palette"))
 		palette_file = parser.getValue("palette","Palettes\\altirra.act");
+
+	string dither_value = parser.getValue("dither","none");
+	if (dither_value=="floyd")
+		dither=E_DITHER_FLOYD;
+	else if (dither_value=="chess" || dither_value=="cdither")
+		dither=E_DITHER_CHESS;
+	else if (dither_value=="2d")
+		dither=E_DITHER_2D;
+	else if (dither_value=="jarvis")
+		dither=E_DITHER_JARVIS;
+	else if (dither_value=="simple")
+		dither=E_DITHER_SIMPLE;
+	else
+		dither=E_DITHER_NONE;
 
 	string solutions_value = parser.getValue("s","1");
 	solutions=String2Value<int>(solutions_value);
@@ -60,11 +123,13 @@ Configuration::Configuration(int argc, char *argv[])
 		rescale_filter=FILTER_CATMULLROM;
 	else rescale_filter=FILTER_LANCZOS3;
 
-	string init_type_string = parser.getValue("init","smart");
+	string init_type_string = parser.getValue("init","random");
 	if (init_type_string=="random")
 		init_type=E_INIT_RANDOM;
 	else if (init_type_string=="empty")
 		init_type=E_INIT_EMPTY;
+	else if (init_type_string=="less")
+		init_type=E_INIT_LESS;
 	else
 		init_type=E_INIT_SMART;
 
