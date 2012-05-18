@@ -60,3 +60,38 @@ holidays for 10 days so I publish it without other promised features.
 * Resuming of optimization added
 * Conversion in Beta3 is MUCH faster than in Beta2 and overal picture quality
   is better.
+
+Rasta-opthack  2012-05-05  phaeron
+-----------------------------------
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__200#entry2515740
+
+This thing is really cool, especially for being pretty much hands off. My
+random contribution (NTSC and PAL):
+
+I spent way too much time hacking on the source and managed to optimize it a
+bit (attached, based on beta 3; requires SSE2). Might be buggy -- had to
+regressions on the way, and they might not all be fixed -- but it runs faster
+now and still seems to produce decent output. What I found out on the way:
+
+* As others have discovered, this sucker spends a ton of time in the color
+  differencing function. Since the transform between RGB and YCbCr is linear,
+  this can be immediately doubled in speed by doing the YCbCr conversion after
+  the difference instead of before... but, it turns out, it's even faster to
+  just precompute the differences between each pixel and the entire palette.
+  This change more than tripled the iteration rate as not only does the
+  differencing function basically go away during the run, but it also reduces
+  the size of the output array by 75%.
+* Several arrays are transposed from ideal memory ordering, although this is
+  minor.
+* Adding a line cache to the row evaluation loop is a huge gain since the
+  converter starts re-evaluating mostly similar frames a lot after initial
+  convergence. Actual execution and color re-matching drops to less than 5%,
+  and I'm pretty sure that further gains could be made by caching the line
+  evaluation results as well... but what this really means is that a more
+  aggressive mutator is needed. The algorithm starts making very slow progress
+  past 200K iterations.
+* There appears to be an omission in the dithering routine. At least for
+  Floyd-Steinberg, it is usually a good idea to alternate traversal direction
+  on each scan line to avoid error diffusion skewing toward the right side of
+  the image.

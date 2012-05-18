@@ -20,7 +20,11 @@
 
 using namespace std;
 
-typedef double (*f_rgb_distance)(rgb &col1, rgb &col2);
+#define DISTANCE_MAX 0xffff
+typedef long long distance_accum_t;
+typedef unsigned short distance_t;
+typedef distance_t (fn_rgb_distance)(const rgb &col1, const rgb &col2);
+typedef fn_rgb_distance *f_rgb_distance;
 
 // CPU registers
 
@@ -69,9 +73,16 @@ enum e_mutation_type {
 };
 
 struct SRasterInstruction {
-	e_raster_instruction instruction;
-	e_target target;
+	/*e_raster_instruction*/ unsigned char instruction;
+	/*e_target*/ unsigned char target;
 	unsigned char value;
+
+	bool operator==(const SRasterInstruction& other) const
+	{
+		return instruction == other.instruction
+			&& target == other.target
+			&& value == other.value;
+	}
 };
 
 class screen_line {
@@ -82,11 +93,18 @@ public:
 	{
 		pixels.resize(i);
 	}
+
 	rgb& operator[](size_t i)
 	{
 		return pixels[i];
 	}
-	size_t size()
+
+	const rgb& operator[](size_t i) const
+	{
+		return pixels[i];
+	}
+
+	size_t size() const
 	{
 		return pixels.size();
 	}
@@ -94,21 +112,25 @@ public:
 
 class line_target {
 private:
-	vector < e_target > pixels; // target of the pixel f.e. COLBAK
+	vector < unsigned char > pixels; // target of the pixel f.e. COLBAK
 public:
 	void Resize(size_t i)
 	{
 		pixels.resize(i);
 	}
-	e_target& operator[](size_t i)
+
+	unsigned char& operator[](size_t i)
 	{
 		return pixels[i];
 	}
-	size_t size()
+
+	size_t size() const
 	{
 		return pixels.size();
 	}
 };
+
+typedef vector<unsigned char> color_index_line;
 
 // Tables of cycles
 
@@ -154,15 +176,15 @@ private:
 	BITMAP *destination_bitmap;
 
 	vector < screen_line > m_picture; 
+	vector<distance_t> m_picture_all_errors[128]; 
 	int m_width,m_height; // picture size
 
 	// private functions
 	void InitLocalStructure();
 
 
-	vector < screen_line > m_created_picture;
+	vector < color_index_line > m_created_picture;
 	vector < line_target > m_created_picture_targets;
-	vector < screen_line > m_best_created_picture;
 	map < double, raster_picture > m_solutions;
 	vector < vector < unsigned char > > m_possible_colors_for_each_line;
 	vector < vector < rgb_error > > error_map;
@@ -177,12 +199,19 @@ private:
 	void CreateRandomRasterPicture(raster_picture *);
 	void DiffuseError( int x, int y, double quant_error, double e_r,double e_g,double e_b);
 
-	void ExecuteInstruction(SRasterInstruction &instr, int x);
-	int GetInstructionCycles(SRasterInstruction &instr);
+	inline void ExecuteInstruction(const SRasterInstruction &instr, int x);
+	inline int GetInstructionCycles(const SRasterInstruction &instr);
+
 	void ExecuteRasterProgram(raster_picture *);
+
+	template<fn_rgb_distance& T_distance_function> 
+	void ExecuteRasterProgramT(raster_picture *);
+
 	void SetSpriteBorders(raster_picture *);
 	double EvaluateCreatedPicture(void);
-	double CalculateLineDistance(screen_line &r, screen_line &l);
+
+	template<fn_rgb_distance& T_distance_function>
+	distance_accum_t CalculateLineDistance(const screen_line &r, const screen_line &l);
 
 	void AddSolution(double,raster_picture);
 
@@ -200,7 +229,9 @@ private:
 	int m_mutation_stats[E_MUTATION_MAX];
 	map < int,int > m_current_mutations;
 	void ShowMutationStats();
-	e_target FindClosestColorRegister(rgb pixel,int x,int y, bool &restart_line);
+
+	template<fn_rgb_distance& T_distance_function>
+	e_target FindClosestColorRegister(int index, int x,int y, bool &restart_line);
 
 	void SaveRasterProgram(string name);
 	void SavePMG(string name);

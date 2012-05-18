@@ -30,6 +30,8 @@ const char *program_version="Beta3";
 #include <sstream>
 #include <ctype.h>
 #include <iomanip>
+#include <iterator>
+#include <unordered_map>
 
 #include "rasta.h"
 #include "main.h"
@@ -108,6 +110,7 @@ unsigned char reg_a, reg_x, reg_y;
 
 unsigned char mem_regs[E_TARGET_MAX];
 unsigned char sprite_shift_regs[4];
+unsigned char sprite_shift_start_array[256];
 
 char *mem_regs_names[E_TARGET_MAX+1]=
 {
@@ -130,9 +133,9 @@ int free_cycles=0; // must be set depending on the mode, PMG, LMS etc.
 ScreenCycle screen_cycles[CYCLES_MAX];
 
 // we limit PMG memory to visible 240 bytes
-unsigned char sprites_memory[4][240][8]; // we convert it to 240 bytes of PMG memory at the end of processing.
+unsigned char sprites_memory[240][4][8]; // we convert it to 240 bytes of PMG memory at the end of processing.
 
-vector < rgb > atari_palette; // 128 colors in mode 15!
+rgb atari_palette[128]; // 128 colors in mode 15!
 
 
 void create_cycles_table()
@@ -196,7 +199,7 @@ bool LoadAtariPalette(string filename)
 		// limit it to 128 colors!
 		// use every second color
 		if (i%2==0)
-			atari_palette.push_back(col);
+			atari_palette[i >> 1] = col;
 	}
 	fclose(fp);
 	return true;
@@ -224,35 +227,46 @@ inline void RGBtoYUV(double r, double g, double b, double &y, double &u, double 
 
 #define MAX_COLOR_DISTANCE (255*255*3)
 
-double RGByuvDistance(rgb &col1, rgb &col2)
+distance_t RGByuvDistance(const rgb &col1, const rgb &col2)
 {
-	double distance=0,temp;	
-	// this one is better :)
-	double y1,u1,v1;
-	double y2,u2,v2;
+	int dr = col2.r - col1.r;
+	int dg = col2.g - col1.g;
+	int db = col2.b - col1.b;
 
-	RGBtoYUV(col1.r,col1.g,col1.b,y1,u1,v1);
-	RGBtoYUV(col2.r,col2.g,col2.b,y2,u2,v2);
+	float dy = 0.299f*dr + 0.587f*dg + 0.114f*db;
+	float du = (db-dy)*0.565f;
+	float dv = (dr-dy)*0.713f;
 
-	temp=(y2-y1);
-	distance+=temp*temp;
-	temp=(u2-u1);
-	distance+=temp*temp;
-	temp=(v2-v1);
-	distance+=temp*temp;
-	return distance;
+	float d = dy*dy + du*du + dv*dv;
+
+	if (d > (float)DISTANCE_MAX)
+		d = (float)DISTANCE_MAX;
+
+	return (distance_t)d;
+
+//	int dy = 38*dr + 75*dg + 14*db;
+//	int du = (db - ((dy + 64) >> 7)) * 72;
+//	int dv = (dr - ((dy + 64) >> 7)) * 91;
+
+//	return (dy*dy + du*du + dv*dv) >> 14;
 }
 
 
-double RGBEuclidianDistance(rgb &col1, rgb &col2)
+distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2)
 {
-	double distance=0;
+	int distance=0;
+
 	// euclidian distance
-	distance+=((double)col1.r-(double)col2.r)*((double)col1.r-(double)col2.r);
-	distance+=((double)col1.g-(double)col2.g)*((double)col1.g-(double)col2.g);
-	distance+=((double)col1.b-(double)col2.b)*((double)col1.b-(double)col2.b);
-	//	return sqrt(distance); no need for sqrt
-	return distance;
+	int dr = col1.r - col2.r;
+	int dg = col1.g - col2.g;
+	int db = col1.b - col2.b;
+
+	int d = dr*dr + dg*dg + db*db;
+
+	if (d > DISTANCE_MAX)
+		d = DISTANCE_MAX;
+
+	return (distance_t)d;
 }
 
 void resize_rgb_picture(vector < screen_line > *picture, size_t width, size_t height)
@@ -287,8 +301,8 @@ unsigned char FindAtariColorIndex(rgb &col)
 	double min_distance=DBL_MAX;
 	for(i=0;i<128;++i)
 	{
-		distance=distance_function(col,atari_palette[i]);
-		if (distance<min_distance)
+		distance = distance_function(col,atari_palette[i]);
+		if (distance < min_distance)
 		{
 			min_distance=distance;
 			most_similar=i;
@@ -357,9 +371,9 @@ void RastaConverter::InitLocalStructure()
 	// Set color distance
 
 	if (cfg.euclid)
-		distance_function=RGBEuclidianDistance;
+		distance_function = RGBEuclidianDistance;
 	else
-		distance_function=RGByuvDistance;
+		distance_function = RGByuvDistance;
 
 	//////////////////////////////////////////////////////////////////////////
 	// Set our structure size
@@ -383,6 +397,26 @@ void RastaConverter::InitLocalStructure()
 			FreeImage_SetPixelColor(fbitmap, x, y, &fpixel);
 		}
 	}
+
+	for(int i=0; i<128; ++i)
+	{
+		m_picture_all_errors[i].resize(input_bitmap->w * input_bitmap->h);
+
+		const rgb ref = atari_palette[i];
+
+		auto *dst = &m_picture_all_errors[i][0];
+		for (y=0;y<input_bitmap->h;++y)
+		{
+			auto& dstrow = m_picture_all_errors[i][y];
+			const auto& srcrow = m_picture[y];
+
+			for (x=0;x<input_bitmap->w;++x)
+			{
+				*dst++ = distance_function(srcrow[x], ref);
+			}
+		}
+	}
+
 	clear_bitmap(screen);
 	// Show our picture
 	if (desktop_width>=320*3)
@@ -410,10 +444,17 @@ void RastaConverter::PrepareDestinationPicture()
 		ClearErrorMap();
 
 	// Draw new picture on the screen
+	const int w = input_bitmap->w;
+	const int w1 = w - 1;
+
 	for (y=0;y<input_bitmap->h;++y)
 	{
-		for (x=0;x<input_bitmap->w;++x)
+		const bool flip = (cfg.dither==E_DITHER_FLOYD) && (y & 1);
+
+		for (int i=0;i<w;++i)
 		{
+			int x = flip ? w1 - i : i;
+
 			rgb out_pixel=m_picture[y][x];
 
 			if (cfg.dither!=E_DITHER_NONE)
@@ -438,9 +479,9 @@ void RastaConverter::PrepareDestinationPicture()
 				else if (p.b<0)
 					p.b=0;
 
-				out_pixel.r=(unsigned char) p.r;
-				out_pixel.g=(unsigned char) p.g;
-				out_pixel.b=(unsigned char) p.b;
+				out_pixel.r=(unsigned char)(p.r + 0.5);
+				out_pixel.g=(unsigned char)(p.g + 0.5);
+				out_pixel.b=(unsigned char)(p.b + 0.5);
 
 				out_pixel=atari_palette[FindAtariColorIndex(out_pixel)];
 
@@ -454,10 +495,20 @@ void RastaConverter::PrepareDestinationPicture()
 				{
 					/* Standard Floyd–Steinberg uses 4 pixels to diffuse */
 
-					DiffuseError( x+1, y,   7.0/16.0, qe.r,qe.g,qe.b);
-					DiffuseError( x-1, y+1, 3.0/16.0, qe.r,qe.g,qe.b);
-					DiffuseError( x  , y+1, 5.0/16.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+1, y+1, 1.0/16.0, qe.r,qe.g,qe.b);
+					if (flip)
+					{
+						DiffuseError( x-1, y,   7.0/16.0, qe.r,qe.g,qe.b);
+						DiffuseError( x+1, y+1, 3.0/16.0, qe.r,qe.g,qe.b);
+						DiffuseError( x  , y+1, 5.0/16.0, qe.r,qe.g,qe.b);
+						DiffuseError( x-1, y+1, 1.0/16.0, qe.r,qe.g,qe.b);
+					}
+					else
+					{
+						DiffuseError( x+1, y,   7.0/16.0, qe.r,qe.g,qe.b);
+						DiffuseError( x-1, y+1, 3.0/16.0, qe.r,qe.g,qe.b);
+						DiffuseError( x  , y+1, 5.0/16.0, qe.r,qe.g,qe.b);
+						DiffuseError( x+1, y+1, 1.0/16.0, qe.r,qe.g,qe.b);
+					}
 				}
 				else if (cfg.dither==E_DITHER_CHESS)
 				{
@@ -567,10 +618,10 @@ bool RastaConverter::SaveScreenData(const char *filename)
 		for (x=0;x<m_width;x+=4)
 		{
 			unsigned char pix=0;
-			a=ConvertColorRegisterToRawData(m_created_picture_targets[y][x]);
-			b=ConvertColorRegisterToRawData(m_created_picture_targets[y][x+1]);
-			c=ConvertColorRegisterToRawData(m_created_picture_targets[y][x+2]);
-			d=ConvertColorRegisterToRawData(m_created_picture_targets[y][x+3]);
+			a=ConvertColorRegisterToRawData((e_target)m_created_picture_targets[y][x]);
+			b=ConvertColorRegisterToRawData((e_target)m_created_picture_targets[y][x+1]);
+			c=ConvertColorRegisterToRawData((e_target)m_created_picture_targets[y][x+2]);
+			d=ConvertColorRegisterToRawData((e_target)m_created_picture_targets[y][x+3]);
 			pix |= a<<6;
 			pix |= b<<4;
 			pix |= c<<2;
@@ -600,9 +651,9 @@ void RastaConverter::ClearErrorMap()
 		}
 	}
 	// clear the map
-	for (size_t y=0;y<m_height;++y)
+	for (int y=0;y<m_height;++y)
 	{
-		for (size_t x=0;x<m_width;++x)
+		for (int x=0;x<m_width;++x)
 		{
 			error_map[y][x].zero();	
 		}
@@ -661,7 +712,7 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 
 	int size = FreeImage_GetWidth(fbitmap);
 	// in line 0 we set init registers
-	for (y=0;y<r->raster_lines.size();++y)
+	for (y=0;y<(int)r->raster_lines.size();++y)
 	{
 		// create new picture from line y 
 		FIBITMAP *f_copy = FreeImage_Copy(fbitmap,0,y+1,size,0);	
@@ -700,7 +751,7 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 		// convert colors to series of LDA/STA in order of appearance. Ignore for now(?) regs in prev line
 
 		m=sorted_colors.begin();
-		for (int k=0;k<dest_regs && k<sorted_colors.size();++k,++m)
+		for (int k=0;k<dest_regs && k<(int)sorted_colors.size();++k,++m)
 		{
 			int c=m->second;
 			color.r=getr(c);
@@ -823,7 +874,7 @@ void RastaConverter::CreateRandomRasterPicture(raster_picture *r)
 }
 
 
-int RastaConverter::GetInstructionCycles(SRasterInstruction &instr)
+inline int RastaConverter::GetInstructionCycles(const SRasterInstruction &instr)
 {
 	switch(instr.instruction)
 	{
@@ -860,14 +911,14 @@ void RastaConverter::DiffuseError( int x, int y, double quant_error, double e_r,
 	error_map[y][x]=p;
 }
 
-
-e_target RastaConverter::FindClosestColorRegister(rgb pixel, int x,int y, bool &restart_line)
+template<fn_rgb_distance& T_distance_function>
+e_target RastaConverter::FindClosestColorRegister(int index, int x,int y, bool &restart_line)
 {
-	double distance;
+	distance_t distance;
 	int sprite_bit;
 	int best_sprite_bit;
 	e_target result=E_COLBAK;
-	double min_distance=DBL_MAX;
+	distance_t min_distance = DISTANCE_MAX;
 	bool sprite_covers_colbak=false;
 
 	// check sprites
@@ -879,15 +930,20 @@ e_target RastaConverter::FindClosestColorRegister(rgb pixel, int x,int y, bool &
 		int sprite_pos=sprite_shift_regs[temp-E_COLPM0];
 
 		int sprite_x=sprite_pos-sprite_screen_color_cycle_start;
-		if (x>=sprite_x && x<sprite_x+sprite_size)
+//		if (x>=sprite_x && x<sprite_x+sprite_size)
+
+		unsigned x_offset = (unsigned)(x - sprite_x);
+		if (x_offset < sprite_size)
 		{
-			sprite_bit=(x-sprite_x)/4; // bit of this sprite memory
+//			sprite_bit=(x-sprite_x)/4; // bit of this sprite memory
+			sprite_bit=x_offset >> 2; // bit of this sprite memory
 			assert(sprite_bit<8);
 
 			sprite_covers_colbak=true;
 
-			distance = distance_function(pixel,atari_palette[mem_regs[temp]/2]);
-			if (sprites_memory[temp-E_COLPM0][y][sprite_bit])
+//			distance = T_distance_function(pixel,atari_palette[mem_regs[temp]/2]);
+			distance = m_picture_all_errors[mem_regs[temp]/2][index];
+			if (sprites_memory[y][temp-E_COLPM0][sprite_bit])
 			{
 				// priority of sprites - next sprites are hidden below that one, so they are not processed
 				best_sprite_bit=sprite_bit;
@@ -915,7 +971,8 @@ e_target RastaConverter::FindClosestColorRegister(rgb pixel, int x,int y, bool &
 
 	for (int temp=E_COLOR0;temp<=last_color_register;++temp)
 	{
-		distance = distance_function(pixel,atari_palette[mem_regs[temp]/2]);
+//		distance = T_distance_function(pixel,atari_palette[mem_regs[temp]/2]);
+		distance = m_picture_all_errors[mem_regs[temp]/2][index];
 		if (distance<min_distance)
 		{
 			min_distance=distance;
@@ -927,10 +984,10 @@ e_target RastaConverter::FindClosestColorRegister(rgb pixel, int x,int y, bool &
 	if (result>=E_COLPM0 && result<=E_COLPM3)
 	{
 		// if PMG bit has been modified, then restart this line, because previous pixels of COLBAK may be covered
-		if (sprites_memory[result-E_COLPM0][y][best_sprite_bit]==false)
+		if (sprites_memory[y][result-E_COLPM0][best_sprite_bit]==false)
 		{
 			restart_line=true;
-			sprites_memory[result-E_COLPM0][y][best_sprite_bit]=true;
+			sprites_memory[y][result-E_COLPM0][best_sprite_bit]=true;
 		}
 
 	}
@@ -938,7 +995,7 @@ e_target RastaConverter::FindClosestColorRegister(rgb pixel, int x,int y, bool &
 }
 
 
-void RastaConverter::ExecuteInstruction(SRasterInstruction &instr, int x)
+inline void RastaConverter::ExecuteInstruction(const SRasterInstruction &instr, int x)
 {
 	int reg_value=-1;
 	switch(instr.instruction)
@@ -965,14 +1022,20 @@ void RastaConverter::ExecuteInstruction(SRasterInstruction &instr, int x)
 
 	if (reg_value!=-1)
 	{
-		if (cfg.border)
+		// make write to sprite0 4 cycle nop in border mode
+		if (!cfg.border || (instr.target!=E_HPOSP0 && instr.target!=E_COLPM0))
 		{
-			// make write to sprite0 4 cycle nop
-			if (instr.target!=E_HPOSP0 && instr.target!=E_COLPM0)
+			const unsigned hpos_index = (unsigned)(instr.target - E_HPOSP0);
+			if (hpos_index < 4) {
+				sprite_shift_start_array[mem_regs[instr.target]] &= ~(1 << hpos_index);
+
 				mem_regs[instr.target]=reg_value;
+
+				sprite_shift_start_array[mem_regs[instr.target]] |= (1 << hpos_index);
+			} else {
+				mem_regs[instr.target]=reg_value;
+			}
 		}
-		else
-			mem_regs[instr.target]=reg_value;
 	}
 }
 
@@ -1004,6 +1067,109 @@ void RastaConverter::SetSpriteBorders(raster_picture *pic)
 	}
 }
 
+void ResetSpriteShiftStartArray()
+{
+	memset(sprite_shift_start_array, 0, sizeof sprite_shift_start_array);
+
+	for(int i=0; i<4; ++i)
+		sprite_shift_start_array[mem_regs[i+E_HPOSP0]] |= (1 << i);
+}
+
+struct line_machine_state
+{
+	unsigned char reg_a;
+	unsigned char reg_x;
+	unsigned char reg_y;
+	unsigned char mem_regs[E_TARGET_MAX];
+
+	void capture()
+	{
+		this->reg_a = ::reg_a;
+		this->reg_x = ::reg_x;
+		this->reg_y = ::reg_y;
+
+		memcpy(this->mem_regs, ::mem_regs, sizeof this->mem_regs);
+	}
+
+	void apply() const
+	{
+		::reg_a = this->reg_a;
+		::reg_x = this->reg_x;
+		::reg_y = this->reg_y;
+		memcpy(::mem_regs, this->mem_regs, sizeof ::mem_regs);
+	}
+};
+
+struct line_cache_key
+{
+	size_t hash;
+	line_machine_state entry_state;
+	const SRasterInstruction *insns;
+	unsigned insn_count;
+};
+
+struct line_cache_key_hash
+{
+	size_t operator()(const line_cache_key& key) const
+	{
+		unsigned h = 0;
+		
+		h += (size_t)key.entry_state.reg_a;
+		h += (size_t)key.entry_state.reg_x << 8;
+		h += (size_t)key.entry_state.reg_y << 16;
+		h += key.insn_count << 24;
+
+		for(int i=0; i<E_TARGET_MAX; ++i)
+			h += (size_t)key.entry_state.mem_regs[i] << (8*(i & 3));
+
+		for(unsigned i=0; i<key.insn_count; ++i)
+		{
+			const SRasterInstruction& insn = key.insns[i];
+
+			h += (size_t)insn.value;
+			h += (size_t)insn.target << 8;
+			h += (size_t)insn.instruction << 16;
+
+			h = (h >> 27) + (h << 5);
+		}
+
+		return h;
+	}
+};
+
+struct line_cache_key_eq
+{
+	bool operator()(const line_cache_key& key1, const line_cache_key& key2) const
+	{
+		if (key1.hash != key2.hash) return false;
+		if (key1.entry_state.reg_a != key2.entry_state.reg_a) return false;
+		if (key1.entry_state.reg_x != key2.entry_state.reg_x) return false;
+		if (key1.entry_state.reg_y != key2.entry_state.reg_y) return false;
+		if (memcmp(key1.entry_state.mem_regs, key2.entry_state.mem_regs, sizeof key1.entry_state.mem_regs)) return false;
+
+		if (key1.insn_count != key2.insn_count) return false;
+
+		for(unsigned i=0; i<key1.insn_count; ++i) {
+			if (!(key1.insns[i] == key2.insns[i]))
+				return false;
+		}
+
+		return true;
+	}
+};
+
+struct line_cache_result
+{
+	line_machine_state new_state;
+	vector<unsigned char> color_row;
+	vector<unsigned char> target_row;
+	unsigned char sprite_data[4][8];
+};
+
+unordered_map<line_cache_key, line_cache_result, line_cache_key_hash, line_cache_key_eq> line_cache;
+const size_t LINE_CACHE_INSN_POOL_SIZE = 1048576*4;
+SRasterInstruction line_cache_insn_pool[LINE_CACHE_INSN_POOL_SIZE];
+size_t line_cache_insn_pool_level = 0;
 
 unsigned char old_reg_a,old_reg_x,old_reg_y;
 unsigned char old_mem_regs[E_TARGET_MAX];
@@ -1026,13 +1192,22 @@ void RestoreLineRegs()
 
 void RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 {
+	if (distance_function == RGByuvDistance)
+		ExecuteRasterProgramT<RGByuvDistance>(pic);
+	else
+		ExecuteRasterProgramT<RGBEuclidianDistance>(pic);
+}
+
+template<fn_rgb_distance& T_distance_function> 
+void RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
+{
 	int x,y; // currently processed pixel
 
 	int cycle;
 	int next_instr_offset;
 	int ip; // instruction pointer
 
-	SRasterInstruction *instr;
+	const SRasterInstruction *__restrict instr;
 
 	reg_a=0;
 	reg_x=0;
@@ -1040,14 +1215,55 @@ void RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 	memset(sprite_shift_regs,0,sizeof(sprite_shift_regs));
 	memcpy(mem_regs,pic->mem_regs_init,sizeof(pic->mem_regs_init));
 	memset(sprites_memory,0,sizeof(sprites_memory));
-
+	
 	bool restart_line=false;
+	bool shift_start_array_dirty = true;
 	for (y=0;y<m_height;++y)
 	{
 		if (restart_line)
+		{
 			RestoreLineRegs();
+			shift_start_array_dirty = true;
+		}
 		else
+		{
 			StoreLineRegs();
+		}
+
+		// snapshot current machine state
+		const auto *__restrict rastinsns = pic->raster_lines[y].instructions.data();
+		const int rastinsncnt = pic->raster_lines[y].instructions.size();
+
+		line_cache_key lck;
+		lck.entry_state.capture();
+		lck.insns = rastinsns;
+		lck.insn_count = rastinsncnt;
+		lck.hash = line_cache_key_hash()(lck);
+
+		// check line cache
+		auto * __restrict created_picture_row = &m_created_picture[y][0];
+		auto * __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
+
+		auto cache_it = line_cache.find(lck);
+		if (cache_it != line_cache.end())
+		{
+			// sweet! cache hit!!
+			const auto& cached_line_result = cache_it->second;
+
+			cached_line_result.new_state.apply();
+			memcpy(created_picture_row, cached_line_result.color_row.data(), m_width);
+			memcpy(created_picture_targets_row, cached_line_result.target_row.data(), m_width);
+			memcpy(sprites_memory[y], cached_line_result.sprite_data, sizeof sprites_memory[y]);
+			shift_start_array_dirty = true;
+			continue;
+		}
+
+		if (shift_start_array_dirty)
+		{
+			shift_start_array_dirty = false;
+
+			ResetSpriteShiftStartArray();
+		}
 
 		restart_line=false;
 		ip=0;
@@ -1057,20 +1273,44 @@ void RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 		// on new line clear sprite shifts and wait to be taken from mem_regs
 		memset(sprite_shift_regs,0,sizeof(sprite_shift_regs));
 
+		if (!rastinsncnt)
+			next_instr_offset = 1000;
+
+		const auto *__restrict picture_row = &m_picture[y][0];
+		const auto *__restrict error_row = &m_picture_all_errors[y][0];
+
+		const int picture_row_index = m_width * y;
+
 		for (x=-sprite_screen_color_cycle_start;x<176;++x)
 		{
 			// check position of sprites
+			const int sprite_check_x = x + sprite_screen_color_cycle_start;
+
+#if 1
+			const unsigned char sprite_start_mask = sprite_shift_start_array[sprite_check_x];
+
+			if (sprite_start_mask)
+			{
+				if (sprite_start_mask & 1) sprite_shift_regs[0] = mem_regs[E_HPOSP0];
+				if (sprite_start_mask & 2) sprite_shift_regs[1] = mem_regs[E_HPOSP1];
+				if (sprite_start_mask & 4) sprite_shift_regs[2] = mem_regs[E_HPOSP2];
+				if (sprite_start_mask & 8) sprite_shift_regs[3] = mem_regs[E_HPOSP3];
+			}
+#else
 			for (int spr=0;spr<4;++spr)
 			{
-				if (x+sprite_screen_color_cycle_start==mem_regs[spr+E_HPOSP0])
+//				if (x+sprite_screen_color_cycle_start==mem_regs[spr+E_HPOSP0])
+				if (sprite_check_x == mem_regs[spr+E_HPOSP0])
 					sprite_shift_regs[spr]=mem_regs[spr+E_HPOSP0];
 			}
+#endif
 
-			while(next_instr_offset<x && ip<pic->raster_lines[y].instructions.size()) // execute instructions
+			while(next_instr_offset<x && ip<rastinsncnt) // execute instructions
 			{
 				// check position of sprites
 
-				instr = &pic->raster_lines[y].instructions[ip++];
+				instr = &rastinsns[ip++];
+
 				if (cycle<4) // in the previous line
 					ExecuteInstruction(*instr,x+200);
 				else
@@ -1078,33 +1318,63 @@ void RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 
 				cycle+=GetInstructionCycles(*instr);
 				next_instr_offset=screen_cycles[cycle].offset;
+				if (ip >= rastinsncnt)
+					next_instr_offset = 1000;
 			}
-			if (x>=0 && x<m_width)
+
+//			if (x>=0 && x<m_width)
+			if ((unsigned)x < (unsigned)m_width)
 			{
 				// put pixel closest to one of the current color registers
-				rgb pixel = m_picture[y][x];
-				e_target closest_register = FindClosestColorRegister(pixel,x,y,restart_line);
-				rgb out_pixel = atari_palette[mem_regs[closest_register]/2];
-				m_created_picture[y][x]=out_pixel;
-				m_created_picture_targets[y][x]=closest_register;
+//				rgb pixel = picture_row[x];
+				e_target closest_register = FindClosestColorRegister<T_distance_function>(picture_row_index + x,x,y,restart_line);
+				created_picture_row[x]=mem_regs[closest_register] >> 1;
+				created_picture_targets_row[x]=closest_register;
 			}
 		}
+
 		if (restart_line)
+		{
 			--y;
+		}
+		else
+		{
+			// add this to line cache
+			if (line_cache_insn_pool_level + rastinsncnt > LINE_CACHE_INSN_POOL_SIZE)
+			{
+				// flush line cache
+				line_cache.clear();
+				line_cache_insn_pool_level = 0;
+			}
+
+			// relocate insns to pool
+			auto *new_insns = line_cache_insn_pool + line_cache_insn_pool_level;
+			lck.insns = new_insns;
+			memcpy(new_insns, rastinsns, rastinsncnt * sizeof(rastinsns[0]));
+			line_cache_insn_pool_level += rastinsncnt;
+
+			auto& result_state = line_cache[lck];
+
+			result_state.new_state.capture();
+			result_state.color_row.assign(created_picture_row, created_picture_row + m_width);
+			result_state.target_row.assign(created_picture_targets_row, created_picture_targets_row + m_width);
+			memcpy(result_state.sprite_data, sprites_memory[y], sizeof result_state.sprite_data);
+		}
 	}
 	return;
 }
 
-double RastaConverter::CalculateLineDistance(screen_line &r, screen_line &l)
+template<fn_rgb_distance& T_distance_function>
+distance_accum_t RastaConverter::CalculateLineDistance(const screen_line &r, const screen_line &l)
 {
-	int width=r.size();
-	double distance=0;
+	const int width = r.size();
+	distance_accum_t distance=0;
 
 	for (int x=0;x<width;++x)
 	{
 		rgb in_pixel = r[x];
 		rgb out_pixel = l[x];
-		distance+=distance_function(in_pixel,out_pixel);
+		distance += T_distance_function(in_pixel,out_pixel);
 	}
 	return distance;
 };
@@ -1112,14 +1382,37 @@ double RastaConverter::CalculateLineDistance(screen_line &r, screen_line &l)
 double RastaConverter::EvaluateCreatedPicture(void)
 {
 	int y; // currently processed pixel
-	double distance=0;
+	distance_accum_t distance=0;
 	++evaluations;
 
+#if 1
+	int error_index = 0;
 	for (y=0;y<m_height;++y)
 	{
-		double line_distance = CalculateLineDistance(m_picture[y],m_created_picture[y]);
-		distance+=line_distance;
+		const auto *index_src_row = &m_created_picture[y][0];
+
+		for(int x=0; x<m_width; ++x)
+			distance += m_picture_all_errors[index_src_row[x]][error_index++];
 	}
+#else
+	if (distance_function == RGByuvDistance)
+	{
+		for (y=0;y<m_height;++y)
+		{
+			const distance_t line_distance = CalculateLineDistance<RGByuvDistance>(m_picture[y],m_created_picture[y]);
+			distance += line_distance;
+		}
+	}
+	else
+	{
+		for (y=0;y<m_height;++y)
+		{
+			const distance_t line_distance = CalculateLineDistance<RGBEuclidianDistance>(m_picture[y],m_created_picture[y]);
+			distance += line_distance;
+		}
+	}
+#endif
+
 	return distance;
 }
 
@@ -1142,7 +1435,7 @@ void RastaConverter::FindPossibleColors()
 			set_of_colors.insert(FindAtariColorIndex(m_picture[l][x])*2);				
 
 		// copy set to vector
-		copy(set_of_colors.begin(), set_of_colors.end(),back_inserter(vector_of_colors));
+		copy(set_of_colors.begin(), set_of_colors.end(), back_inserter(vector_of_colors));
 #else
 		vector_of_colors.push_back(0);
 #endif
@@ -1170,7 +1463,7 @@ void RastaConverter::Init()
 			init_solutions=500;
 	}
 
-	for (size_t i=0;i<init_solutions && !user_closed_app;++i)
+	for (int i=0; i<init_solutions && !user_closed_app; ++i)
 	{
 		raster_picture m(m_height);
 		if (cfg.init_type==E_INIT_RANDOM)
@@ -1192,7 +1485,6 @@ void RastaConverter::Init()
 		{
 			ShowLastCreatedPicture();
 			min_distance=result;
-			m_best_created_picture=m_created_picture;
 		}
 		AddSolution(result,m);
 	}
@@ -1235,7 +1527,7 @@ unsigned char LimitValueToPMGPosition(unsigned char value)
 
 void RastaConverter::MutateOnce(raster_line &prog)
 {
-	int i1,i2,c,x,value;
+	int i1,i2,c,x;
 
 	i1=random(prog.instructions.size());
 	i2=i1;
@@ -1370,7 +1662,7 @@ void RastaConverter::MutateOnce(raster_line &prog)
 			x=random(m_width);
 		i2=m_currently_mutated_y;
 		// check color in next lines
-		while(random(5)==0 && i2+1<m_picture.size())
+		while(random(5)==0 && i2+1 < (int)m_picture.size())
 			++i2;
 		prog.instructions[i1].value=FindAtariColorIndex(m_picture[i2][x])*2;
 		m_current_mutations[E_MUTATION_CHANGE_VALUE_TO_COLOR]++;
@@ -1518,7 +1810,11 @@ void Wait(int t)
 
 void RastaConverter::FindBestSolution()
 {
-	resize_rgb_picture(&m_created_picture,m_picture[0].size(),m_picture.size());
+	m_created_picture.resize(m_height);
+	for(int i=0; i<m_height; ++i)
+		m_created_picture[i].resize(m_width, 0);
+
+//	resize_rgb_picture(&m_created_picture,m_picture[0].size(),m_picture.size());
 	resize_target_picture(&m_created_picture_targets,input_bitmap->w,input_bitmap->h);
 
 	memset(m_mutation_stats,0,sizeof(m_mutation_stats));
@@ -1533,6 +1829,8 @@ void RastaConverter::FindBestSolution()
 
 	textprintf_ex(screen, font, 0, 280, makecol(0xF0,0xF0,0xF0), 0, "Press 'S' to save.");
 	textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u", evaluations);
+
+	unsigned last_eval = 0;
 
 	while(!key[KEY_ESC] && !user_closed_app)
 	{
@@ -1558,6 +1856,7 @@ void RastaConverter::FindBestSolution()
 
 			if (evaluations%300==0)
 			{
+				last_eval = evaluations;
 				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u", evaluations,last_best_evaluation);
 				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", m_solutions.begin()->first/ (((double)m_width*(double)m_height)*(MAX_COLOR_DISTANCE/10000)));
 			}
@@ -1565,11 +1864,12 @@ void RastaConverter::FindBestSolution()
 			if ( ((solutions==1 && result<=current_distance) || 
 				(solutions>1 && result<current_distance)) )
 			{
-				// show it only if mutation gives better picture
-				if (result<current_distance)
+				// show it only if mutation gives better picture and if a minimum amount of evals have gone by
+				if (result<current_distance && evaluations - last_eval >= 20)
 				{
+					last_eval = evaluations;
 					ShowLastCreatedPicture();
-					textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u  Solutions: %d", evaluations,last_best_evaluation,(int) m_solutions.size());
+					textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u  Solutions: %d  Cached insns: %8u", evaluations,last_best_evaluation,(int) m_solutions.size(), line_cache_insn_pool_level);
 					textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", result/ (((double)m_width*(double)m_height)*(MAX_COLOR_DISTANCE/10000)));
 					ShowMutationStats();
 				}
@@ -1578,7 +1878,6 @@ void RastaConverter::FindBestSolution()
 				if (result<m_solutions.begin()->first)
 				{
 					last_best_evaluation=evaluations;
-					m_best_created_picture=m_created_picture;
 				}
 				AddSolution(result,new_picture);
 				break;
@@ -1587,7 +1886,8 @@ void RastaConverter::FindBestSolution()
 				--m_currently_mutated_y; 
 
 		}
-		while (m_solutions.size()>solutions)
+
+		while ((int)m_solutions.size() > solutions)
 		{
 			m=m_solutions.end();
 			m--;
@@ -1598,13 +1898,13 @@ void RastaConverter::FindBestSolution()
 
 void RastaConverter::ShowLastCreatedPicture()
 {
-	size_t x,y;
+	int x,y;
 	// Draw new picture on the screen
 	for (y=0;y<m_height;++y)
 	{
 		for (x=0;x<m_width;++x)
 		{
-			rgb atari_color=m_created_picture[y][x];
+			rgb atari_color=atari_palette[m_created_picture[y][x]];
 			int color=RGB2PIXEL(atari_color);
 			putpixel(output_bitmap,x,y,color);
 		}
@@ -1635,7 +1935,7 @@ void RastaConverter::SavePMG(string name)
 	{
 		for (y=0;y<240;++y)
 			for (bit=0;bit<8;++bit)
-				sprites_memory[0][y][bit]=1;
+				sprites_memory[y][0][bit]=1;
 	}
 
 	fprintf(fp,"missiles\n");
@@ -1665,10 +1965,10 @@ void RastaConverter::SavePMG(string name)
 			b=0;
 			for (bit=0;bit<8;++bit)
 			{
-				if (y>m_height)
-					sprites_memory[sprite][y][bit]=0;
+				if (y > (size_t)m_height)
+					sprites_memory[y][sprite][bit]=0;
 
-				b|=(sprites_memory[sprite][y][bit])<<(7-bit);
+				b|=(sprites_memory[y][sprite][bit])<<(7-bit);
 			}
 			fprintf(fp," %02X",b);
 			if (y%16==7)
@@ -1791,7 +2091,6 @@ void RastaConverter::LoadRasterProgram(string name)
 
 	string line;
 	reg_a=0;
-	e_target destination_reg;
 
 	SRasterInstruction instr;
 	raster_line current_raster_line;
@@ -1854,7 +2153,7 @@ bool RastaConverter::Resume2()
 
 void RastaConverter::SaveRasterProgram(string name)
 {
-	size_t y;
+	int y;
 	if (m_solutions.empty())
 		return;
 
