@@ -1,0 +1,67 @@
+RastaConverter by Jakub 'Ilmenit' Debski / 04.2012
+
+Usage:
+RastaConverter.exe InputFile [options]
+
+To save the output during the optimization process press 's' key.
+To save the output with dithering press 'd'. The set the dithering strength use '+' and '-' keys.
+
+Copy created output files to the Generator directory and run 'build.bat' to create executable file.
+
+The application displays three images:
+- the left one is the original picture resized to Atari width.
+- the right one is the original picture mapped to choosen Atari palette. This is our goal to reach.
+- the cental one is preview of the output picture.
+
+If the colors on the right image are wrong (f.e. too gray) then try some different palette file
+or remap original picture to choosen palette file using other tool f.e. Timanthes.
+Below on the screen are some statistics from the optimization process.
+With the current algorithm the longer you wait, the better results you get. 
+For some pictures more than 1 million of evaluations is needed to get really good results.
+
+Command line options:
+
+/i=Input File
+  File to process. All the formats of the FreeImage library supported, including JPG, PNG, GIF and BMP.
+
+/h=Output Height
+  Default: 240.
+  Generated file height. The speed of the optimization process depends on the height. 
+
+/pal=Palette File
+  Default: Palettes\altirra.act
+  The output quality depends a lot on similarity between chosen Atari palette and the image palette.
+  The default palette covers a large color range and is close to real Atari palette.
+  Converting GFX from C64 it is usually better to use: /pal=Palettes\laoo.act     
+  You can also use shorcuts: /pal=laoo and the converter will try to load palette from 'Palettes\laoo.act'
+
+/noborder
+  This option allows RastaConverter to use one more sprite that covers overscan borders. 
+  While output picture is better there are "random" horizontal lines on the both sides of the picture.
+
+/filter=Resize filter
+  Default: lanczos, other recommended: box  
+  Filter used to resize the picture to the Atari width=160 color pixels (40 bytes). 
+  For most of the pictures the default filter is the best, but converting pictures from C64
+  /filter=box is recommended - it preserves details better.
+	Possible filters are: lanczos, box, bicubic, bilinear, bspline, catmullrom
+
+/init=Initial optimization state
+   Default: smart
+   The optimization search space is large and the final results depends a lot on the initial values.
+   You may see that RastaConverter sometimes optimizes not those details of the picture that you want.
+   To change the initial value you may use other states: random, empty   
+
+/o=Output File
+  Output file name. The default name is 'output.png'. 
+  Using a different name you have to change the file names used in the Generator.
+  
+/s=Number of solutions
+  You may set a different number of solutions used in the optimization process.
+  With /s=1 (default) the optimization algorithm is heuristic Hill Climbing.
+  With more solutions the Tabu Search algorithm is used. It may produce a better picture, 
+  but it is usually better/faster to run the Hill Climbing a few times.
+  
+Example:
+RastaConverter.exe c64.png /filter=box /h=200 /pal=palettes\laoo.act
+
