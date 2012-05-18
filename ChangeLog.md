@@ -159,3 +159,19 @@ would essentially be free. Post-quantization dithering is much harder to do
 but might solve some of the blotchiness that results with the existing dither
 option.
 
+RastaConverterBorder  2012-05-18  Xuel
+--------------------------------------
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__350#entry2524423
+
+I found that I can "fix" the top border by simply patching rasta.cpp so that
+it never mutates the COLBAK initial register value away from zero. No need
+for additional instruction shuffling because Rasta will naturally figure it
+out from there.
+
+This zip file contains a recompiled version of Rasta-opthack5 with this
+border fix. It also includes a patched version of no_name.asq that adds the
+missile borders on the left and right of the image. Although
+counter-intuitive, this lets you use the /noborder mode to use all four
+players for detail while still getting a nice border. You can unzip this over
+your existing rasta work area at your own risk.

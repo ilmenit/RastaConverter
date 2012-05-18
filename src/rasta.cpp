@@ -1852,7 +1852,12 @@ void RastaConverter::MutateRasterProgram(raster_picture *pic)
 		if (random(2))
 			c*=16;
 
-		pic->mem_regs_init[random(E_TARGET_MAX)]+=c;
+		int targ;
+		do {
+			targ = random(E_TARGET_MAX);
+		} while (targ == E_COLBAK);
+
+		pic->mem_regs_init[targ]+=c;
 		if (cfg.border)
 		{
 			pic->mem_regs_init[E_HPOSP0]=sprite_screen_color_cycle_start-sprite_size;
@@ -1962,7 +1967,7 @@ void RastaConverter::FindBestSolution()
 	unsigned last_eval = 0;
 	bool clean_first_evaluation = cfg.continue_processing;
 	clock_t last_rate_check_time = clock();
-
+	
 	while(!key[KEY_ESC] && !user_closed_app)
 	{
 		for (m=m_solutions.begin(),_m=m_solutions.end();m!=_m;++m)

@@ -112,10 +112,14 @@ s0	lda #$03
 	sta sizep1
 	sta sizep2
 	sta sizep3
-	sta sizem
-	lda #$D0
-	sta hposm0
-	lda #$04
+	mva #$ff sizem
+	sta grafm
+	mva #$20 hposm0
+	mva #$28 hposm1
+	mva #$d0 hposm2
+	mva #$d8 hposm3
+	mva #$02 pmcntl
+	lda #$14
 	sta gtictl
 
 
