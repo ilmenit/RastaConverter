@@ -95,3 +95,14 @@ now and still seems to produce decent output. What I found out on the way:
   Floyd-Steinberg, it is usually a good idea to alternate traversal direction
   on each scan line to avoid error diffusion skewing toward the right side of
   the image.
+
+Rasta-opthack2  2012-05-05  phaeron
+-----------------------------------
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__200#entry2516103
+
+I figured out that the post-evaluation pass after the raster program run was
+redundant and added caching for line difference values, and also rewrote the
+line cache to use a custom allocator. It should run about 50% faster now over
+the previous version.
+

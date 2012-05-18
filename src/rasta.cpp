@@ -112,6 +112,211 @@ unsigned char mem_regs[E_TARGET_MAX];
 unsigned char sprite_shift_regs[4];
 unsigned char sprite_shift_start_array[256];
 
+class linear_allocator
+{
+public:
+	linear_allocator()
+		: chunk_list(NULL)
+		, alloc_left(0)
+	{
+	}
+
+	~linear_allocator()
+	{
+		clear();
+	}
+
+	void clear()
+	{
+		while(chunk_list)
+		{
+			chunk_node *next = chunk_list->next;
+
+			free(chunk_list);
+
+			chunk_list = next;
+		}
+
+		alloc_left = 0;
+	}
+
+	template<class T>
+	T *allocate()
+	{
+		return new(allocate(sizeof(T))) T;
+	}
+
+	void *allocate(size_t n)
+	{
+		n = (n + 7) & ~7;
+
+		if (alloc_left < n)
+		{
+			size_t to_alloc = 1048576 - 64 - sizeof(chunk_node);
+
+			if (to_alloc < n)
+				to_alloc = n;
+
+			chunk_node *new_node = (chunk_node *)malloc(sizeof(chunk_node) + to_alloc);
+			new_node->next = chunk_list;
+			chunk_list = new_node;
+			alloc_ptr = (char *)(new_node + 1);
+			alloc_left = to_alloc;
+		}
+
+		void *p = alloc_ptr;
+		alloc_ptr += n;
+		alloc_left -= n;
+		return p;
+	}
+
+private:
+	struct chunk_node
+	{
+		chunk_node *next;
+		void *align_pad;
+	};
+
+	chunk_node *chunk_list;
+	char *alloc_ptr;
+	size_t alloc_left;
+};
+
+linear_allocator line_cache_linear_allocator;
+
+struct line_machine_state
+{
+	unsigned char reg_a;
+	unsigned char reg_x;
+	unsigned char reg_y;
+	unsigned char mem_regs[E_TARGET_MAX];
+
+	void capture()
+	{
+		this->reg_a = ::reg_a;
+		this->reg_x = ::reg_x;
+		this->reg_y = ::reg_y;
+
+		memcpy(this->mem_regs, ::mem_regs, sizeof this->mem_regs);
+	}
+
+	void apply() const
+	{
+		::reg_a = this->reg_a;
+		::reg_x = this->reg_x;
+		::reg_y = this->reg_y;
+		memcpy(::mem_regs, this->mem_regs, sizeof ::mem_regs);
+	}
+};
+
+struct line_cache_key
+{
+	line_machine_state entry_state;
+	const SRasterInstruction *insns;
+	unsigned insn_count;
+	unsigned insn_hash;
+
+	uint32_t hash()
+	{
+		uint32_t hash = 0;
+		
+		hash += (size_t)entry_state.reg_a;
+		hash += (size_t)entry_state.reg_x << 8;
+		hash += (size_t)entry_state.reg_y << 16;
+		hash += insn_count << 24;
+
+		for(int i=0; i<E_TARGET_MAX; ++i)
+			hash += (size_t)entry_state.mem_regs[i] << (8*(i & 3));
+
+		hash += insn_hash;
+
+		return hash;
+	}
+};
+
+bool operator==(const line_cache_key& key1, const line_cache_key& key2)
+{
+	if (key1.insn_hash != key2.insn_hash) return false;
+	if (key1.entry_state.reg_a != key2.entry_state.reg_a) return false;
+	if (key1.entry_state.reg_x != key2.entry_state.reg_x) return false;
+	if (key1.entry_state.reg_y != key2.entry_state.reg_y) return false;
+	if (memcmp(key1.entry_state.mem_regs, key2.entry_state.mem_regs, sizeof key1.entry_state.mem_regs)) return false;
+
+	if (key1.insn_count != key2.insn_count) return false;
+
+	for(unsigned i=0; i<key1.insn_count; ++i) {
+		if (!(key1.insns[i] == key2.insns[i]))
+			return false;
+	}
+
+	return true;
+}
+
+struct line_cache_result
+{
+	distance_accum_t line_error;
+	line_machine_state new_state;
+	unsigned char *color_row;
+	unsigned char *target_row;
+	unsigned char sprite_data[4][8];
+};
+
+class line_cache
+{
+public:
+	typedef pair<line_cache_key, line_cache_result> value_type;
+
+	struct hash_node
+	{
+		uint32_t hash;
+		value_type *value;
+	};
+
+	typedef vector<hash_node> hash_list;
+
+	void clear()
+	{
+		for(int i=0; i<1024; ++i)
+		{
+			hash_table[i].clear();
+		}
+	}
+
+	const line_cache_result *find(const line_cache_key& key, uint32_t hash) const
+	{
+		const hash_list& hl = hash_table[hash & 1023];
+
+		for(auto it = hl.rbegin(), itEnd = hl.rend(); it != itEnd; ++it)
+		{
+			if (it->hash == hash && key == it->value->first)
+				return &it->value->second;
+		}
+
+		return NULL;
+	}
+
+	line_cache_result& insert(const line_cache_key& key, uint32_t hash)
+	{
+		hash_list& hl = hash_table[hash & 1023];
+
+		value_type *value = line_cache_linear_allocator.allocate<value_type>();
+		value->first = key;
+
+		hash_node node = { hash, value };
+		hl.push_back(node);
+		return value->second;
+	}
+
+private:
+
+	hash_list hash_table[1024];
+};
+
+vector<line_cache> line_caches;
+const size_t LINE_CACHE_INSN_POOL_SIZE = 1048576*4;
+SRasterInstruction line_cache_insn_pool[LINE_CACHE_INSN_POOL_SIZE];
+size_t line_cache_insn_pool_level = 0;
+
 char *mem_regs_names[E_TARGET_MAX+1]=
 {
 	"COLOR0",
@@ -417,6 +622,8 @@ void RastaConverter::InitLocalStructure()
 		}
 	}
 
+	line_caches.resize(m_height);
+
 	clear_bitmap(screen);
 	// Show our picture
 	if (desktop_width>=320*3)
@@ -664,15 +871,16 @@ void RastaConverter::CreateEmptyRasterPicture(raster_picture *r)
 {
 	memset(r->mem_regs_init,0,sizeof(r->mem_regs_init));
 	SRasterInstruction i;
-	i.instruction=E_RASTER_NOP;
-	i.target=E_COLBAK;
-	i.value=0;
+	i.loose.instruction=E_RASTER_NOP;
+	i.loose.target=E_COLBAK;
+	i.loose.value=0;
 	int size = FreeImage_GetWidth(fbitmap);
 	// in line 0 we set init registers
 	for (size_t y=0;y<r->raster_lines.size();++y)
 	{
 		r->raster_lines[y].instructions.push_back(i);
 		r->raster_lines[y].cycles+=2;
+		r->raster_lines[y].rehash();
 	}
 }
 
@@ -759,28 +967,30 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 			color.b=getb(c);
 
 			// lda
-			i.instruction=(e_raster_instruction) (E_RASTER_LDA+k%3); // k%3 to cycle through A,X,Y regs
+			i.loose.instruction=(e_raster_instruction) (E_RASTER_LDA+k%3); // k%3 to cycle through A,X,Y regs
 			if (k>E_COLBAK && y%2==1)
-				i.value=(e_target) color_position[k]+sprite_screen_color_cycle_start; // sprite position
+				i.loose.value=(e_target) color_position[k]+sprite_screen_color_cycle_start; // sprite position
 			else
-				i.value=FindAtariColorIndex(color)*2;
-			i.target=E_COLOR0;
+				i.loose.value=FindAtariColorIndex(color)*2;
+			i.loose.target=E_COLOR0;
 			r->raster_lines[y].instructions.push_back(i);
 			r->raster_lines[y].cycles+=2;
 
 			// sta 
-			i.instruction=(e_raster_instruction) (E_RASTER_STA+k%3); // k%3 to cycle through A,X,Y regs
-			i.value=(random(128)*2);
+			i.loose.instruction=(e_raster_instruction) (E_RASTER_STA+k%3); // k%3 to cycle through A,X,Y regs
+			i.loose.value=(random(128)*2);
 
 			if (k>E_COLBAK && y%2==1)
-				i.target=(e_target) (k+4); // position
+				i.loose.target=(e_target) (k+4); // position
 			else
-				i.target=(e_target) k;
+				i.loose.target=(e_target) k;
 			r->raster_lines[y].instructions.push_back(i);
 			r->raster_lines[y].cycles+=4;	
 
 			assert(r->raster_lines[y].cycles<free_cycles);
 		}
+
+		r->raster_lines[y].rehash();
 
 		FreeImage_Unload(f_copy);
 		FreeImage_Unload(f_copy24bits);
@@ -814,59 +1024,59 @@ void RastaConverter::CreateRandomRasterPicture(raster_picture *r)
 	for (size_t y=0;y<r->raster_lines.size();++y)
 	{
 		// lda random
-		i.instruction=E_RASTER_LDA;
+		i.loose.instruction=E_RASTER_LDA;
 		r->raster_lines[y].cycles+=2;
 		x=random(m_width);
-		i.value=FindAtariColorIndex(m_picture[y][x])*2;
-		i.target=E_COLOR0;
+		i.loose.value=FindAtariColorIndex(m_picture[y][x])*2;
+		i.loose.target=E_COLOR0;
 		r->raster_lines[y].instructions.push_back(i);
 		// sta 
-		i.instruction=E_RASTER_STA;
+		i.loose.instruction=E_RASTER_STA;
 		r->raster_lines[y].cycles+=4;
-		i.value=(random(128)*2);
-		i.target=E_COLOR0;
+		i.loose.value=(random(128)*2);
+		i.loose.target=E_COLOR0;
 		r->raster_lines[y].instructions.push_back(i);
 
 		// ldx random
-		i.instruction=E_RASTER_LDX;
+		i.loose.instruction=E_RASTER_LDX;
 		r->raster_lines[y].cycles+=2;
 		x=random(m_width);
-		i.value=FindAtariColorIndex(m_picture[y][x])*2;
-		i.target=E_COLOR1;
+		i.loose.value=FindAtariColorIndex(m_picture[y][x])*2;
+		i.loose.target=E_COLOR1;
 		r->raster_lines[y].instructions.push_back(i);
 		// stx 
-		i.instruction=E_RASTER_STX;
+		i.loose.instruction=E_RASTER_STX;
 		r->raster_lines[y].cycles+=4;
-		i.value=(random(128)*2);
-		i.target=E_COLOR1;
+		i.loose.value=(random(128)*2);
+		i.loose.target=E_COLOR1;
 		r->raster_lines[y].instructions.push_back(i);
 
 		// ldy random
-		i.instruction=E_RASTER_LDY;
+		i.loose.instruction=E_RASTER_LDY;
 		r->raster_lines[y].cycles+=2;
 		x=random(m_width);
-		i.value=FindAtariColorIndex(m_picture[y][x])*2;
-		i.target=E_COLOR2;
+		i.loose.value=FindAtariColorIndex(m_picture[y][x])*2;
+		i.loose.target=E_COLOR2;
 		r->raster_lines[y].instructions.push_back(i);
 		// sty 
-		i.instruction=E_RASTER_STY;
+		i.loose.instruction=E_RASTER_STY;
 		r->raster_lines[y].cycles+=4;
-		i.value=(random(128)*2);
-		i.target=E_COLOR2;
+		i.loose.value=(random(128)*2);
+		i.loose.target=E_COLOR2;
 		r->raster_lines[y].instructions.push_back(i);
 
 		// lda random
-		i.instruction=E_RASTER_LDA;
+		i.loose.instruction=E_RASTER_LDA;
 		r->raster_lines[y].cycles+=2;
 		x=random(m_width);
-		i.value=FindAtariColorIndex(m_picture[y][x])*2;
-		i.target=E_COLBAK;
+		i.loose.value=FindAtariColorIndex(m_picture[y][x])*2;
+		i.loose.target=E_COLBAK;
 		r->raster_lines[y].instructions.push_back(i);
 		// sty 
-		i.instruction=E_RASTER_STA;
+		i.loose.instruction=E_RASTER_STA;
 		r->raster_lines[y].cycles+=4;
-		i.value=(random(128)*2);
-		i.target=E_COLBAK;
+		i.loose.value=(random(128)*2);
+		i.loose.target=E_COLBAK;
 		r->raster_lines[y].instructions.push_back(i);
 
 		assert(r->raster_lines[y].cycles<free_cycles);
@@ -876,7 +1086,7 @@ void RastaConverter::CreateRandomRasterPicture(raster_picture *r)
 
 inline int RastaConverter::GetInstructionCycles(const SRasterInstruction &instr)
 {
-	switch(instr.instruction)
+	switch(instr.loose.instruction)
 	{
 	case E_RASTER_NOP:
 	case E_RASTER_LDA:
@@ -912,7 +1122,7 @@ void RastaConverter::DiffuseError( int x, int y, double quant_error, double e_r,
 }
 
 template<fn_rgb_distance& T_distance_function>
-e_target RastaConverter::FindClosestColorRegister(int index, int x,int y, bool &restart_line)
+e_target RastaConverter::FindClosestColorRegister(int index, int x,int y, bool &restart_line, distance_t& best_error)
 {
 	distance_t distance;
 	int sprite_bit;
@@ -991,6 +1201,9 @@ e_target RastaConverter::FindClosestColorRegister(int index, int x,int y, bool &
 		}
 
 	}
+
+	best_error = min_distance;
+
 	return result;
 }
 
@@ -998,16 +1211,16 @@ e_target RastaConverter::FindClosestColorRegister(int index, int x,int y, bool &
 inline void RastaConverter::ExecuteInstruction(const SRasterInstruction &instr, int x)
 {
 	int reg_value=-1;
-	switch(instr.instruction)
+	switch(instr.loose.instruction)
 	{
 	case E_RASTER_LDA:
-		reg_a=instr.value;
+		reg_a=instr.loose.value;
 		break;
 	case E_RASTER_LDX:
-		reg_x=instr.value;
+		reg_x=instr.loose.value;
 		break;
 	case E_RASTER_LDY:
-		reg_y=instr.value;
+		reg_y=instr.loose.value;
 		break;
 	case E_RASTER_STA:
 		reg_value=reg_a;
@@ -1023,17 +1236,17 @@ inline void RastaConverter::ExecuteInstruction(const SRasterInstruction &instr, 
 	if (reg_value!=-1)
 	{
 		// make write to sprite0 4 cycle nop in border mode
-		if (!cfg.border || (instr.target!=E_HPOSP0 && instr.target!=E_COLPM0))
+		if (!cfg.border || (instr.loose.target!=E_HPOSP0 && instr.loose.target!=E_COLPM0))
 		{
-			const unsigned hpos_index = (unsigned)(instr.target - E_HPOSP0);
+			const unsigned hpos_index = (unsigned)(instr.loose.target - E_HPOSP0);
 			if (hpos_index < 4) {
-				sprite_shift_start_array[mem_regs[instr.target]] &= ~(1 << hpos_index);
+				sprite_shift_start_array[mem_regs[instr.loose.target]] &= ~(1 << hpos_index);
 
-				mem_regs[instr.target]=reg_value;
+				mem_regs[instr.loose.target]=reg_value;
 
-				sprite_shift_start_array[mem_regs[instr.target]] |= (1 << hpos_index);
+				sprite_shift_start_array[mem_regs[instr.loose.target]] |= (1 << hpos_index);
 			} else {
-				mem_regs[instr.target]=reg_value;
+				mem_regs[instr.loose.target]=reg_value;
 			}
 		}
 	}
@@ -1047,9 +1260,9 @@ void RastaConverter::SetSpriteBorders(raster_picture *pic)
 	SRasterInstruction i;
 	for (y=0;y<m_height;++y)
 	{
-		i.instruction=E_RASTER_NOP;
-		i.target=E_COLBAK;
-		i.value=0;
+		i.loose.instruction=E_RASTER_NOP;
+		i.loose.target=E_COLBAK;
+		i.loose.value=0;
 		while(pic->raster_lines[y].cycles<free_cycles)
 		{
 			pic->raster_lines[y].instructions.push_back(i);
@@ -1075,102 +1288,6 @@ void ResetSpriteShiftStartArray()
 		sprite_shift_start_array[mem_regs[i+E_HPOSP0]] |= (1 << i);
 }
 
-struct line_machine_state
-{
-	unsigned char reg_a;
-	unsigned char reg_x;
-	unsigned char reg_y;
-	unsigned char mem_regs[E_TARGET_MAX];
-
-	void capture()
-	{
-		this->reg_a = ::reg_a;
-		this->reg_x = ::reg_x;
-		this->reg_y = ::reg_y;
-
-		memcpy(this->mem_regs, ::mem_regs, sizeof this->mem_regs);
-	}
-
-	void apply() const
-	{
-		::reg_a = this->reg_a;
-		::reg_x = this->reg_x;
-		::reg_y = this->reg_y;
-		memcpy(::mem_regs, this->mem_regs, sizeof ::mem_regs);
-	}
-};
-
-struct line_cache_key
-{
-	size_t hash;
-	line_machine_state entry_state;
-	const SRasterInstruction *insns;
-	unsigned insn_count;
-};
-
-struct line_cache_key_hash
-{
-	size_t operator()(const line_cache_key& key) const
-	{
-		unsigned h = 0;
-		
-		h += (size_t)key.entry_state.reg_a;
-		h += (size_t)key.entry_state.reg_x << 8;
-		h += (size_t)key.entry_state.reg_y << 16;
-		h += key.insn_count << 24;
-
-		for(int i=0; i<E_TARGET_MAX; ++i)
-			h += (size_t)key.entry_state.mem_regs[i] << (8*(i & 3));
-
-		for(unsigned i=0; i<key.insn_count; ++i)
-		{
-			const SRasterInstruction& insn = key.insns[i];
-
-			h += (size_t)insn.value;
-			h += (size_t)insn.target << 8;
-			h += (size_t)insn.instruction << 16;
-
-			h = (h >> 27) + (h << 5);
-		}
-
-		return h;
-	}
-};
-
-struct line_cache_key_eq
-{
-	bool operator()(const line_cache_key& key1, const line_cache_key& key2) const
-	{
-		if (key1.hash != key2.hash) return false;
-		if (key1.entry_state.reg_a != key2.entry_state.reg_a) return false;
-		if (key1.entry_state.reg_x != key2.entry_state.reg_x) return false;
-		if (key1.entry_state.reg_y != key2.entry_state.reg_y) return false;
-		if (memcmp(key1.entry_state.mem_regs, key2.entry_state.mem_regs, sizeof key1.entry_state.mem_regs)) return false;
-
-		if (key1.insn_count != key2.insn_count) return false;
-
-		for(unsigned i=0; i<key1.insn_count; ++i) {
-			if (!(key1.insns[i] == key2.insns[i]))
-				return false;
-		}
-
-		return true;
-	}
-};
-
-struct line_cache_result
-{
-	line_machine_state new_state;
-	vector<unsigned char> color_row;
-	vector<unsigned char> target_row;
-	unsigned char sprite_data[4][8];
-};
-
-unordered_map<line_cache_key, line_cache_result, line_cache_key_hash, line_cache_key_eq> line_cache;
-const size_t LINE_CACHE_INSN_POOL_SIZE = 1048576*4;
-SRasterInstruction line_cache_insn_pool[LINE_CACHE_INSN_POOL_SIZE];
-size_t line_cache_insn_pool_level = 0;
-
 unsigned char old_reg_a,old_reg_x,old_reg_y;
 unsigned char old_mem_regs[E_TARGET_MAX];
 
@@ -1190,16 +1307,16 @@ void RestoreLineRegs()
 	memcpy(mem_regs,old_mem_regs,sizeof(mem_regs));
 }
 
-void RastaConverter::ExecuteRasterProgram(raster_picture *pic)
+distance_accum_t RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 {
 	if (distance_function == RGByuvDistance)
-		ExecuteRasterProgramT<RGByuvDistance>(pic);
+		return ExecuteRasterProgramT<RGByuvDistance>(pic);
 	else
-		ExecuteRasterProgramT<RGBEuclidianDistance>(pic);
+		return ExecuteRasterProgramT<RGBEuclidianDistance>(pic);
 }
 
 template<fn_rgb_distance& T_distance_function> 
-void RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
+distance_accum_t RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 {
 	int x,y; // currently processed pixel
 
@@ -1218,6 +1335,8 @@ void RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 	
 	bool restart_line=false;
 	bool shift_start_array_dirty = true;
+	distance_accum_t total_error = 0;
+
 	for (y=0;y<m_height;++y)
 	{
 		if (restart_line)
@@ -1238,23 +1357,25 @@ void RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 		lck.entry_state.capture();
 		lck.insns = rastinsns;
 		lck.insn_count = rastinsncnt;
-		lck.hash = line_cache_key_hash()(lck);
+		lck.insn_hash = pic->raster_lines[y].hash;
+
+		const uint32_t lck_hash = lck.hash();
 
 		// check line cache
-		auto * __restrict created_picture_row = &m_created_picture[y][0];
-		auto * __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
+		unsigned char * __restrict created_picture_row = &m_created_picture[y][0];
+		unsigned char * __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
 
-		auto cache_it = line_cache.find(lck);
-		if (cache_it != line_cache.end())
+		auto cached_line_result = line_caches[y].find(lck, lck_hash);
+		if (cached_line_result)
 		{
 			// sweet! cache hit!!
-			const auto& cached_line_result = cache_it->second;
-
-			cached_line_result.new_state.apply();
-			memcpy(created_picture_row, cached_line_result.color_row.data(), m_width);
-			memcpy(created_picture_targets_row, cached_line_result.target_row.data(), m_width);
-			memcpy(sprites_memory[y], cached_line_result.sprite_data, sizeof sprites_memory[y]);
+			cached_line_result->new_state.apply();
+			memcpy(created_picture_row, cached_line_result->color_row, m_width);
+			memcpy(created_picture_targets_row, cached_line_result->target_row, m_width);
+			memcpy(sprites_memory[y], cached_line_result->sprite_data, sizeof sprites_memory[y]);
 			shift_start_array_dirty = true;
+
+			total_error += cached_line_result->line_error;
 			continue;
 		}
 
@@ -1277,9 +1398,10 @@ void RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 			next_instr_offset = 1000;
 
 		const auto *__restrict picture_row = &m_picture[y][0];
-		const auto *__restrict error_row = &m_picture_all_errors[y][0];
 
 		const int picture_row_index = m_width * y;
+
+		distance_accum_t total_line_error = 0;
 
 		for (x=-sprite_screen_color_cycle_start;x<176;++x)
 		{
@@ -1327,7 +1449,9 @@ void RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 			{
 				// put pixel closest to one of the current color registers
 //				rgb pixel = picture_row[x];
-				e_target closest_register = FindClosestColorRegister<T_distance_function>(picture_row_index + x,x,y,restart_line);
+				distance_t closest_dist;
+				e_target closest_register = FindClosestColorRegister<T_distance_function>(picture_row_index + x,x,y,restart_line,closest_dist);
+				total_line_error += closest_dist;
 				created_picture_row[x]=mem_regs[closest_register] >> 1;
 				created_picture_targets_row[x]=closest_register;
 			}
@@ -1339,11 +1463,16 @@ void RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 		}
 		else
 		{
+			total_error += total_line_error;
+
 			// add this to line cache
 			if (line_cache_insn_pool_level + rastinsncnt > LINE_CACHE_INSN_POOL_SIZE)
 			{
 				// flush line cache
-				line_cache.clear();
+				for(int y2=0; y2<m_height; ++y2)
+					line_caches[y2].clear();
+
+				line_cache_linear_allocator.clear();
 				line_cache_insn_pool_level = 0;
 			}
 
@@ -1353,15 +1482,21 @@ void RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 			memcpy(new_insns, rastinsns, rastinsncnt * sizeof(rastinsns[0]));
 			line_cache_insn_pool_level += rastinsncnt;
 
-			auto& result_state = line_cache[lck];
+			auto& result_state = line_caches[y].insert(lck, lck_hash);
 
+			result_state.line_error = total_line_error;
 			result_state.new_state.capture();
-			result_state.color_row.assign(created_picture_row, created_picture_row + m_width);
-			result_state.target_row.assign(created_picture_targets_row, created_picture_targets_row + m_width);
+			result_state.color_row = (unsigned char *)line_cache_linear_allocator.allocate(m_width);
+			memcpy(result_state.color_row, created_picture_row, m_width);
+
+			result_state.target_row = (unsigned char *)line_cache_linear_allocator.allocate(m_width);
+			memcpy(result_state.target_row, created_picture_targets_row, m_width);
+
 			memcpy(result_state.sprite_data, sprites_memory[y], sizeof result_state.sprite_data);
 		}
 	}
-	return;
+
+	return total_error;
 }
 
 template<fn_rgb_distance& T_distance_function>
@@ -1479,8 +1614,8 @@ void RastaConverter::Init()
 			m.mem_regs_init[E_COLPM0]=0;
 		}
 
-		ExecuteRasterProgram(&m);
-		double result = EvaluateCreatedPicture();
+		double result = ExecuteRasterProgram(&m); ++evaluations;
+//		double result = EvaluateCreatedPicture();
 		if (result<min_distance)
 		{
 			ShowLastCreatedPicture();
@@ -1506,6 +1641,8 @@ void RastaConverter::MutateLine(raster_line &prog)
 	{
 		MutateOnce(prog);
 	}
+
+	prog.rehash();
 }
 
 unsigned char LimitValueToColor(unsigned char value)
@@ -1584,23 +1721,23 @@ void RastaConverter::MutateOnce(raster_line &prog)
 		{
 			if (prog.cycles+4<free_cycles && random(2)) // 4 cycles instructions
 			{
-				temp.instruction=(e_raster_instruction) (E_RASTER_STA+random(3));
-				temp.value=(random(128)*2);
-				temp.target=(e_target) (random(E_TARGET_MAX));
+				temp.loose.instruction=(e_raster_instruction) (E_RASTER_STA+random(3));
+				temp.loose.value=(random(128)*2);
+				temp.loose.target=(e_target) (random(E_TARGET_MAX));
 				prog.instructions.insert(prog.instructions.begin()+i1,temp);
 				prog.cycles+=4;
 			}
 			else
 			{
-				temp.instruction=(e_raster_instruction) (E_RASTER_LDA+random(4));
+				temp.loose.instruction=(e_raster_instruction) (E_RASTER_LDA+random(4));
 				if (random(2))
-					temp.value=(random(128)*2);
+					temp.loose.value=(random(128)*2);
 				else
-					temp.value=m_possible_colors_for_each_line[m_currently_mutated_y][random(m_possible_colors_for_each_line[m_currently_mutated_y].size())];
+					temp.loose.value=m_possible_colors_for_each_line[m_currently_mutated_y][random(m_possible_colors_for_each_line[m_currently_mutated_y].size())];
 
-				temp.target=(e_target) (random(E_TARGET_MAX));
+				temp.loose.target=(e_target) (random(E_TARGET_MAX));
 				c=random(m_picture[m_currently_mutated_y].size());
-				temp.value=FindAtariColorIndex(m_picture[m_currently_mutated_y][c])*2;
+				temp.loose.value=FindAtariColorIndex(m_picture[m_currently_mutated_y][c])*2;
 				prog.instructions.insert(prog.instructions.begin()+i1,temp);
 				prog.cycles+=2;
 			}
@@ -1630,13 +1767,13 @@ void RastaConverter::MutateOnce(raster_line &prog)
 			break;
 		}
 	case E_MUTATION_CHANGE_TARGET:
-		prog.instructions[i1].target=(e_target) (random(E_TARGET_MAX));
+		prog.instructions[i1].loose.target=(e_target) (random(E_TARGET_MAX));
 		m_current_mutations[E_MUTATION_CHANGE_TARGET]++;
 		break;
 	case E_MUTATION_CHANGE_VALUE_TO_COLOR:
-		if ((prog.instructions[i1].target>=E_HPOSP0 && prog.instructions[i1].target<=E_HPOSP3))
+		if ((prog.instructions[i1].loose.target>=E_HPOSP0 && prog.instructions[i1].loose.target<=E_HPOSP3))
 		{
-			x=mem_regs[prog.instructions[i1].target]-sprite_screen_color_cycle_start;
+			x=mem_regs[prog.instructions[i1].loose.target]-sprite_screen_color_cycle_start;
 			x+=random(sprite_size);
 		}
 		else
@@ -1645,7 +1782,7 @@ void RastaConverter::MutateOnce(raster_line &prog)
 			// find color in the next raster column
 			for (x=0;x<i1-1;++x)
 			{
-				if (prog.instructions[x].instruction<=E_RASTER_NOP)
+				if (prog.instructions[x].loose.instruction<=E_RASTER_NOP)
 					c+=2;
 				else
 					c+=4; // cycles
@@ -1664,16 +1801,16 @@ void RastaConverter::MutateOnce(raster_line &prog)
 		// check color in next lines
 		while(random(5)==0 && i2+1 < (int)m_picture.size())
 			++i2;
-		prog.instructions[i1].value=FindAtariColorIndex(m_picture[i2][x])*2;
+		prog.instructions[i1].loose.value=FindAtariColorIndex(m_picture[i2][x])*2;
 		m_current_mutations[E_MUTATION_CHANGE_VALUE_TO_COLOR]++;
 		break;
 	case E_MUTATION_CHANGE_VALUE:
 		if (random(10)==0)
 		{
 			if (random(2))
-				prog.instructions[i1].value=(random(128)*2);
+				prog.instructions[i1].loose.value=(random(128)*2);
 			else
-				prog.instructions[i1].value=m_possible_colors_for_each_line[m_currently_mutated_y][random(m_possible_colors_for_each_line[m_currently_mutated_y].size())];
+				prog.instructions[i1].loose.value=m_possible_colors_for_each_line[m_currently_mutated_y][random(m_possible_colors_for_each_line[m_currently_mutated_y].size())];
 		}
 		else
 		{
@@ -1682,7 +1819,7 @@ void RastaConverter::MutateOnce(raster_line &prog)
 				c*=-1;
 			if (random(2))
 				c*=16;
-			prog.instructions[i1].value+=c;
+			prog.instructions[i1].loose.value+=c;
 		}
 		m_current_mutations[E_MUTATION_CHANGE_VALUE]++;
 		break;
@@ -1701,14 +1838,14 @@ void RastaConverter::TestRasterProgram(raster_picture *pic)
 	{
 		pic->raster_lines[y].cycles=6;
 		pic->raster_lines[y].instructions.resize(2);
-		pic->raster_lines[y].instructions[0].instruction=E_RASTER_LDA;
+		pic->raster_lines[y].instructions[0].loose.instruction=E_RASTER_LDA;
 		if (y%2==0)
-			pic->raster_lines[y].instructions[0].value=0xF;
+			pic->raster_lines[y].instructions[0].loose.value=0xF;
 		else
-			pic->raster_lines[y].instructions[0].value=0x33;
+			pic->raster_lines[y].instructions[0].loose.value=0x33;
 
-		pic->raster_lines[y].instructions[1].instruction=E_RASTER_STA;
-		pic->raster_lines[y].instructions[1].target=E_COLOR2;
+		pic->raster_lines[y].instructions[1].loose.instruction=E_RASTER_STA;
+		pic->raster_lines[y].instructions[1].loose.target=E_COLOR2;
 
 
 		for (x=0;x<m_width;++x)
@@ -1850,11 +1987,11 @@ void RastaConverter::FindBestSolution()
 			m_pic=&new_picture;
 			//			TestRasterProgram(&new_picture); // !!!
 			MutateRasterProgram(&new_picture);
-			ExecuteRasterProgram(&new_picture);
+			double result = ExecuteRasterProgram(&new_picture); ++evaluations;
 
-			double result = EvaluateCreatedPicture();
+//			double result = EvaluateCreatedPicture();
 
-			if (evaluations%300==0)
+			if (evaluations%1000==0)
 			{
 				last_eval = evaluations;
 				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u", evaluations,last_best_evaluation);
@@ -2007,7 +2144,7 @@ bool GetInstructionFromString(string line, SRasterInstruction &instr)
 
 	size_t i,j;
 
-	instr.instruction=E_RASTER_MAX;
+	instr.loose.instruction=E_RASTER_MAX;
 
 	// check load instructions
 	for (i=0;i<3;++i)
@@ -2017,13 +2154,13 @@ bool GetInstructionFromString(string line, SRasterInstruction &instr)
 		{
 			if (pos_instr<pos_comment)
 			{
-				instr.instruction= (e_raster_instruction) (E_RASTER_LDA+i);
+				instr.loose.instruction= (e_raster_instruction) (E_RASTER_LDA+i);
 				pos_value=line.find("$");
 				if (pos_value==string::npos)
 					error("Load instruction: No value for Load Register");
 				++pos_value;
 				string val_string=line.substr(pos_value,2);
-				instr.value=String2HexValue<int>(val_string);
+				instr.loose.value=String2HexValue<int>(val_string);
 				return true;
 			}
 		}
@@ -2036,16 +2173,16 @@ bool GetInstructionFromString(string line, SRasterInstruction &instr)
 		{
 			if (pos_instr<pos_comment)
 			{
-				instr.instruction=(e_raster_instruction) (E_RASTER_STA+i);
+				instr.loose.instruction=(e_raster_instruction) (E_RASTER_STA+i);
 				// find target
 				for (j=0;j<=E_TARGET_MAX;++j)
 				{
 					pos_target=line.find(mem_regs_names[j]);
 					if (pos_target!=string::npos)
 					{
-						instr.target=(e_target) (E_COLOR0+j);
-						if (instr.target==E_TARGET_MAX)
-							instr.target=E_COLPM0; // !!! HACK until other sprites can be changed to HITCLR
+						instr.loose.target=(e_target) (E_COLOR0+j);
+						if (instr.loose.target==E_TARGET_MAX)
+							instr.loose.target=E_COLPM0; // !!! HACK until other sprites can be changed to HITCLR
 						return true;
 					}
 				}
@@ -2070,11 +2207,11 @@ void RastaConverter::LoadRegInits(string name)
 
 	while( getline( f, line)) 
 	{
-		instr.target=E_TARGET_MAX;
+		instr.loose.target=E_TARGET_MAX;
 		if (GetInstructionFromString(line,instr))
 		{
-			if (instr.target!=E_TARGET_MAX)
-				m_pic->mem_regs_init[instr.target]=instr.value;			
+			if (instr.loose.target!=E_TARGET_MAX)
+				m_pic->mem_regs_init[instr.loose.target]=instr.loose.value;			
 		}
 	}
 
@@ -2119,6 +2256,7 @@ void RastaConverter::LoadRasterProgram(string name)
 		// if next raster line
 		if (line.find("cmp byt2")!=string::npos && current_raster_line.cycles>0)
 		{
+			current_raster_line.rehash();
 			m_pic->raster_lines.push_back(current_raster_line);
 			current_raster_line.cycles=0;
 			current_raster_line.instructions.clear();
@@ -2220,7 +2358,7 @@ void RastaConverter::SaveRasterProgram(string name)
 			bool save_target=false;
 			bool save_value=false;
 			fprintf(fp,"\t");
-			switch (instr.instruction)
+			switch (instr.loose.instruction)
 			{
 			case E_RASTER_LDA:
 				fprintf(fp,"lda ");
@@ -2254,18 +2392,18 @@ void RastaConverter::SaveRasterProgram(string name)
 			}
 			if (save_value)
 			{
-				fprintf(fp,"#$%02X ; %d (spr=%d)",instr.value,instr.value,instr.value-48);
+				fprintf(fp,"#$%02X ; %d (spr=%d)",instr.loose.value,instr.loose.value,instr.loose.value-48);
 			}
 			else if (save_target)
 			{
 				if (cfg.border)
 				{
-					if (instr.target==E_HPOSP0 || instr.target==E_COLPM0)
-						instr.target=E_TARGET_MAX; // HITCLR
+					if (instr.loose.target==E_HPOSP0 || instr.loose.target==E_COLPM0)
+						instr.loose.target=E_TARGET_MAX; // HITCLR
 				}
-				if (instr.target>E_TARGET_MAX)
+				if (instr.loose.target>E_TARGET_MAX)
 					error("Unknown target in instruction!");
-				fprintf(fp,"%s",mem_regs_names[instr.target]);
+				fprintf(fp,"%s",mem_regs_names[instr.loose.target]);
 			}
 			fprintf(fp,"\n");			
 		}

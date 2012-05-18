@@ -72,16 +72,23 @@ enum e_mutation_type {
 	E_MUTATION_MAX,
 };
 
-struct SRasterInstruction {
-	/*e_raster_instruction*/ unsigned char instruction;
-	/*e_target*/ unsigned char target;
-	unsigned char value;
+union SRasterInstruction {
+	struct {
+		/*e_raster_instruction*/ unsigned short instruction;
+		/*e_target*/ unsigned char target;
+		unsigned char value;
+	} loose;
+
+	uint32_t packed;
 
 	bool operator==(const SRasterInstruction& other) const
 	{
-		return instruction == other.instruction
-			&& target == other.target
-			&& value == other.value;
+		return packed == other.packed;
+	}
+
+	size_t hash() const
+	{
+		return packed;
 	}
 };
 
@@ -148,7 +155,23 @@ struct raster_line {
 	{
 		cycles=0;
 	}
+
+	void rehash()
+	{
+		unsigned h = 0;
+
+		for(auto it = instructions.begin(), itEnd = instructions.end(); it != itEnd; ++it)
+		{
+			h += it->hash();
+
+			h = (h >> 27) + (h << 5);
+		}
+
+		this->hash = h;
+	}
+
 	int cycles; // cache, to chech if we can add/remove new instructions
+	unsigned hash;
 };
 
 struct raster_picture {
@@ -202,10 +225,10 @@ private:
 	inline void ExecuteInstruction(const SRasterInstruction &instr, int x);
 	inline int GetInstructionCycles(const SRasterInstruction &instr);
 
-	void ExecuteRasterProgram(raster_picture *);
+	distance_accum_t ExecuteRasterProgram(raster_picture *);
 
 	template<fn_rgb_distance& T_distance_function> 
-	void ExecuteRasterProgramT(raster_picture *);
+	distance_accum_t ExecuteRasterProgramT(raster_picture *);
 
 	void SetSpriteBorders(raster_picture *);
 	double EvaluateCreatedPicture(void);
@@ -231,7 +254,7 @@ private:
 	void ShowMutationStats();
 
 	template<fn_rgb_distance& T_distance_function>
-	e_target FindClosestColorRegister(int index, int x,int y, bool &restart_line);
+	e_target FindClosestColorRegister(int index, int x,int y, bool &restart_line, distance_t& error);
 
 	void SaveRasterProgram(string name);
 	void SavePMG(string name);
