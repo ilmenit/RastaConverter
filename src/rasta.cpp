@@ -244,10 +244,12 @@ bool operator==(const line_cache_key& key1, const line_cache_key& key2)
 
 	if (key1.insn_count != key2.insn_count) return false;
 
-	for(unsigned i=0; i<key1.insn_count; ++i) {
-		if (!(key1.insns[i] == key2.insns[i]))
-			return false;
-	}
+	uint32_t diff = 0;
+	for(unsigned i=0; i<key1.insn_count; ++i)
+		diff |= (key1.insns[i].packed ^ key2.insns[i].packed);
+
+	if (diff)
+		return false;
 
 	return true;
 }
@@ -494,10 +496,9 @@ void resize_target_picture(vector < line_target > *picture, size_t width, size_t
 	}
 }
 
-unsigned char FindAtariColorIndex(rgb &col);
 bool LoadAtariPalette(string filename);
 
-unsigned char FindAtariColorIndex(rgb &col)
+unsigned char FindAtariColorIndex(const rgb &col)
 {
 	unsigned char i;
 	// Find the most similar color in the Atari Palette
@@ -603,25 +604,6 @@ void RastaConverter::InitLocalStructure()
 		}
 	}
 
-	for(int i=0; i<128; ++i)
-	{
-		m_picture_all_errors[i].resize(input_bitmap->w * input_bitmap->h);
-
-		const rgb ref = atari_palette[i];
-
-		auto *dst = &m_picture_all_errors[i][0];
-		for (y=0;y<input_bitmap->h;++y)
-		{
-			auto& dstrow = m_picture_all_errors[i][y];
-			const auto& srcrow = m_picture[y];
-
-			for (x=0;x<input_bitmap->w;++x)
-			{
-				*dst++ = distance_function(srcrow[x], ref);
-			}
-		}
-	}
-
 	line_caches.resize(m_height);
 
 	clear_bitmap(screen);
@@ -641,7 +623,29 @@ void RastaConverter::InitLocalStructure()
 		textprintf_ex(screen, font, input_bitmap->w*2, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Destination");
 	}
 
-};
+}
+
+void RastaConverter::GeneratePictureErrorMap()
+{
+	for(int i=0; i<128; ++i)
+	{
+		m_picture_all_errors[i].resize(input_bitmap->w * input_bitmap->h);
+
+		const rgb ref = atari_palette[i];
+
+		auto *dst = &m_picture_all_errors[i][0];
+		for (int y=0; y<input_bitmap->h; ++y)
+		{
+			auto& dstrow = m_picture_all_errors[i][y];
+			const auto& srcrow = m_picture[y];
+
+			for (int x=0;x<input_bitmap->w;++x)
+			{
+				*dst++ = distance_function(srcrow[x], ref);
+			}
+		}
+	}
+}
 
 void RastaConverter::PrepareDestinationPicture()
 {
@@ -787,6 +791,8 @@ bool RastaConverter::ProcessInit()
 	// Apply dithering or other picture transformation
 	PrepareDestinationPicture();
 	SavePicture(cfg.output_file+"-dst.png",destination_bitmap);
+
+	GeneratePictureErrorMap();
 	return true;
 }
 
@@ -1710,9 +1716,7 @@ void RastaConverter::MutateOnce(raster_line &prog)
 		{
 			int prev_y = m_currently_mutated_y-1;
 			raster_line &prev_line=m_pic->raster_lines[prev_y];
-			raster_line temp=prog;
-			prog=prev_line;
-			prev_line=temp;
+			prog.swap(prev_line);
 			m_current_mutations[E_MUTATION_SWAP_LINE_WITH_PREV_ONE]++;
 			break;
 		}
@@ -1968,6 +1972,7 @@ void RastaConverter::FindBestSolution()
 	textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u", evaluations);
 
 	unsigned last_eval = 0;
+	bool clean_first_evaluation = cfg.continue_processing;
 
 	while(!key[KEY_ESC] && !user_closed_app)
 	{
@@ -1986,7 +1991,14 @@ void RastaConverter::FindBestSolution()
 
 			m_pic=&new_picture;
 			//			TestRasterProgram(&new_picture); // !!!
-			MutateRasterProgram(&new_picture);
+
+			// If this is the first evaluation after a continue, we don't do any mutations in order to
+			// get the correct statistic. This avoids taking the first mutation unconditionally.
+			if (clean_first_evaluation)
+				clean_first_evaluation = false;
+			else
+				MutateRasterProgram(&new_picture);
+
 			double result = ExecuteRasterProgram(&new_picture); ++evaluations;
 
 //			double result = EvaluateCreatedPicture();
@@ -2116,7 +2128,7 @@ void RastaConverter::SavePMG(string name)
 	fclose(fp);
 }
 
-bool GetInstructionFromString(string line, SRasterInstruction &instr)
+bool GetInstructionFromString(const string& line, SRasterInstruction &instr)
 {
 	static char *load_names[3]=
 	{
@@ -2146,6 +2158,14 @@ bool GetInstructionFromString(string line, SRasterInstruction &instr)
 
 	instr.loose.instruction=E_RASTER_MAX;
 
+	if (line.find("nop") != string::npos)
+	{
+		instr.loose.instruction = E_RASTER_NOP;
+		instr.loose.value = 0;
+		instr.loose.target = E_COLBAK;
+		return true;
+	}
+
 	// check load instructions
 	for (i=0;i<3;++i)
 	{
@@ -2161,6 +2181,7 @@ bool GetInstructionFromString(string line, SRasterInstruction &instr)
 				++pos_value;
 				string val_string=line.substr(pos_value,2);
 				instr.loose.value=String2HexValue<int>(val_string);
+				instr.loose.target = E_TARGET_MAX;
 				return true;
 			}
 		}
@@ -2183,6 +2204,8 @@ bool GetInstructionFromString(string line, SRasterInstruction &instr)
 						instr.loose.target=(e_target) (E_COLOR0+j);
 						if (instr.loose.target==E_TARGET_MAX)
 							instr.loose.target=E_COLPM0; // !!! HACK until other sprites can be changed to HITCLR
+
+						instr.loose.value = 0;
 						return true;
 					}
 				}
@@ -2205,13 +2228,39 @@ void RastaConverter::LoadRegInits(string name)
 	string line;
 	SRasterInstruction instr;
 
+	uint8_t a = 0;
+	uint8_t x = 0;
+	uint8_t y = 0;
+
 	while( getline( f, line)) 
 	{
 		instr.loose.target=E_TARGET_MAX;
 		if (GetInstructionFromString(line,instr))
 		{
-			if (instr.loose.target!=E_TARGET_MAX)
-				m_pic->mem_regs_init[instr.loose.target]=instr.loose.value;			
+			switch(instr.loose.instruction)
+			{
+				case E_RASTER_LDA:
+					a = instr.loose.value;
+					break;
+				case E_RASTER_LDX:
+					x = instr.loose.value;
+					break;
+				case E_RASTER_LDY:
+					y = instr.loose.value;
+					break;
+				case E_RASTER_STA:
+					if (instr.loose.target != E_TARGET_MAX)
+						m_pic->mem_regs_init[instr.loose.target] = a;
+					break;
+				case E_RASTER_STX:
+					if (instr.loose.target != E_TARGET_MAX)
+						m_pic->mem_regs_init[instr.loose.target] = x;
+					break;
+				case E_RASTER_STY:
+					if (instr.loose.target != E_TARGET_MAX)
+						m_pic->mem_regs_init[instr.loose.target] = y;
+					break;
+			}
 		}
 	}
 
@@ -2233,6 +2282,7 @@ void RastaConverter::LoadRasterProgram(string name)
 	raster_line current_raster_line;
 	current_raster_line.cycles=0;
 	size_t pos;
+	bool line_started = false;
 	
 	while( getline( f, line)) 
 	{
@@ -2253,6 +2303,15 @@ void RastaConverter::LoadRasterProgram(string name)
 		if (pos!=string::npos)
 			cfg.command_line=(line.substr(pos+11));
 
+		if (line.compare(0, 4, "line", 4) == 0)
+		{
+			line_started = true;
+			continue;
+		}
+
+		if (!line_started)
+			continue;
+
 		// if next raster line
 		if (line.find("cmp byt2")!=string::npos && current_raster_line.cycles>0)
 		{
@@ -2260,6 +2319,7 @@ void RastaConverter::LoadRasterProgram(string name)
 			m_pic->raster_lines.push_back(current_raster_line);
 			current_raster_line.cycles=0;
 			current_raster_line.instructions.clear();
+			line_started = false;
 			continue;
 		}
 
@@ -2280,12 +2340,6 @@ bool RastaConverter::Resume1()
 	LoadRegInits("output.png.rp.ini");
 	LoadRasterProgram("output.png.rp");
 	cfg.ProcessCmdLine();
-	return true;
-}
-
-bool RastaConverter::Resume2()
-{
-	InitLocalStructure();
 	return true;
 }
 

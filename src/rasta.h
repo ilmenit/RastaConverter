@@ -170,6 +170,13 @@ struct raster_line {
 		this->hash = h;
 	}
 
+	void swap(raster_line& other)
+	{
+		instructions.swap(other.instructions);
+		std::swap(cycles, other.cycles);
+		std::swap(hash, other.hash);
+	}
+
 	int cycles; // cache, to chech if we can add/remove new instructions
 	unsigned hash;
 };
@@ -204,6 +211,7 @@ private:
 
 	// private functions
 	void InitLocalStructure();
+	void GeneratePictureErrorMap();
 
 
 	vector < color_index_line > m_created_picture;
@@ -266,6 +274,13 @@ private:
 	void LoadPMG(string name);
 
 public:
+	RastaConverter()
+		: last_best_evaluation(0)
+		, evaluations(0)
+		, m_currently_mutated_y(0)
+	{
+	}
+
 	// configuration
 	Configuration cfg;
 
@@ -278,7 +293,6 @@ public:
 	bool ProcessInit();
 	bool LoadInputBitmap();
 	bool Resume1();
-	bool Resume2();
 };
 
 #endif

@@ -1,2 +1,2 @@
-unsigned char FindAtariColorIndex(rgb &col);
+unsigned char FindAtariColorIndex(const rgb &col);
 

@@ -106,3 +106,20 @@ redundant and added caching for line difference values, and also rewrote the
 line cache to use a custom allocator. It should run about 50% faster now over
 the previous version.
 
+rasta-opthack3  2012-05-06  phaeron
+-----------------------------------
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__225#entry2516711
+
+Here's an optimized version with some bug fixes:
+
+* Fixed dithering not being taken into account -- the error map I added was
+  being inited too soon, before the dithering had taken place.
+* /continue now reloads NOPs in the raster instruction lists.
+* Fixed bug where the first mutation after a /continue was always accepted
+  unconditionally, because the score for the loaded solution wasn't
+  evaluated. I think this may have been in the original build as well,
+  although I don't have a buildable version of it to check.
+
+There are still some discrepancies in the score after /continue... I'm going to
+see if I can track down the remaining problems.
