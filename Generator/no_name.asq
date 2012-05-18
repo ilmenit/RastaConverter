@@ -23,7 +23,13 @@ zc	.ds ZCOLORS
 
 * ---	MAIN PROGRAM
 	org $2010
+	IFT PIC_HEIGHT>=204
+scr	ins "output.png.mic", 0, 8160
+	:16 .byte 0
+	ins "output.png.mic" , +8160
+	ELS
 scr	ins "output.png.mic"
+	EIF
 
 	.ifdef nil_used
 nil	:8*40 brk
@@ -191,11 +197,12 @@ byt3	brk
 	:+8 dta $4e,a(:1+$1B80+#*40)
 	:+8 dta $4e,a(:1+$1CC0+#*40)
 	:+8 dta $4e,a(:1+$1E00+#*40)
-	:+8 dta $4e,a(:1+$1F40+#*40)
-	:+8 dta $4e,a(:1+$2080+#*40)
-	:+8 dta $4e,a(:1+$21C0+#*40)
-	:+8 dta $4e,a(:1+$2300+#*40)
-	:+8 dta $4e,a(:1+$2440+#*40)
+	:+4 dta $4e,a(:1+$1F40+#*40)
+	:+4 dta $4e,a(:1+$1FF0+#*40)
+	:+8 dta $4e,a(:1+$2090+#*40)
+	:+8 dta $4e,a(:1+$21D0+#*40)
+	:+8 dta $4e,a(:1+$2310+#*40)
+	:+8 dta $4e,a(:1+$2450+#*40)
 	dta $41,a(:2)
 .ENDM
 

@@ -4,7 +4,6 @@ Usage:
 RastaConverter.exe InputFile [options]
 
 To save the output during the optimization process press 's' key.
-To save the output with dithering press 'd'. The set the dithering strength use '+' and '-' keys.
 
 Copy created output files to the Generator directory and run 'build.bat' to create executable file.
 
@@ -34,6 +33,12 @@ Command line options:
   The default palette covers a large color range and is close to real Atari palette.
   Converting GFX from C64 it is usually better to use: /pal=Palettes\laoo.act     
   You can also use shorcuts: /pal=laoo and the converter will try to load palette from 'Palettes\laoo.act'
+  
+/cdither
+  Use Chessboard dithering - typical 8bit dithering technique
+
+ /dither
+  Use Floyd–Steinberg dithering - more "random" than chessboard dithering
 
 /noborder
   This option allows RastaConverter to use one more sprite that covers overscan borders. 
@@ -50,7 +55,11 @@ Command line options:
    Default: smart
    The optimization search space is large and the final results depends a lot on the initial values.
    You may see that RastaConverter sometimes optimizes not those details of the picture that you want.
-   To change the initial value you may use other states: random, empty   
+   To change the initial value you may use other states: random, empty, less
+   
+   '/init=less' option sets less colors in the initial state of the picture. This gives better result
+   quick, but then picture is harder to optimize than with /init=smart 
+   If you want to have better output picture and you have a lot of time then usually 'smart' is better.
 
 /o=Output File
   Output file name. The default name is 'output.png'. 
@@ -61,7 +70,11 @@ Command line options:
   With /s=1 (default) the optimization algorithm is heuristic Hill Climbing.
   With more solutions the Tabu Search algorithm is used. It may produce a better picture, 
   but it is usually better/faster to run the Hill Climbing a few times.
-  
+
+/euclid
+  Use Euclidian RGB distance for colors instead of default UYV distance. 
+  UYV produces usually better color mapping, but sometimes RGB distance is useful.
+    
 Example:
 RastaConverter.exe c64.png /filter=box /h=200 /pal=palettes\laoo.act
 
