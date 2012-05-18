@@ -61,7 +61,7 @@ void Configuration::Process(int argc, char *argv[])
 
 	input_file = parser.getValue("i","NoFileName");
 	output_file = parser.getValue("o","output.png");
-	palette_file = parser.getValue("pal","Palettes\\altirra.act");
+	palette_file = parser.getValue("pal","Palettes/altirra.act");
 
 	if (parser.switchExists("noborder"))
 		border=false;
@@ -74,7 +74,7 @@ void Configuration::Process(int argc, char *argv[])
 		euclid=false;
 
 	if (parser.switchExists("palette"))
-		palette_file = parser.getValue("palette","Palettes\\altirra.act");
+		palette_file = parser.getValue("palette","Palettes/altirra.act");
 
 	string dither_value = parser.getValue("dither","none");
 	if (dither_value=="floyd")

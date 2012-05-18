@@ -13,8 +13,10 @@ liable for any damage caused due to use of this code even if incidental.
 */
 
 #include "CommandLineParser.h"
+#include "port.h"
 
 #include<algorithm>
+#include <string.h>
 
 namespace Epoch
 {
@@ -102,7 +104,7 @@ namespace Epoch
 
 			for(;i != mVec_Switches.end(); i++){
 
-				if(strcmpi(i->c_str(), name.c_str()) == 0)	// case insensitive search;
+				if(strcasecmp(i->c_str(), name.c_str()) == 0)	// case insensitive search;
 					return true;
 
 			}
@@ -119,7 +121,7 @@ namespace Epoch
 
 			for(;i != mVec_NonInterpreted.end(); i++){
 
-				if(strcmpi(i->c_str(), name.c_str()) == 0)	// case insensitive search;
+				if(strcasecmp(i->c_str(), name.c_str()) == 0)	// case insensitive search;
 					return true;
 
 			}

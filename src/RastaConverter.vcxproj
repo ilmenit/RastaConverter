@@ -101,6 +101,7 @@
   <ItemGroup>
     <ClInclude Include="CommandLineParser.h" />
     <ClInclude Include="config.h" />
+    <ClInclude Include="port.h" />
     <ClInclude Include="rasta.h" />
     <ClInclude Include="rgb.h" />
     <ClInclude Include="string_conv.h" />

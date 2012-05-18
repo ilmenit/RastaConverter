@@ -13,7 +13,7 @@ std::string Value2String(T value)
 }
 
 template<class T>
-T String2Value(std::string &s)
+T String2Value(const std::string &s)
 {
 	T result;
 	std::stringstream ss(s);
@@ -22,7 +22,7 @@ T String2Value(std::string &s)
 }
 
 template<class T>
-T String2HexValue(std::string &s)
+T String2HexValue(const std::string &s)
 {
 	T result;
 	std::stringstream ss;

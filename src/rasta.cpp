@@ -386,13 +386,13 @@ bool LoadAtariPalette(string filename)
 	FILE *fp=fopen(filename.c_str(),"rb");
 	if (!fp)
 	{
-		fp=fopen((string("palettes\\")+filename).c_str(),"rb");
+		fp=fopen((string("palettes/")+filename).c_str(),"rb");
 		if (!fp)
 		{
-			fp=fopen((string("palettes\\")+filename+string(".act")).c_str(),"rb");
+			fp=fopen((string("palettes/")+filename+string(".act")).c_str(),"rb");
 			if (!fp)
 			{
-				fp=fopen((string("palettes\\")+filename+string(".pal")).c_str(),"rb");
+				fp=fopen((string("palettes/")+filename+string(".pal")).c_str(),"rb");
 				if (!fp)
 					error("Error opening .act palette file");
 			}
@@ -542,6 +542,25 @@ bool RastaConverter::SavePicture(string filename, BITMAP *to_save)
 	FreeImage_Save(FIF_PNG,f_outbitmap,filename.c_str());
 	FreeImage_Unload(f_outbitmap);
 	return true;
+}
+
+void RastaConverter::SaveStatistics(const char *fn)
+{
+	FILE *f = fopen(fn, "w");
+	if (!f)
+		return;
+
+	fprintf(f, "Iterations,Seconds,Score\n");
+	for(statistics_list::const_iterator it(m_statistics.begin()), itEnd(m_statistics.end());
+		it != itEnd;
+		++it)
+	{
+		const statistics_point& pt = *it;
+
+		fprintf(f, "%u,%u,%.6f\n", pt.evaluations, pt.seconds, NormalizeScore(pt.distance));
+	}
+
+	fclose(f);
 }
 
 bool RastaConverter::LoadInputBitmap()
@@ -1679,7 +1698,7 @@ void RastaConverter::MutateOnce(raster_line &prog)
 		do 
 		{
 			i2=random(prog.instructions.size());
-		} while (i1!=i2);
+		} while (i1==i2);
 	}
 
 	SRasterInstruction temp;
@@ -1935,6 +1954,7 @@ void RastaConverter::SaveBestSolution()
 	SavePMG(string(cfg.output_file+".pmg"));
 	SaveScreenData  (string(cfg.output_file+".mic").c_str());
 	SavePicture     (cfg.output_file,output_bitmap);
+	SaveStatistics((cfg.output_file+".csv").c_str());
 }
 
 void Wait(int t)
@@ -1947,6 +1967,14 @@ void Wait(int t)
 		b=(unsigned)time( NULL );
 		while (b==(unsigned)time( NULL ));
 	}
+}
+
+RastaConverter::RastaConverter()
+	: last_best_evaluation(0)
+	, evaluations(0)
+	, m_currently_mutated_y(0)
+	, init_finished(false)
+{
 }
 
 void RastaConverter::FindBestSolution()
@@ -1964,7 +1992,10 @@ void RastaConverter::FindBestSolution()
 
 	if (!cfg.continue_processing)
 		Init();
+	else
+		init_finished = true;
 
+	const time_t time_start = time(NULL);
 	map < double, raster_picture >::iterator m,_m;
 	m_currently_mutated_y=0;
 
@@ -2006,9 +2037,10 @@ void RastaConverter::FindBestSolution()
 			if (evaluations%1000==0)
 			{
 				last_eval = evaluations;
-				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u", evaluations,last_best_evaluation);
-				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", m_solutions.begin()->first/ (((double)m_width*(double)m_height)*(MAX_COLOR_DISTANCE/10000)));
+				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u  Solutions: %d  Cached insns: %8u Y:%4d", evaluations,last_best_evaluation,(int) m_solutions.size(), line_cache_insn_pool_level, m_currently_mutated_y);
+				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", NormalizeScore(m_solutions.begin()->first));
 			}
+
 			// store this solution (<= to make results more diverse)
 			if ( ((solutions==1 && result<=current_distance) || 
 				(solutions>1 && result<current_distance)) )
@@ -2018,8 +2050,8 @@ void RastaConverter::FindBestSolution()
 				{
 					last_eval = evaluations;
 					ShowLastCreatedPicture();
-					textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u  Solutions: %d  Cached insns: %8u", evaluations,last_best_evaluation,(int) m_solutions.size(), line_cache_insn_pool_level);
-					textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", result/ (((double)m_width*(double)m_height)*(MAX_COLOR_DISTANCE/10000)));
+					textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u  Solutions: %d  Cached insns: %8u Y:%4d", evaluations,last_best_evaluation,(int) m_solutions.size(), line_cache_insn_pool_level, m_currently_mutated_y);
+					textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", NormalizeScore(result));
 					ShowMutationStats();
 				}
 
@@ -2031,8 +2063,19 @@ void RastaConverter::FindBestSolution()
 				AddSolution(result,new_picture);
 				break;
 			}
+
 			if (result>=current_distance) // move to the prev line even if result is equal
 				--m_currently_mutated_y; 
+
+			if (evaluations % 10000 == 0)
+			{
+				statistics_point stats;
+				stats.evaluations = evaluations;
+				stats.seconds = (unsigned)(time(NULL) - time_start);
+				stats.distance = current_distance;
+
+				m_statistics.push_back(stats);
+			}
 
 		}
 
@@ -2393,6 +2436,7 @@ void RastaConverter::SaveRasterProgram(string name)
 	fprintf(fp,"; InputName: %s\n",cfg.input_file.c_str());
 	fprintf(fp,"; CmdLine: %s\n",cfg.command_line.c_str());
 	fprintf(fp,"; Evaluations: %u\n",evaluations);
+	fprintf(fp,"; Score: %g\n",NormalizeScore(m_solutions.begin()->first));
 	fprintf(fp,"; ---------------------------------- \n");
 
 	fprintf(fp,"; Proper offset \n");
@@ -2471,6 +2515,10 @@ void RastaConverter::SaveRasterProgram(string name)
 	fclose(fp);
 }
 
+double RastaConverter::NormalizeScore(double raw_score)
+{
+	return raw_score / (((double)m_width*(double)m_height)*(MAX_COLOR_DISTANCE/10000));
+}
 
 
 void close_button_procedure()

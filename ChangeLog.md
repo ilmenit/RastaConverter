@@ -123,3 +123,20 @@ Here's an optimized version with some bug fixes:
 
 There are still some discrepancies in the score after /continue... I'm going to
 see if I can track down the remaining problems.
+
+Rasta-opthack4  2012-05-06  phaeron
+-----------------------------------
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__225#entry2516959
+
+Another version of the speed hack:
+
+* I integrated the Linux portability changes... hopefully the delta should be
+  smaller now.
+* Fixed an uninitialized variable bug that sometimes prevented the (s)ave
+  command being recognized after a /continue.
+* The swap mutation bug noted above is fixed in this version.
+* A .csv file is now written out with statistics for time and distance score
+  relative to evaluation count.
+* The raster program (.rp) file now contains the distance score.
+

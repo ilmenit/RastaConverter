@@ -184,7 +184,7 @@ struct raster_line {
 struct raster_picture {
 	unsigned char mem_regs_init[E_TARGET_MAX];
 	vector < raster_line > raster_lines;
-	raster_picture::raster_picture()
+	raster_picture()
 	{
 	}
 
@@ -192,6 +192,12 @@ struct raster_picture {
 	{
 		raster_lines.resize(height);
 	}
+};
+
+struct statistics_point {
+	unsigned evaluations;
+	unsigned seconds;
+	double distance;
 };
 
 class RastaConverter {
@@ -208,6 +214,9 @@ private:
 	vector < screen_line > m_picture; 
 	vector<distance_t> m_picture_all_errors[128]; 
 	int m_width,m_height; // picture size
+
+	typedef vector<statistics_point> statistics_list;
+	statistics_list m_statistics;
 
 	// private functions
 	void InitLocalStructure();
@@ -268,21 +277,19 @@ private:
 	void SavePMG(string name);
 	bool SaveScreenData(const char *filename);
 	bool SavePicture(string filename, BITMAP *to_save);
+	void SaveStatistics(const char *filename);
 
 	void LoadRegInits(string name);
 	void LoadRasterProgram(string name);
 	void LoadPMG(string name);
 
-public:
-	RastaConverter()
-		: last_best_evaluation(0)
-		, evaluations(0)
-		, m_currently_mutated_y(0)
-	{
-	}
+	double NormalizeScore(double raw_score);
 
+public:
 	// configuration
 	Configuration cfg;
+
+	RastaConverter();
 
 	void FindBestSolution();
 	void SaveBestSolution();
