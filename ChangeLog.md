@@ -140,3 +140,22 @@ Another version of the speed hack:
   relative to evaluation count.
 * The raster program (.rp) file now contains the distance score.
 
+Rasta-opthack5  2012-05-09  phaeron
+-----------------------------------
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__275#entry2518629
+
+After ivop's report with G++ I decided to try a profile-guided optimization
+build, and to my surprise, it's significantly faster -- at least another 50%
+faster on my Core i7, around 3.5-4.5K evals/sec. Pogo build is attached. I
+also went ahead and integrated another one of the gcc build fixes and
+stripped out all the 'auto' crap I put in when I was hacking on it so it
+could be built with VS2005/2008. That's probably it from me for optimizations
+for now... it's up to someone else to get us the next order of magnitude.
+
+Trying to increase quality is the next thing, I think... emphasis masks might
+be the way to go for a start, and with the error map I put into my build it
+would essentially be free. Post-quantization dithering is much harder to do
+but might solve some of the blotchiness that results with the existing dither
+option.
+

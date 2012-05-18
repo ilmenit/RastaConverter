@@ -45,7 +45,7 @@ namespace Epoch
 		class CommandLineParser  
 		{
 		public:
-			virtual bool CommandLineParser::verifyCompulsory(vectorOfString pairs	= vectorOfString(),
+			virtual bool verifyCompulsory(vectorOfString pairs	= vectorOfString(),
 												 vectorOfString switches			= vectorOfString(),
 												 vectorOfString nonInterpreted		= vectorOfString());
 

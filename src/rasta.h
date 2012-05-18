@@ -160,7 +160,7 @@ struct raster_line {
 	{
 		unsigned h = 0;
 
-		for(auto it = instructions.begin(), itEnd = instructions.end(); it != itEnd; ++it)
+		for(vector<SRasterInstruction>::const_iterator it = instructions.begin(), itEnd = instructions.end(); it != itEnd; ++it)
 		{
 			h += it->hash();
 
@@ -244,9 +244,6 @@ private:
 
 	distance_accum_t ExecuteRasterProgram(raster_picture *);
 
-	template<fn_rgb_distance& T_distance_function> 
-	distance_accum_t ExecuteRasterProgramT(raster_picture *);
-
 	void SetSpriteBorders(raster_picture *);
 	double EvaluateCreatedPicture(void);
 
@@ -270,7 +267,6 @@ private:
 	map < int,int > m_current_mutations;
 	void ShowMutationStats();
 
-	template<fn_rgb_distance& T_distance_function>
 	e_target FindClosestColorRegister(int index, int x,int y, bool &restart_line, distance_t& error);
 
 	void SaveRasterProgram(string name);

@@ -288,7 +288,7 @@ public:
 	{
 		const hash_list& hl = hash_table[hash & 1023];
 
-		for(auto it = hl.rbegin(), itEnd = hl.rend(); it != itEnd; ++it)
+		for(hash_list::const_reverse_iterator it = hl.rbegin(), itEnd = hl.rend(); it != itEnd; ++it)
 		{
 			if (it->hash == hash && key == it->value->first)
 				return &it->value->second;
@@ -450,12 +450,6 @@ distance_t RGByuvDistance(const rgb &col1, const rgb &col2)
 		d = (float)DISTANCE_MAX;
 
 	return (distance_t)d;
-
-//	int dy = 38*dr + 75*dg + 14*db;
-//	int du = (db - ((dy + 64) >> 7)) * 72;
-//	int dv = (dr - ((dy + 64) >> 7)) * 91;
-
-//	return (dy*dy + du*du + dv*dv) >> 14;
 }
 
 
@@ -652,11 +646,10 @@ void RastaConverter::GeneratePictureErrorMap()
 
 		const rgb ref = atari_palette[i];
 
-		auto *dst = &m_picture_all_errors[i][0];
+		distance_t *dst = &m_picture_all_errors[i][0];
 		for (int y=0; y<input_bitmap->h; ++y)
 		{
-			auto& dstrow = m_picture_all_errors[i][y];
-			const auto& srcrow = m_picture[y];
+			const screen_line& srcrow = m_picture[y];
 
 			for (int x=0;x<input_bitmap->w;++x)
 			{
@@ -1146,7 +1139,6 @@ void RastaConverter::DiffuseError( int x, int y, double quant_error, double e_r,
 	error_map[y][x]=p;
 }
 
-template<fn_rgb_distance& T_distance_function>
 e_target RastaConverter::FindClosestColorRegister(int index, int x,int y, bool &restart_line, distance_t& best_error)
 {
 	distance_t distance;
@@ -1165,12 +1157,10 @@ e_target RastaConverter::FindClosestColorRegister(int index, int x,int y, bool &
 		int sprite_pos=sprite_shift_regs[temp-E_COLPM0];
 
 		int sprite_x=sprite_pos-sprite_screen_color_cycle_start;
-//		if (x>=sprite_x && x<sprite_x+sprite_size)
 
 		unsigned x_offset = (unsigned)(x - sprite_x);
-		if (x_offset < sprite_size)
+		if (x_offset < sprite_size)		// (x>=sprite_x && x<sprite_x+sprite_size)
 		{
-//			sprite_bit=(x-sprite_x)/4; // bit of this sprite memory
 			sprite_bit=x_offset >> 2; // bit of this sprite memory
 			assert(sprite_bit<8);
 
@@ -1334,15 +1324,6 @@ void RestoreLineRegs()
 
 distance_accum_t RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 {
-	if (distance_function == RGByuvDistance)
-		return ExecuteRasterProgramT<RGByuvDistance>(pic);
-	else
-		return ExecuteRasterProgramT<RGBEuclidianDistance>(pic);
-}
-
-template<fn_rgb_distance& T_distance_function> 
-distance_accum_t RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
-{
 	int x,y; // currently processed pixel
 
 	int cycle;
@@ -1375,7 +1356,7 @@ distance_accum_t RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 		}
 
 		// snapshot current machine state
-		const auto *__restrict rastinsns = pic->raster_lines[y].instructions.data();
+		const SRasterInstruction *__restrict rastinsns = pic->raster_lines[y].instructions.data();
 		const int rastinsncnt = pic->raster_lines[y].instructions.size();
 
 		line_cache_key lck;
@@ -1390,7 +1371,7 @@ distance_accum_t RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 		unsigned char * __restrict created_picture_row = &m_created_picture[y][0];
 		unsigned char * __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
 
-		auto cached_line_result = line_caches[y].find(lck, lck_hash);
+		const line_cache_result *cached_line_result = line_caches[y].find(lck, lck_hash);
 		if (cached_line_result)
 		{
 			// sweet! cache hit!!
@@ -1422,8 +1403,6 @@ distance_accum_t RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 		if (!rastinsncnt)
 			next_instr_offset = 1000;
 
-		const auto *__restrict picture_row = &m_picture[y][0];
-
 		const int picture_row_index = m_width * y;
 
 		distance_accum_t total_line_error = 0;
@@ -1446,7 +1425,6 @@ distance_accum_t RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 #else
 			for (int spr=0;spr<4;++spr)
 			{
-//				if (x+sprite_screen_color_cycle_start==mem_regs[spr+E_HPOSP0])
 				if (sprite_check_x == mem_regs[spr+E_HPOSP0])
 					sprite_shift_regs[spr]=mem_regs[spr+E_HPOSP0];
 			}
@@ -1469,13 +1447,11 @@ distance_accum_t RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 					next_instr_offset = 1000;
 			}
 
-//			if (x>=0 && x<m_width)
-			if ((unsigned)x < (unsigned)m_width)
+			if ((unsigned)x < (unsigned)m_width)		// x>=0 && x<m_width
 			{
 				// put pixel closest to one of the current color registers
-//				rgb pixel = picture_row[x];
 				distance_t closest_dist;
-				e_target closest_register = FindClosestColorRegister<T_distance_function>(picture_row_index + x,x,y,restart_line,closest_dist);
+				e_target closest_register = FindClosestColorRegister(picture_row_index + x,x,y,restart_line,closest_dist);
 				total_line_error += closest_dist;
 				created_picture_row[x]=mem_regs[closest_register] >> 1;
 				created_picture_targets_row[x]=closest_register;
@@ -1502,12 +1478,12 @@ distance_accum_t RastaConverter::ExecuteRasterProgramT(raster_picture *pic)
 			}
 
 			// relocate insns to pool
-			auto *new_insns = line_cache_insn_pool + line_cache_insn_pool_level;
+			SRasterInstruction *new_insns = line_cache_insn_pool + line_cache_insn_pool_level;
 			lck.insns = new_insns;
 			memcpy(new_insns, rastinsns, rastinsncnt * sizeof(rastinsns[0]));
 			line_cache_insn_pool_level += rastinsncnt;
 
-			auto& result_state = line_caches[y].insert(lck, lck_hash);
+			line_cache_result& result_state = line_caches[y].insert(lck, lck_hash);
 
 			result_state.line_error = total_line_error;
 			result_state.new_state.capture();
@@ -1545,33 +1521,14 @@ double RastaConverter::EvaluateCreatedPicture(void)
 	distance_accum_t distance=0;
 	++evaluations;
 
-#if 1
 	int error_index = 0;
 	for (y=0;y<m_height;++y)
 	{
-		const auto *index_src_row = &m_created_picture[y][0];
+		const unsigned char *index_src_row = &m_created_picture[y][0];
 
 		for(int x=0; x<m_width; ++x)
 			distance += m_picture_all_errors[index_src_row[x]][error_index++];
 	}
-#else
-	if (distance_function == RGByuvDistance)
-	{
-		for (y=0;y<m_height;++y)
-		{
-			const distance_t line_distance = CalculateLineDistance<RGByuvDistance>(m_picture[y],m_created_picture[y]);
-			distance += line_distance;
-		}
-	}
-	else
-	{
-		for (y=0;y<m_height;++y)
-		{
-			const distance_t line_distance = CalculateLineDistance<RGBEuclidianDistance>(m_picture[y],m_created_picture[y]);
-			distance += line_distance;
-		}
-	}
-#endif
 
 	return distance;
 }
@@ -2004,6 +1961,7 @@ void RastaConverter::FindBestSolution()
 
 	unsigned last_eval = 0;
 	bool clean_first_evaluation = cfg.continue_processing;
+	clock_t last_rate_check_time = clock();
 
 	while(!key[KEY_ESC] && !user_closed_app)
 	{
@@ -2036,8 +1994,23 @@ void RastaConverter::FindBestSolution()
 
 			if (evaluations%1000==0)
 			{
+				double rate = 0;
+				clock_t next_rate_check_time = clock();
+
+				if (next_rate_check_time > last_rate_check_time)
+				{
+					double clock_delta = (double)(next_rate_check_time - last_rate_check_time);
+					rate = 1000.0 * (double)CLOCKS_PER_SEC / clock_delta;
+
+					// clamp the rate if it is ridiculous... Allegro uses an unbounded sprintf(). :(
+					if (rate < 0 || rate > 10000000.0)
+						rate = 0;
+
+					last_rate_check_time = next_rate_check_time;
+				}
+
 				last_eval = evaluations;
-				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u  Solutions: %d  Cached insns: %8u Y:%4d", evaluations,last_best_evaluation,(int) m_solutions.size(), line_cache_insn_pool_level, m_currently_mutated_y);
+				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %8u  LastBest: %8u  Solutions: %d  Cached insns: %8u Rate: %6.1f", evaluations,last_best_evaluation,(int) m_solutions.size(), line_cache_insn_pool_level, rate);
 				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", NormalizeScore(m_solutions.begin()->first));
 			}
 
@@ -2050,7 +2023,7 @@ void RastaConverter::FindBestSolution()
 				{
 					last_eval = evaluations;
 					ShowLastCreatedPicture();
-					textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %u  LastBest: %u  Solutions: %d  Cached insns: %8u Y:%4d", evaluations,last_best_evaluation,(int) m_solutions.size(), line_cache_insn_pool_level, m_currently_mutated_y);
+					textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %8u  LastBest: %8u  Solutions: %d  Cached insns: %8u", evaluations,last_best_evaluation,(int) m_solutions.size(), line_cache_insn_pool_level);
 					textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", NormalizeScore(result));
 					ShowMutationStats();
 				}
