@@ -43,7 +43,7 @@ Command line options:
 /dither=Dithering Type
   Possible dithering types are: chess, floyd, 2d, jarvis, simple
   'chess' is Chessboard Dithering - typical 8bit dithering technique
-  'floyd' is Floyd–Steinberg dithering - more "random" than chessboard dithering
+  'floyd' is Floyd-Steinberg dithering - more "random" than chessboard dithering
   '2d' and 'simple' are between chess and floyd.
   'jarvis' dithering is more artistic
 
