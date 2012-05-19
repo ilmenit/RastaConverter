@@ -41,6 +41,7 @@ struct Configuration {
 	e_dither_type dither;
 	int width;
 	int height;
+	unsigned max_evals;
 	FREE_IMAGE_FILTER rescale_filter;
 	e_init_type init_type;
 

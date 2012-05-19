@@ -1968,7 +1968,7 @@ void RastaConverter::FindBestSolution()
 	bool clean_first_evaluation = cfg.continue_processing;
 	clock_t last_rate_check_time = clock();
 	
-	while(!key[KEY_ESC] && !user_closed_app)
+	while(!key[KEY_ESC] && !user_closed_app && evaluations < cfg.max_evals)
 	{
 		for (m=m_solutions.begin(),_m=m_solutions.end();m!=_m;++m)
 		{

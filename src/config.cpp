@@ -135,4 +135,7 @@ void Configuration::Process(int argc, char *argv[])
 
 	string height_value = parser.getValue("h","240");
 	height=String2Value<int>(height_value);
+
+	string max_evals_value = parser.getValue("max_evals","2000000000");
+	max_evals=String2Value<unsigned>(max_evals_value);
 }

@@ -213,3 +213,8 @@ Source patched to build on Linux. 64 bit amd64 binary included.
 Linux users need this small patch and add -std=c++0x to CXXFLAGS (needed for
 the auto keyword).  Great work Phaeron and thanks for including the portability
 patches.
+
+Max Evaluations
+---------------
+
+Added /max_evals flag.

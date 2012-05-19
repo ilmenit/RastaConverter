@@ -82,6 +82,10 @@ Command line options:
   Use Euclidian RGB distance for colors instead of default UYV distance. 
   UYV produces usually better color mapping, but sometimes RGB distance is useful.
     
+/max_evals=Maximum number of evaluations
+  RastaConverter will save the current solution and exit when this limit is
+  reached.
+
 Example:
 RastaConverter.exe c64.png /filter=box /h=200 /pal=palettes\laoo.act
 
