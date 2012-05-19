@@ -175,3 +175,41 @@ missile borders on the left and right of the image. Although
 counter-intuitive, this lets you use the /noborder mode to use all four
 players for detail while still getting a nice border. You can unzip this over
 your existing rasta work area at your own risk.
+
+Linux Support
+-------------
+
+Added ivop's Linux Makefile.  The following contributions were rolled into
+Rasta-opthack5.
+
+# rasta-linux.patch  2012-04-26  ivop
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__150#entry2513277
+
+Here's a patch to compile this on Linux. Just a few small fixes to make it more
+standards compliant and a simple Makefile. Did not fix the pathsep issue, but
+you can just specify the input file and palette file on the command line.
+
+Thanks for using portable libraries like allegro and freeimage.
+
+# rastahacklinux  2012-05-12  frogstar_robot
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__200#entry2516222
+
+I've applied Ivop's patch, tweaked the source, and built Phaeron's optimized
+version on 64 bit Ubuntu Oneiric. The amd64 binary and the linux buildable
+source is included.
+
+# rastahacklinux.tar.gz  2012-05-06  frogstar_robot
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__225#entry2516790
+
+Source patched to build on Linux. 64 bit amd64 binary included.
+
+# patch  2012-05-07  ivop
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__225#entry2517118
+
+Linux users need this small patch and add -std=c++0x to CXXFLAGS (needed for
+the auto keyword).  Great work Phaeron and thanks for including the portability
+patches.
