@@ -218,3 +218,11 @@ Max Evaluations
 ---------------
 
 Added /max_evals flag.
+
+RastaConverterNewFeatures  2012-05-24  Ilmenit
+----------------------------------------------
+
+- Details mask added /details=inputfile /details_val=value
+- Improved dithering algorithms
+- New dithering algorithm (/dither=knoll)
+- Dithering strength added (/dither_val=value)
