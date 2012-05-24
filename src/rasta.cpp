@@ -1,11 +1,8 @@
-// - wznawianie
 // - warunek stopu
 // - maska dokladnosci + scale
-// - nazwy plików dla generatora z pliku CFG
-// - inaczej dithering /dither(ing)=
-// - obszary gdzie poszczególne obiekty w³¹czome lub wy³¹czone
+// - obszary gdzie poszczególne obiekty w³¹czone lub wy³¹czone
 
-const char *program_version="Beta3";
+const char *program_version="Beta4";
 
 #pragma warning (disable: 4312)
 #pragma warning (disable: 4996)
@@ -31,7 +28,6 @@ const char *program_version="Beta3";
 #include <ctype.h>
 #include <iomanip>
 #include <iterator>
-#include <unordered_map>
 
 #include "rasta.h"
 #include "main.h"
@@ -638,8 +634,51 @@ void RastaConverter::InitLocalStructure()
 
 }
 
+void RastaConverter::LoadDetailsMap()
+{
+	Message("Loading details map");
+	FIBITMAP *fbitmap = FreeImage_Load(FreeImage_GetFileType(cfg.details_file.c_str()), cfg.details_file.c_str(), 0);
+	if (!fbitmap)
+		error("Error loading details file");
+	fbitmap=FreeImage_Rescale(fbitmap,cfg.width,cfg.height,FILTER_BOX);
+	fbitmap = FreeImage_ConvertTo24Bits(fbitmap);	
+
+	FreeImage_FlipVertical(fbitmap);
+
+	RGBQUAD fpixel;
+
+	int x,y;
+
+	details_data.resize(m_height);	
+	blit(input_bitmap,destination_bitmap,0,0,0,0,destination_bitmap->w,destination_bitmap->h);
+
+	for (y=0;y<m_height;++y)
+	{
+		details_data[y].resize(m_width);
+
+		for (x=0;x<m_width;++x)
+		{
+			FreeImage_GetPixelColor(fbitmap, x, y, &fpixel);
+			// average as brightness
+			details_data[y][x]=(unsigned char) ( (int) ( (int)fpixel.rgbRed + (int)fpixel.rgbGreen + (int)fpixel.rgbBlue)/3);
+			if ((x+y)%2==0)
+				putpixel( destination_bitmap,x,y,makecol(details_data[y][x],details_data[y][x],details_data[y][x]));
+		}
+		if (desktop_width>=320*3)
+			stretch_blit(destination_bitmap,screen,0,0,destination_bitmap->w,destination_bitmap->h,0,0,destination_bitmap->w*2,destination_bitmap->h);
+		else
+			blit(destination_bitmap,screen,0,0,0,0,destination_bitmap->w,destination_bitmap->h);
+	}
+	FreeImage_Unload(fbitmap);
+};
+
 void RastaConverter::GeneratePictureErrorMap()
 {
+	if (!cfg.details_file.empty())
+		LoadDetailsMap();
+
+	unsigned int details_multiplier=255;
+
 	for(int i=0; i<128; ++i)
 	{
 		m_picture_all_errors[i].resize(input_bitmap->w * input_bitmap->h);
@@ -653,26 +692,24 @@ void RastaConverter::GeneratePictureErrorMap()
 
 			for (int x=0;x<input_bitmap->w;++x)
 			{
-				*dst++ = distance_function(srcrow[x], ref);
+				if (!details_data.empty())
+					details_multiplier=255+details_data[y][x]*cfg.details_strength;
+				*dst++ = (distance_function(srcrow[x], ref)*details_multiplier)/255;
 			}
 		}
 	}
 }
 
-void RastaConverter::PrepareDestinationPicture()
+void RastaConverter::OtherDithering()
 {
-	int x,y;
+	int i,y;
 
-	if (cfg.dither!=E_DITHER_NONE)
-		ClearErrorMap();
-
-	// Draw new picture on the screen
 	const int w = input_bitmap->w;
 	const int w1 = w - 1;
 
 	for (y=0;y<input_bitmap->h;++y)
 	{
-		const bool flip = (cfg.dither==E_DITHER_FLOYD) && (y & 1);
+		const bool flip = y & 1;
 
 		for (int i=0;i<w;++i)
 		{
@@ -775,6 +812,39 @@ void RastaConverter::PrepareDestinationPicture()
 			putpixel(destination_bitmap,x,y,color);
 		}
 	}
+}
+
+
+
+void RastaConverter::PrepareDestinationPicture()
+{
+	int x,y;
+	// Draw new picture on the screen
+	if (cfg.dither!=E_DITHER_NONE)
+	{
+		if (cfg.dither==E_DITHER_KNOLL)
+			KnollDithering();
+		else
+		{
+			ClearErrorMap();
+			OtherDithering();
+		}
+	}
+	else
+	{
+		for (y=0;y<m_height;++y)
+		{
+			for (x=0;x<m_width;++x)
+			{
+				rgb out_pixel=m_picture[y][x];
+				out_pixel = atari_palette[FindAtariColorIndex(out_pixel)];
+				int color=RGB2PIXEL(out_pixel);
+				putpixel(destination_bitmap,x,y,color);
+			}
+		}
+	}
+	if (user_closed_app)
+		return;
 
 	if (desktop_width>=320*3)
 		stretch_blit(destination_bitmap,screen,0,0,destination_bitmap->w,destination_bitmap->h,input_bitmap->w*4,0,destination_bitmap->w*2,destination_bitmap->h);
@@ -802,6 +872,10 @@ bool RastaConverter::ProcessInit()
 
 	// Apply dithering or other picture transformation
 	PrepareDestinationPicture();
+
+	if (user_closed_app)
+		return false;
+
 	SavePicture(cfg.output_file+"-dst.png",destination_bitmap);
 
 	GeneratePictureErrorMap();
@@ -863,6 +937,209 @@ void RastaConverter::SetConfig(Configuration &a_c)
 {
 	cfg=a_c;
 }
+
+/* 8x8 threshold map */
+static const unsigned char threshold_map[8*8] = {
+	0,48,12,60, 3,51,15,63,
+	32,16,44,28,35,19,47,31,
+	8,56, 4,52,11,59, 7,55,
+	40,24,36,20,43,27,39,23,
+	2,50,14,62, 1,49,13,61,
+	34,18,46,30,33,17,45,29,
+	10,58, 6,54, 9,57, 5,53,
+	42,26,38,22,41,25,37,21 };
+
+/* Luminance for each palette entry, to be initialized as soon as the program begins */
+static unsigned luma[128];
+
+bool PaletteCompareLuma(unsigned index1, unsigned index2)
+{
+	return luma[index1] < luma[index2];
+}
+
+double ColorCompare(int r1,int g1,int b1, int r2,int g2,int b2)
+{
+	double luma1 = (r1*299 + g1*587 + b1*114) / (255.0*1000);
+	double luma2 = (r2*299 + g2*587 + b2*114) / (255.0*1000);
+	double lumadiff = luma1-luma2;
+	double diffR = (r1-r2)/255.0, diffG = (g1-g2)/255.0, diffB = (b1-b2)/255.0;
+	return (diffR*diffR*0.299 + diffG*diffG*0.587 + diffB*diffB*0.114)*0.75
+		+ lumadiff*lumadiff;
+}
+
+struct MixingPlan
+{
+    unsigned colors[64];
+};
+
+MixingPlan RastaConverter::DeviseBestMixingPlan(rgb color)
+{
+	MixingPlan result = { {0} };
+	const double X = cfg.dither_strength/10; // Error multiplier
+	rgb src=color;
+	rgb_error e;
+	e.zero(); // Error accumulator
+	for(unsigned c=0; c<64; ++c)
+	{
+		// Current temporary value
+		rgb_error temp;
+		temp.r = src.r + e.r * X;
+		temp.g = src.g + e.g * X;
+		temp.b = src.b + e.b * X ;
+		// Clamp it in the allowed RGB range
+		if(temp.r<0) temp.r=0; else if(temp.r>255) temp.r=255;
+		if(temp.g<0) temp.g=0; else if(temp.g>255) temp.g=255;
+		if(temp.b<0) temp.b=0; else if(temp.b>255) temp.b=255;
+		// Find the closest color from the palette
+		double least_penalty = 1e99;
+		unsigned chosen = c%128;
+		for(unsigned index=0; index<128; ++index)
+		{
+			rgb color2;
+			color2.r=temp.r;
+			color2.g=temp.g;
+			color2.b=temp.b;
+
+			double penalty = distance_function(atari_palette[index], color2);
+			if(penalty < least_penalty)
+			{ 
+				least_penalty = penalty; 
+				chosen=index; 
+			}
+		}
+		// Add it to candidates and update the error
+		result.colors[c] = chosen;
+		rgb color = atari_palette[chosen];
+		e.r += src.r-color.r;
+		e.g += src.g-color.g;
+		e.b += src.b-color.b;
+	}
+	// Sort the colors according to luminance
+	std::sort(result.colors, result.colors+64, PaletteCompareLuma);
+	return result;
+}
+
+void RastaConverter::KnollDithering()
+{
+	Message("Knoll Dithering             ");
+
+	for(unsigned c=0; c<128; ++c)
+	{
+		luma[c] = atari_palette[c].r*299 + atari_palette[c].g*587 + atari_palette[c].b*114;
+	}
+	for(unsigned y=0; y<m_height; ++y)
+	{
+		if (desktop_width>=320*3)
+			hline(screen,m_width*2,y,m_width*4,makecol(0xFF,0xFF,0x0));
+		else
+			hline(screen,m_width,y,m_width*2,makecol(0xFF,0xFF,0x0));
+
+		for(unsigned x=0; x<m_width; ++x)
+		{
+			if (user_closed_app)
+				return;
+
+			rgb r_color = m_picture[y][x];
+			unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
+			MixingPlan plan = DeviseBestMixingPlan(r_color);
+			rgb out_pixel = atari_palette[plan.colors[ map_value ]];
+
+			//			out_pixel = atari_palette[FindAtariColorIndex(out_pixel)];
+			int color=RGB2PIXEL(out_pixel);
+			putpixel(destination_bitmap,x,y,color);
+		}
+	}
+}
+
+/*
+struct MixingPlan
+{
+	static const unsigned n_colors = 128;
+	unsigned colors[n_colors];
+};
+
+MixingPlan DeviseBestMixingPlan(rgb color)
+{
+	MixingPlan result = { {0} };
+	const unsigned src[3] = { color.b, color.g, color.r };
+	unsigned proportion_total = 0;
+
+	unsigned so_far[3] = {0,0,0};
+
+	while(proportion_total < MixingPlan::n_colors)
+	{
+		unsigned chosen_amount = 1;
+		unsigned chosen        = 0;
+
+		const unsigned max_test_count = std::max(1u, proportion_total);
+
+		double least_penalty = -1;
+		for(unsigned index=0; index<128; ++index)
+		{
+			const rgb color = atari_palette[index];
+			unsigned sum[3] = { so_far[0], so_far[1], so_far[2] };
+			unsigned add[3] = { color.b, color.g, color.r };
+			for(unsigned p=1; p<=max_test_count; p*=2)
+			{
+				for(unsigned c=0; c<3; ++c) sum[c] += add[c];
+				for(unsigned c=0; c<3; ++c) add[c] += add[c];
+				unsigned t = proportion_total + p;
+				unsigned test[3] = { sum[0] / t, sum[1] / t, sum[2] / t };
+				double penalty = ColorCompare(src[0],src[1],src[2],
+					test[0],test[1],test[2]);
+				if(penalty < least_penalty || least_penalty < 0)
+				{
+					least_penalty = penalty;
+					chosen        = index;
+					chosen_amount = p;
+				}
+			}
+		}
+		for(unsigned p=0; p<chosen_amount; ++p)
+		{
+			if(proportion_total >= MixingPlan::n_colors) break;
+			result.colors[proportion_total++] = chosen;
+		}
+
+		const rgb color = atari_palette[chosen];
+		unsigned palcolor[3] = { color.b, color.g, color.r };
+
+		for(unsigned c=0; c<3; ++c)
+			so_far[c] += palcolor[c] * chosen_amount;
+	}
+	// Sort the colors according to luminance
+	std::sort(result.colors, result.colors+MixingPlan::n_colors, PaletteCompareLuma);
+	return result;
+}
+
+void RastaConverter::YliluomaDithering()
+{
+	for(unsigned c=0; c<128; ++c)
+	{
+		luma[c] = atari_palette[c].r*299 + atari_palette[c].g*587 + atari_palette[c].b*114;
+	}
+	for(unsigned y=0; y<m_height; ++y)
+	{
+		if (desktop_width>=320*3)
+			hline(screen,m_width*2,y,m_width*4,makecol(0xFF,0xFF,0x0));
+		else
+			hline(screen,m_width,y,m_width*2,makecol(0xFF,0xFF,0x0));
+
+		for(unsigned x=0; x<m_width; ++x)
+		{
+			rgb r_color = m_picture[y][x];;
+			unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
+			MixingPlan plan = DeviseBestMixingPlan(r_color);
+			map_value = map_value * MixingPlan::n_colors / 64;
+			rgb out_pixel = atari_palette[plan.colors[ map_value ]];
+
+//			out_pixel = atari_palette[FindAtariColorIndex(out_pixel)];
+			int color=RGB2PIXEL(out_pixel);
+			putpixel(destination_bitmap,x,y,color);
+		}
+	}
+}
+*/
 
 void RastaConverter::ClearErrorMap()
 {
@@ -1121,9 +1398,9 @@ void RastaConverter::DiffuseError( int x, int y, double quant_error, double e_r,
 		return;
 
 	rgb_error p = error_map[y][x];
-	p.r += e_r * quant_error;
-	p.g += e_g * quant_error;
-	p.b += e_b * quant_error;
+	p.r += e_r * quant_error*cfg.dither_strength;
+	p.g += e_g * quant_error*cfg.dither_strength;
+	p.b += e_b * quant_error*cfg.dither_strength;
 	if (p.r>255)
 		p.r=255;
 	else if (p.r<0)
@@ -1356,7 +1633,7 @@ distance_accum_t RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 		}
 
 		// snapshot current machine state
-		const SRasterInstruction *__restrict rastinsns = pic->raster_lines[y].instructions.data();
+		const SRasterInstruction *__restrict rastinsns = &pic->raster_lines[y].instructions[0];
 		const int rastinsncnt = pic->raster_lines[y].instructions.size();
 
 		line_cache_key lck;
@@ -1625,23 +1902,6 @@ void RastaConverter::MutateLine(raster_line &prog)
 	}
 
 	prog.rehash();
-}
-
-unsigned char LimitValueToColor(unsigned char value)
-{
-	if (value>127)
-		value-=128;
-	return value;
-}
-
-unsigned char LimitValueToPMGPosition(unsigned char value)
-{
-	// sprite position is 32-224, in quad size position is modulo 4
-	if (value>224)
-		value=224;
-	else if (value<32)
-		value=32;
-	return value;
 }
 
 void RastaConverter::MutateOnce(raster_line &prog)

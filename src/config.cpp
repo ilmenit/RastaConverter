@@ -87,8 +87,23 @@ void Configuration::Process(int argc, char *argv[])
 		dither=E_DITHER_JARVIS;
 	else if (dither_value=="simple")
 		dither=E_DITHER_SIMPLE;
+	else if (dither_value=="knoll")
+		dither=E_DITHER_KNOLL;
 	else
 		dither=E_DITHER_NONE;
+
+	string dither_val2;
+	if (dither==E_DITHER_KNOLL)
+		dither_val2 = parser.getValue("dither_val","0.3");
+	else
+		dither_val2 = parser.getValue("dither_val","1");
+
+	dither_strength=String2Value<double>(dither_val2);
+
+	details_file = parser.getValue("details","");
+
+	string details_val2 = parser.getValue("details_val","0.5");
+	details_strength=String2Value<double>(details_val2);
 
 	string solutions_value = parser.getValue("s","1");
 	solutions=String2Value<int>(solutions_value);

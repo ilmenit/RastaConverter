@@ -20,11 +20,13 @@
 
 using namespace std;
 
-#define DISTANCE_MAX 0xffff
+#define DISTANCE_MAX 0xffffffff
 typedef long long distance_accum_t;
-typedef unsigned short distance_t;
+typedef unsigned int distance_t;
 typedef distance_t (fn_rgb_distance)(const rgb &col1, const rgb &col2);
 typedef fn_rgb_distance *f_rgb_distance;
+
+struct MixingPlan;
 
 // CPU registers
 
@@ -211,6 +213,8 @@ private:
 	BITMAP *output_bitmap;
 	BITMAP *destination_bitmap;
 
+	vector < vector <unsigned char> > details_data;	
+
 	vector < screen_line > m_picture; 
 	vector<distance_t> m_picture_all_errors[128]; 
 	int m_width,m_height; // picture size
@@ -238,11 +242,16 @@ private:
 	void CreateSmartRasterPicture(raster_picture *);
 	void CreateRandomRasterPicture(raster_picture *);
 	void DiffuseError( int x, int y, double quant_error, double e_r,double e_g,double e_b);
+	void KnollDithering();
+	void OtherDithering();
+	MixingPlan DeviseBestMixingPlan(rgb color);
 
 	inline void ExecuteInstruction(const SRasterInstruction &instr, int x);
 	inline int GetInstructionCycles(const SRasterInstruction &instr);
 
 	distance_accum_t ExecuteRasterProgram(raster_picture *);
+
+	void LoadDetailsMap();
 
 	void SetSpriteBorders(raster_picture *);
 	double EvaluateCreatedPicture(void);

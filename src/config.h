@@ -25,6 +25,7 @@ enum e_dither_type {
 	E_DITHER_SIMPLE,
 	E_DITHER_2D,
 	E_DITHER_JARVIS,
+	E_DITHER_KNOLL,
 };
 
 
@@ -32,6 +33,7 @@ struct Configuration {
 	std::string input_file;
 	std::string output_file;
 	std::string palette_file;
+	std::string details_file;
 	std::string command_line;
 
 	bool border;
@@ -39,6 +41,8 @@ struct Configuration {
 	bool continue_processing;
 
 	e_dither_type dither;
+	double dither_strength;
+	double details_strength;
 	int width;
 	int height;
 	unsigned max_evals;
