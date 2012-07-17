@@ -226,3 +226,32 @@ RastaConverterNewFeatures  2012-05-24  Ilmenit
 - Improved dithering algorithms
 - New dithering algorithm (/dither=knoll)
 - Dithering strength added (/dither_val=value)
+- /distance param replaced /euclid
+- new distance color function (CIEDE2000) that solves problems with "too gray" output
+- /noborder param removed
+
+RastaConverterBeta5        2012-07-17  Ilmenit
+----------------------------------------------
+
+* Added Preprocess parameters - can be useful for GUI preview:
+
+/preprocess   If this switch exists then RastaConverter generates and saves only destination picture.
+/brightness   Brightness color corection.
+/contrast     Contrast color corection.
+/gamma        Gamma color corection.
+
+* Random Number Generator changed to Marsenne Twister for a long period.
+/seed - if exists the constant seed for the random number generator is used
+
+* Limiting palette 
+/picture_colors - limits palette to colors existing in the destination picture. No average colors will be used.  
+
+* Fast processing of low color (<5) pictures, where sprites are not needed
+
+* "Tabu Search" algorithm has been replaced with amazing "Late Acceptance Hill Climbing" algorithm for /s>1. 
+
+* You can periodically save the results of RastaConverter
+/save - saves best solution after every 'n' evaluations
+
+* Default distance function for preprocess is set to CIEDE2000. Then default /distance function is used.
+/predistance - sets color distance function for preprocess

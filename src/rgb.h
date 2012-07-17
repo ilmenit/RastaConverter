@@ -15,6 +15,21 @@ struct rgb {
 	}
 };
 
+struct LabLch
+{
+                struct{
+                        double L;
+                        double a;
+                        double b;
+                }lab;
+                struct{
+                        double L;
+                        double c;
+                        double h;
+                }lch;
+};
+
+
 struct rgb_error {
 	double b;
 	double g;

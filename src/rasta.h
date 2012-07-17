@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <string>
 #include "FreeImage.h"
-#include <allegro.h> 
 #include "CommandLineParser.h"
 #include <assert.h>
 #include "config.h"
@@ -81,7 +80,7 @@ union SRasterInstruction {
 		unsigned char value;
 	} loose;
 
-	uint32_t packed;
+	unsigned int packed;
 
 	bool operator==(const SRasterInstruction& other) const
 	{
@@ -164,7 +163,7 @@ struct raster_line {
 
 		for(vector<SRasterInstruction>::const_iterator it = instructions.begin(), itEnd = instructions.end(); it != itEnd; ++it)
 		{
-			h += it->hash();
+			h += (unsigned) it->hash();
 
 			h = (h >> 27) + (h << 5);
 		}
@@ -205,7 +204,6 @@ struct statistics_point {
 class RastaConverter {
 private:
 	FILE *out, *in;
-	PALETTE palette;
 	FIBITMAP *fbitmap; 
 
 	// picture
@@ -223,22 +221,25 @@ private:
 	statistics_list m_statistics;
 
 	// private functions
+	void SetDistanceFunction(e_distance_function dst);
 	void InitLocalStructure();
 	void GeneratePictureErrorMap();
 
 
 	vector < color_index_line > m_created_picture;
 	vector < line_target > m_created_picture_targets;
-	map < double, raster_picture > m_solutions;
+	vector < double > m_previous_results; // for Late Acceptance Hill Climbing
 	vector < vector < unsigned char > > m_possible_colors_for_each_line;
 	vector < vector < rgb_error > > error_map;
 
 	bool init_finished;
 	void Init();
 	void FindPossibleColors();
+	void LimitPaletteToExistingColors();
 
 	void ClearErrorMap();
 	void CreateEmptyRasterPicture(raster_picture *);
+	void CreateLowColorRasterPicture(raster_picture *);
 	void CreateSmartRasterPicture(raster_picture *);
 	void CreateRandomRasterPicture(raster_picture *);
 	void DiffuseError( int x, int y, double quant_error, double e_r,double e_g,double e_b);
@@ -253,22 +254,22 @@ private:
 
 	void LoadDetailsMap();
 
-	void SetSpriteBorders(raster_picture *);
 	double EvaluateCreatedPicture(void);
 
 	template<fn_rgb_distance& T_distance_function>
 	distance_accum_t CalculateLineDistance(const screen_line &r, const screen_line &l);
 
-	void AddSolution(double,raster_picture);
+	raster_picture m_pic;
+	raster_picture m_best_pic;
+	double m_best_result;
 
-	raster_picture *m_pic;
 	void MutateRasterProgram(raster_picture *pic);
 	void TestRasterProgram(raster_picture *pic);
 
 	int m_currently_mutated_y;
 
-	unsigned int evaluations;
-	unsigned int last_best_evaluation;
+	unsigned long long m_evaluations;
+	unsigned long long m_last_best_evaluation;
 	void MutateLine(raster_line &);
 	void MutateOnce(raster_line &);
 

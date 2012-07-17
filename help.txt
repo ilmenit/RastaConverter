@@ -41,15 +41,29 @@ Command line options:
   You can also use shorcuts: /pal=laoo and the converter will try to load palette from 'Palettes\laoo.act'
   
 /dither=Dithering Type
-  Possible dithering types are: chess, floyd, 2d, jarvis, simple
+  Possible dithering types are: chess, floyd, 2d, jarvis, simple, knoll
   'chess' is Chessboard Dithering - typical 8bit dithering technique
   'floyd' is Floyd-Steinberg dithering - more "random" than chessboard dithering
   '2d' and 'simple' are between chess and floyd.
   'jarvis' dithering is more artistic
+  'knoll' is similar to Adobe patented pattern dithering algorithm
 
-/noborder
-  This option allows RastaConverter to use one more sprite that covers overscan borders. 
-  While output picture is better there are "random" horizontal lines on the both sides of the picture.
+/dither_val=Dithering strength
+  Default: 1, should be set from 0.0 to 3.0. 
+  Some dithering algorithms set to /dither_val=2 may increase color saturation if the output picture is too gray.
+
+/dither_rand=Dithering randomness
+  Default: 0, should be set from 0.0 to 1.0
+  Current implementation of dithering algorithm produces output which may look too patterned.
+  Set /dither_rand to 0.5 or 1.0 to make output more random.
+
+/details=Details picture
+  To help the optimization algorithm you can set the details mask. 
+  The brighter the color on the mask is, the higher is distance of the color difference between input and output file on the masked region.
+  This way you can make some objects like faces, eyes or other small objects more detailed.
+
+/details_val=Details influence strength
+  Default: 1
 
 /filter=Resize filter
   Default: lanczos, other recommended: box  
@@ -58,15 +72,30 @@ Command line options:
   /filter=box is recommended - it preserves details better.
 	Possible filters are: lanczos, box, bicubic, bilinear, bspline, catmullrom
 
+/brightness=[-100,100]
+  Default: 0
+  Brightness color corection.
+
+/contrast=[-100,100]
+  Default: 0
+  Contrast color corection.
+
+/gamma=[0.0-8.0]
+  Default: 1.0
+  Gamma color corection.
+
+/picture_colors
+  Limits palette to colors existing in the destination picture. No average colors will be used.
+  This is the default behavior when the number of unique colors on the picture is less than 5.
+
 /init=Initial optimization state
-   Default: smart
+   Default: random
    The optimization search space is large and the final results depends a lot on the initial values.
    You may see that RastaConverter sometimes optimizes not those details of the picture that you want.
-   To change the initial value you may use other states: random, empty, less
+   To change the initial value you may use other states: random, empty, less, smart
    
    '/init=less' option sets less colors in the initial state of the picture. This gives better result
    quick, but then picture is harder to optimize than with /init=smart 
-   If you want to have better output picture and you have a lot of time then usually 'smart' is better.
 
 /o=Output File
   Output file name. The default name is 'output.png'. 
@@ -75,17 +104,39 @@ Command line options:
 /s=Number of solutions
   You may set a different number of solutions used in the optimization process.
   With /s=1 (default) the optimization algorithm is heuristic Hill Climbing.
-  With more solutions the Tabu Search algorithm is used. It may produce a better picture, 
-  but it is usually better/faster to run the Hill Climbing a few times.
+  With more solutions the "Late Acceptance Hill Climbing" algorithm is used (www.cs.nott.ac.uk/~yxb/LAHC/)
+  It works slower at the beginning, but after many (100M+) evaluations, when basic Hill Climbing almost stops,
+  this algorithm still finds better solutions! The more solutions you use, the better final result can be. 
+  There is no memory impact so you can use even /s=10000 or more.
 
-/euclid
-  Use Euclidian RGB distance for colors instead of default UYV distance. 
-  UYV produces usually better color mapping, but sometimes RGB distance is useful.
+/distance=Color distance function
+  Default: yuv, other options: euclid, ciede
+ 
+  euclid - Use Euclidian RGB distance for colors instead of default YUV distance. This function is fast.
+  yuv - produces usually better color mapping than Euclidian, but for some pictures RGB distance is also useful.
+  ciede - uses the best visual color distance algorithm CIEDE2000, but can be very slow.
+
+/predistance=Color distance function for preprocess
+  Default: ciede, other options: euclid, ciede
+
+  This option sets the preprocess color distance function to create destination picture.
+  For the rest of the optimization the distance set by the /distance is used.
     
 /max_evals=Maximum number of evaluations
   RastaConverter will save the current solution and exit when this limit is
   reached.
 
+/preprocess
+  If this switch exists then RastaConverter generates and saves only destination picture.
+
+/seed = seed for the random number generator
+
+/save=number of solutions
+  Default: 0
+  Saves best solution after every 'n' evaluations. This is useful for a long-run optimizations, when the run can
+  be stopped f.e. by power outage. If you run many instances of RastaConverter /o option may be useful.
+
 Example:
-RastaConverter.exe c64.png /filter=box /h=200 /pal=palettes\laoo.act
+RastaConverter.exe c64.png /filter=box /h=200 /pal=laoo /s=1000
+
 
