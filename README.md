@@ -4,7 +4,7 @@ Rasta Converter
 RastaConverter is a graphics converter from modern computers to old [8bit Atari computers](http://en.wikipedia.org/wiki/Atari_8-bit_family).
 The tool uses [Allegro](http://alleg.sourceforge.net/) and [FreeImage](http://freeimage.sourceforge.net/) graphics libraries.
 
-The conversion process is optimization of the [Kernel Program](www.atariarchives.org/dere/chapt05.php#H5_7).
+The conversion process is optimization of the [Kernel Program](http://www.atariarchives.org/dere/chapt05.php#H5_7).
 It uses most of the Atari graphics capabilities including sprites, midline color changes and sprite multiplication. 
 
 The converter uses [Late Acceptance Hill Climbing](http://www.cs.nott.ac.uk/~yxb/LAHC/) algorithm.
