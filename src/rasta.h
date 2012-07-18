@@ -229,6 +229,7 @@ private:
 	vector < color_index_line > m_created_picture;
 	vector < line_target > m_created_picture_targets;
 	vector < double > m_previous_results; // for Late Acceptance Hill Climbing
+	size_t m_previous_results_index; // for Late Acceptance Hill Climbing
 	vector < vector < unsigned char > > m_possible_colors_for_each_line;
 	vector < vector < rgb_error > > error_map;
 
@@ -284,10 +285,12 @@ private:
 	bool SaveScreenData(const char *filename);
 	bool SavePicture(string filename, BITMAP *to_save);
 	void SaveStatistics(const char *filename);
+	void SaveLAHC(const char *filename);
 
 	void LoadRegInits(string name);
 	void LoadRasterProgram(string name);
 	void LoadPMG(string name);
+	void LoadLAHC(string name);
 
 	double NormalizeScore(double raw_score);
 

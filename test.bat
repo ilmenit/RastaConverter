@@ -1,0 +1,1 @@
+RastaConverter.exe test.png /filter=box /h=200 /pal=laoo /s=1000

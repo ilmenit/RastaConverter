@@ -1,18 +1,51 @@
 ChangeLog
 =========
 
-RastaConverter-0.9  2012-04-18  ilmenit
----------------------------------------
+RastaConverterBeta5.1      2012-07-17  Ilmenit
+----------------------------------------------
 
-* http://atarionline.pl/forum/comments.php?DiscussionID=1611&page=7#Item_28
+* Fix for the /continue bug that appeared in Beta5
+* Reverted entries in the ChangeLog.md
 
-RastaConverterBeta2  2012-04-20  ilmenit
-----------------------------------------
 
-* http://www.atariage.com/forums/topic/156160-quantizator/page__st__50#entry2505402
+RastaConverterBeta5        2012-07-17  Ilmenit
+----------------------------------------------
 
-* fixed bug in the generator (thanks to Jakub Husak)
-* new options: /cdither, /dither, /init=less, /euclid
+* Added Preprocess parameters - can be useful for GUI preview:
+
+/preprocess   If this switch exists then RastaConverter generates and saves only destination picture.
+/brightness   Brightness color corection.
+/contrast     Contrast color corection.
+/gamma        Gamma color corection.
+
+* Random Number Generator changed to Marsenne Twister for a long period.
+/seed - if exists the constant seed for the random number generator is used
+
+* Limiting palette 
+/picture_colors - limits palette to colors existing in the destination picture. No average colors will be used.  
+
+* Fast processing of low color (<5) pictures, where sprites are not needed
+
+* "Tabu Search" algorithm has been replaced with amazing "Late Acceptance Hill Climbing" algorithm for /s>1. 
+
+* You can periodically save the results of RastaConverter
+/save - saves best solution after every 'n' evaluations
+
+* Default distance function for preprocess is set to CIEDE2000. Then default /distance function is used.
+/predistance - sets color distance function for preprocess
+
+
+RastaConverterNewFeatures  2012-05-24  Ilmenit
+----------------------------------------------
+
+- Details mask added /details=inputfile /details_val=value
+- Improved dithering algorithms
+- New dithering algorithm (/dither=knoll)
+- Dithering strength added (/dither_val=value)
+- /distance param replaced /euclid
+- new distance color function (CIEDE2000) that solves problems with "too gray" output
+- /noborder param removed
+
 
 RastaConverterBeta2  2012-04-21  ilmenit
 ----------------------------------------
@@ -41,25 +74,6 @@ RastaConverterBeta2  2012-04-21  ilmenit
 8. Multiprocessing won't increase the speed. The slowest part is execution of
   raster program and it can't be parallelized.
 
-RastaConverterBeta3  2012-04-26  ilmenit
-----------------------------------------
-
-* http://www.atariage.com/forums/topic/156160-quantizator/page__st__125#entry2509434
-
-RastaConverter Beta3 attached. Big improvements in optimization heuristics and
-"continue" option are two main features in this version.  Tomorrow I'm going on
-holidays for 10 days so I publish it without other promised features.
-
-* New dithering algorithms
-* Changed command line parameters for dithering
-* Improved mutation heuristics (more accurate)
-* Changed default init behavior from smart to random
-* Improved random initialization
-* Preview for the destination picture and rescaled source picture
-* On big enough desktops displayed pictures in the app have proper proportions
-* Resuming of optimization added
-* Conversion in Beta3 is MUCH faster than in Beta2 and overal picture quality
-  is better.
 
 Rasta-opthack  2012-05-05  phaeron
 -----------------------------------
@@ -182,16 +196,6 @@ Linux Support
 Added ivop's Linux Makefile.  The following contributions were rolled into
 Rasta-opthack5.
 
-### rasta-linux.patch  2012-04-26  ivop
-
-* http://www.atariage.com/forums/topic/156160-quantizator/page__st__150#entry2513277
-
-Here's a patch to compile this on Linux. Just a few small fixes to make it more
-standards compliant and a simple Makefile. Did not fix the pathsep issue, but
-you can just specify the input file and palette file on the command line.
-
-Thanks for using portable libraries like allegro and freeimage.
-
 ### rastahacklinux  2012-05-12  frogstar_robot
 
 * http://www.atariage.com/forums/topic/156160-quantizator/page__st__200#entry2516222
@@ -214,44 +218,53 @@ Linux users need this small patch and add -std=c++0x to CXXFLAGS (needed for
 the auto keyword).  Great work Phaeron and thanks for including the portability
 patches.
 
+### rasta-linux.patch  2012-04-26  ivop
+
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__150#entry2513277
+
+Here's a patch to compile this on Linux. Just a few small fixes to make it more
+standards compliant and a simple Makefile. Did not fix the pathsep issue, but
+you can just specify the input file and palette file on the command line.
+
+Thanks for using portable libraries like allegro and freeimage.
+
 Max Evaluations
 ---------------
 
 Added /max_evals flag.
 
-RastaConverterNewFeatures  2012-05-24  Ilmenit
-----------------------------------------------
+RastaConverterBeta3  2012-04-26  ilmenit
+----------------------------------------
 
-- Details mask added /details=inputfile /details_val=value
-- Improved dithering algorithms
-- New dithering algorithm (/dither=knoll)
-- Dithering strength added (/dither_val=value)
-- /distance param replaced /euclid
-- new distance color function (CIEDE2000) that solves problems with "too gray" output
-- /noborder param removed
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__125#entry2509434
 
-RastaConverterBeta5        2012-07-17  Ilmenit
-----------------------------------------------
+RastaConverter Beta3 attached. Big improvements in optimization heuristics and
+"continue" option are two main features in this version.  Tomorrow I'm going on
+holidays for 10 days so I publish it without other promised features.
 
-* Added Preprocess parameters - can be useful for GUI preview:
+* New dithering algorithms
+* Changed command line parameters for dithering
+* Improved mutation heuristics (more accurate)
+* Changed default init behavior from smart to random
+* Improved random initialization
+* Preview for the destination picture and rescaled source picture
+* On big enough desktops displayed pictures in the app have proper proportions
+* Resuming of optimization added
+* Conversion in Beta3 is MUCH faster than in Beta2 and overal picture quality
+  is better.
 
-/preprocess   If this switch exists then RastaConverter generates and saves only destination picture.
-/brightness   Brightness color corection.
-/contrast     Contrast color corection.
-/gamma        Gamma color corection.
+RastaConverterBeta2  2012-04-20  ilmenit
+----------------------------------------
 
-* Random Number Generator changed to Marsenne Twister for a long period.
-/seed - if exists the constant seed for the random number generator is used
+* http://www.atariage.com/forums/topic/156160-quantizator/page__st__50#entry2505402
 
-* Limiting palette 
-/picture_colors - limits palette to colors existing in the destination picture. No average colors will be used.  
+* fixed bug in the generator (thanks to Jakub Husak)
+* new options: /cdither, /dither, /init=less, /euclid
 
-* Fast processing of low color (<5) pictures, where sprites are not needed
+RastaConverter-0.9  2012-04-18  ilmenit
+---------------------------------------
 
-* "Tabu Search" algorithm has been replaced with amazing "Late Acceptance Hill Climbing" algorithm for /s>1. 
+* http://atarionline.pl/forum/comments.php?DiscussionID=1611&page=7#Item_28
 
-* You can periodically save the results of RastaConverter
-/save - saves best solution after every 'n' evaluations
 
-* Default distance function for preprocess is set to CIEDE2000. Then default /distance function is used.
-/predistance - sets color distance function for preprocess
+

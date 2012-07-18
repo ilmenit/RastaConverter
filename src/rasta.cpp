@@ -706,6 +706,21 @@ void RastaConverter::SaveStatistics(const char *fn)
 	fclose(f);
 }
 
+void RastaConverter::SaveLAHC(const char *fn)
+{
+	FILE *f = fopen(fn, "wt+");
+	if (!f)
+		return;
+
+	fprintf(f, "%lu\n",(unsigned long) m_previous_results.size());
+	fprintf(f, "%lu\n",(unsigned long) m_previous_results_index);
+	for (size_t i=0;i<m_previous_results.size();++i)
+	{
+		fprintf(f, "%Lf\n",m_previous_results[i]);
+	}
+	fclose(f);
+}
+
 bool RastaConverter::LoadInputBitmap()
 {
 	Message("Loading and initializing file");
@@ -977,7 +992,9 @@ void RastaConverter::OtherDithering()
 					DiffuseError( x+1, y+2, 1.0/48.0, qe.r,qe.g,qe.b);
 				}
 			}
-			out_pixel = atari_palette[FindAtariColorIndex(out_pixel)];
+			unsigned char color_index=FindAtariColorIndex(out_pixel);
+			color_indexes_on_dst_picture.insert(color_index);	
+			out_pixel = atari_palette[color_index];
 			int color=RGB2PIXEL(out_pixel);
 			putpixel(destination_bitmap,x,y,color);
 		}
@@ -1007,7 +1024,9 @@ void RastaConverter::PrepareDestinationPicture()
 			for (x=0;x<m_width;++x)
 			{
 				rgb out_pixel=m_picture[y][x];
-				out_pixel = atari_palette[FindAtariColorIndex(out_pixel)];
+				unsigned char color_index=FindAtariColorIndex(out_pixel);
+				color_indexes_on_dst_picture.insert(color_index);	
+				out_pixel = atari_palette[color_index];
 				int color=RGB2PIXEL(out_pixel);
 				putpixel(destination_bitmap,x,y,color);
 			}
@@ -1032,12 +1051,6 @@ void RastaConverter::PrepareDestinationPicture()
 			rgb out_pixel=PIXEL2RGB(color);
 			m_picture[y][x]=out_pixel; // copy it always - it is used by the colour distance cache m_picture_all_errors
 		}
-	}
-
-	for (int l=0;l<m_height && !user_closed_app;++l)
-	{
-		for (int x=0;x<m_width;++x)
-			color_indexes_on_dst_picture.insert(FindAtariColorIndex(m_picture[l][x]));				
 	}
 }
 
@@ -1249,7 +1262,9 @@ void RastaConverter::KnollDithering()
 			rgb r_color = m_picture[y][x];
 			unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
 			MixingPlan plan = DeviseBestMixingPlan(r_color);
-			rgb out_pixel = atari_palette[plan.colors[ map_value ]];
+			unsigned char color_index=plan.colors[ map_value ];
+			color_indexes_on_dst_picture.insert(color_index);	
+			rgb out_pixel = atari_palette[color_index];
 
 			//			out_pixel = atari_palette[FindAtariColorIndex(out_pixel)];
 			int color=RGB2PIXEL(out_pixel);
@@ -1961,24 +1976,32 @@ void RastaConverter::FindPossibleColors()
 
 void RastaConverter::Init()
 {
-	init_finished=false;
+	if (cfg.continue_processing)
+	{
+		m_best_result=ExecuteRasterProgram(&m_best_pic); 
+	}
+	else
+	{
+		raster_picture m(m_height);
+		init_finished=false;
 
-	m_evaluations=0;
-	m_last_best_evaluation=0;
+		m_evaluations=0;
+		m_last_best_evaluation=0;
+		m_previous_results_index=0;
 
-	raster_picture m(m_height);
-	if (color_indexes_on_dst_picture.size()<5)
-		CreateLowColorRasterPicture(&m);
-	else if (cfg.init_type==E_INIT_RANDOM)
-		CreateRandomRasterPicture(&m);
-	else if (cfg.init_type==E_INIT_EMPTY)
-		CreateEmptyRasterPicture(&m);
-	else // LESS or SMART
-		CreateSmartRasterPicture(&m);
+		if (color_indexes_on_dst_picture.size()<5)
+			CreateLowColorRasterPicture(&m);
+		else if (cfg.init_type==E_INIT_RANDOM)
+			CreateRandomRasterPicture(&m);
+		else if (cfg.init_type==E_INIT_EMPTY)
+			CreateEmptyRasterPicture(&m);
+		else // LESS or SMART
+			CreateSmartRasterPicture(&m);
+		m_best_result=ExecuteRasterProgram(&m); 
+		m_best_pic=m;
+	}
 
 	ShowLastCreatedPicture();
-	m_best_result=ExecuteRasterProgram(&m); 
-	m_best_pic=m;
 
 	if (!user_closed_app)
 		init_finished=true;
@@ -2264,6 +2287,7 @@ void RastaConverter::SaveBestSolution()
 	SaveScreenData  (string(cfg.output_file+".mic").c_str());
 	SavePicture     (cfg.output_file,output_bitmap);
 	SaveStatistics((cfg.output_file+".csv").c_str());
+	SaveLAHC((cfg.output_file+".lahc").c_str());
 }
 
 void Wait(int t)
@@ -2297,13 +2321,6 @@ void RastaConverter::FindBestSolution()
 
 	memset(m_mutation_stats,0,sizeof(m_mutation_stats));
 
-	// For all k ( 0.. L-1 ) Ck=C(s)
-	// Set initial state for Late Acceptance Hill Climbing
-	m_previous_results.resize(solutions);
-	for(int i=0; i<solutions; ++i)
-		m_previous_results[i]=m_best_result;
-	size_t m_previous_results_index=0;
-
 	if (user_closed_app)
 		return;
 
@@ -2312,10 +2329,16 @@ void RastaConverter::FindBestSolution()
 	if (user_closed_app)
 		return;
 
+	Init();
+
 	if (!cfg.continue_processing)
-		Init();
-	else
-		init_finished = true;
+	{
+		// For all k ( 0.. L-1 ) Ck=C(s)
+		// Set initial state for Late Acceptance Hill Climbing
+		m_previous_results.resize(solutions);
+		for(int i=0; i<solutions; ++i)
+			m_previous_results[i]=m_best_result;
+	}
 
 	const time_t time_start = time(NULL);
 	m_currently_mutated_y=0;
@@ -2573,6 +2596,26 @@ bool GetInstructionFromString(const string& line, SRasterInstruction &instr)
 	return false;
 }
 
+void RastaConverter::LoadLAHC(string name)
+{
+	FILE *f = fopen(name.c_str(), "rt");
+	if (!f)
+		return;
+
+	unsigned long no_elements;
+	unsigned long index;
+	fscanf(f, "%lu\n",&no_elements);
+	fscanf(f, "%lu\n",&index);
+	m_previous_results_index=index;
+	for (size_t i=0;i<(size_t) no_elements;++i)
+	{
+		double dst=0;
+		fscanf(f, "%Lf\n",&dst);
+		m_previous_results.push_back(dst);
+	}
+	fclose(f);
+}
+
 void RastaConverter::LoadRegInits(string name)
 {
 	Message("Loading Reg Inits");
@@ -2607,15 +2650,15 @@ void RastaConverter::LoadRegInits(string name)
 					break;
 				case E_RASTER_STA:
 					if (instr.loose.target != E_TARGET_MAX)
-						m_pic.mem_regs_init[instr.loose.target] = a;
+						m_best_pic.mem_regs_init[instr.loose.target] = a;
 					break;
 				case E_RASTER_STX:
 					if (instr.loose.target != E_TARGET_MAX)
-						m_pic.mem_regs_init[instr.loose.target] = x;
+						m_best_pic.mem_regs_init[instr.loose.target] = x;
 					break;
 				case E_RASTER_STY:
 					if (instr.loose.target != E_TARGET_MAX)
-						m_pic.mem_regs_init[instr.loose.target] = y;
+						m_best_pic.mem_regs_init[instr.loose.target] = y;
 					break;
 			}
 		}
@@ -2673,7 +2716,7 @@ void RastaConverter::LoadRasterProgram(string name)
 		if (line.find("cmp byt2")!=string::npos && current_raster_line.cycles>0)
 		{
 			current_raster_line.rehash();
-			m_pic.raster_lines.push_back(current_raster_line);
+			m_best_pic.raster_lines.push_back(current_raster_line);
 			current_raster_line.cycles=0;
 			current_raster_line.instructions.clear();
 			line_started = false;
@@ -2691,9 +2734,9 @@ void RastaConverter::LoadRasterProgram(string name)
 
 bool RastaConverter::Resume1()
 {
-	raster_picture pic;
 	LoadRegInits("output.png.rp.ini");
 	LoadRasterProgram("output.png.rp");
+	LoadLAHC("output.png.lahc");
 	cfg.ProcessCmdLine();
 	return true;
 }

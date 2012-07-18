@@ -4,7 +4,6 @@
 #include <vector>
 #include <string>
 #include "FreeImage.h"
-#include <allegro.h> 
 #include "CommandLineParser.h"
 #include <assert.h>
 #include "rgb.h"
@@ -28,6 +27,11 @@ enum e_dither_type {
 	E_DITHER_KNOLL,
 };
 
+enum e_distance_function {
+	E_DISTANCE_EUCLID,
+	E_DISTANCE_YUV,
+	E_DISTANCE_CIEDE,
+};
 
 struct Configuration {
 	std::string input_file;
@@ -36,16 +40,26 @@ struct Configuration {
 	std::string details_file;
 	std::string command_line;
 
-	bool border;
-	bool euclid;
+	e_distance_function dstf;
+	e_distance_function pre_dstf;
 	bool continue_processing;
 
 	e_dither_type dither;
+	double dither_randomness; // 0-1
 	double dither_strength;
 	double details_strength;
+
+	int brightness;
+	int contrast;
+	double gamma;
+	int save_period;
+
+	bool picture_colors_only;
+
+	bool preprocess_only;
 	int width;
 	int height;
-	unsigned max_evals;
+	unsigned long long max_evals;
 	FREE_IMAGE_FILTER rescale_filter;
 	e_init_type init_type;
 
