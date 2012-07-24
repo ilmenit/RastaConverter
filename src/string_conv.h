@@ -7,7 +7,7 @@ std::string Value2String(T value)
 {
 	string result;
 	std::stringstream ss;
-	ss << std::setw(2) << std::setfill('0') << value;
+	ss << value;
 	ss >> result;
 	return result;
 }

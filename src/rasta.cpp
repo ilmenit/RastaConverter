@@ -1,8 +1,9 @@
-// - multithreading
-// - obszary gdzie poszczególne obiekty w³¹czone lub wy³¹czone
-// - poprawiæ b³¹d repozycjonowanie duszków
+// TODO:
+// - wykorzystanie gotowego -dst
+// - add multithreading
+// - fix bug with sprite repositioning
 
-const char *program_version="Beta5";
+const char *program_version="Beta6";
 
 #pragma warning (disable: 4312)
 #pragma warning (disable: 4996)
@@ -56,7 +57,7 @@ void quit_function(void)
 	exit(0);
 }
 
-void error(char *e)
+void error(const char *e)
 {
 	if (!quiet)
 		allegro_message(e);
@@ -64,7 +65,7 @@ void error(char *e)
 	exit(1);
 }
 
-void error(char *e, int i)
+void error(const char *e, int i)
 {
 	if (!quiet)
 		allegro_message("%s %d",e,i);
@@ -121,11 +122,13 @@ using namespace Epoch::Foundation;
 
 unsigned char reg_a, reg_x, reg_y;
 
-unsigned char mem_regs[E_TARGET_MAX];
+unsigned char mem_regs[E_TARGET_MAX+1]; // +1 for HITCLR
 unsigned char sprite_shift_regs[4];
 unsigned char sprite_shift_start_array[256];
 
 set < unsigned char > color_indexes_on_dst_picture;
+
+bool on_off[240][E_TARGET_MAX]; // global for speed-up
 
 class linear_allocator
 {
@@ -220,7 +223,7 @@ struct line_machine_state
 		::reg_a = this->reg_a;
 		::reg_x = this->reg_x;
 		::reg_y = this->reg_y;
-		memcpy(::mem_regs, this->mem_regs, sizeof ::mem_regs);
+		memcpy(::mem_regs, this->mem_regs, sizeof this->mem_regs);
 	}
 };
 
@@ -1054,6 +1057,92 @@ void RastaConverter::PrepareDestinationPicture()
 	}
 }
 
+void RastaConverter::LoadOnOffFile(const char *filename)
+{
+	memset(on_off,true,sizeof(on_off));
+
+	// 1. Resize the on_off table and full it with true
+	fstream f;
+	f.open( filename, ios::in);
+	if ( f.fail())
+		error("Error loading OnOff file");
+
+	string line;
+	unsigned int y=1;
+	while( getline( f, line)) 
+	{
+		if (line.empty())
+			continue;
+		std::transform(line.begin(), line.end(), line.begin(), toupper);
+
+		stringstream sl(line);
+		string reg, value;
+		e_target target=E_TARGET_MAX;
+		unsigned int from, to;
+
+		sl >> reg >> value >> from >> to;
+
+		if(sl.rdstate() == ios::failbit) // failed to parse arguments?
+		{
+			string err="Error parsing OnOff file in line ";
+			err+=Value2String<unsigned int>(y);
+			err+="\n";
+			err+=line;
+			error(err.c_str());
+		}
+		if (!(value=="ON" || value=="OFF"))
+		{
+			string err="OnOff file: Second parameter should be ON or OFF in line ";
+			err+=Value2String<unsigned int>(y);
+			err+="\n";
+			err+=line;
+			error(err.c_str());
+		}
+		if (from>239 || to>239) // on_off table size
+		{
+			string err="OnOff file: Range value greater than 239 line ";
+			err+=Value2String<unsigned int>(y);
+			err+="\n";
+			err+=line;
+			error(err.c_str());
+		}
+		if (from>m_height-1 || to>m_height-1)
+		{
+			string err="OnOff file: Range value greater than picture height in line ";
+			err+=Value2String<unsigned int>(y);
+			err+="\n";
+			err+=line;
+			err+="\n";
+			err+="Set range from 0 to ";
+			err+=Value2String<unsigned int>(y-1);
+			error(err.c_str());
+		}
+		for (size_t i=0;i<E_TARGET_MAX;++i)
+		{
+			if (reg==string(mem_regs_names[i]))
+			{
+				target=(e_target) i;
+				break;
+			}
+		}
+		if (target==E_TARGET_MAX)
+		{
+			string err="OnOff file: Unknown register " + reg;
+			err+=" in line ";
+			err+=Value2String<unsigned int>(y);
+			err+="\n";
+			err+=line;
+			error(err.c_str());
+		}
+		// fill 
+		for (size_t l=from;l<=to;++l)
+		{
+			on_off[l][target] = (value=="ON");
+		}
+		++y;
+	}
+}
+
 bool RastaConverter::ProcessInit()
 {
 	InitLocalStructure();
@@ -1073,6 +1162,9 @@ bool RastaConverter::ProcessInit()
 
 	if (cfg.preprocess_only)
 		exit(1);
+
+	if (!cfg.on_off_file.empty())
+		LoadOnOffFile(cfg.on_off_file.c_str());
 
 	// set postprocess distance function
 	SetDistanceFunction(cfg.dstf);
@@ -1249,10 +1341,13 @@ void RastaConverter::KnollDithering()
 	}
 	for(unsigned y=0; y<m_height; ++y)
 	{
-		if (desktop_width>=320*3)
-			hline(screen,m_width*2,y,m_width*4,makecol(0xFF,0xFF,0x0));
-		else
-			hline(screen,m_width,y,m_width*2,makecol(0xFF,0xFF,0x0));
+		if (!cfg.preprocess_only)
+		{
+			if (desktop_width>=320*3)
+				hline(screen,m_width*2,y,m_width*4,makecol(0xFF,0xFF,0x0));
+			else
+				hline(screen,m_width,y,m_width*2,makecol(0xFF,0xFF,0x0));
+		}
 
 		for(unsigned x=0; x<m_width; ++x)
 		{
@@ -1693,14 +1788,14 @@ void ResetSpriteShiftStartArray()
 }
 
 unsigned char old_reg_a,old_reg_x,old_reg_y;
-unsigned char old_mem_regs[E_TARGET_MAX];
+unsigned char old_mem_regs[E_TARGET_MAX+1]; // +1 for HITCLR
 
 void StoreLineRegs()
 {
 	old_reg_a=reg_a;
 	old_reg_x=reg_x;
 	old_reg_y=reg_y;
-	memcpy(old_mem_regs,mem_regs,sizeof(mem_regs));
+	memcpy(old_mem_regs,mem_regs,sizeof(mem_regs)-1); // -1 for HITCLR
 }
 
 void RestoreLineRegs()
@@ -1708,7 +1803,27 @@ void RestoreLineRegs()
 	reg_a=old_reg_a;
 	reg_x=old_reg_x;
 	reg_y=old_reg_y;
-	memcpy(mem_regs,old_mem_regs,sizeof(mem_regs));
+	memcpy(mem_regs,old_mem_regs,sizeof(mem_regs)-1); // -1 for HITCLR
+}
+
+void RastaConverter::TurnOffRegisters(raster_picture *pic)
+{
+	for (size_t i=0;i<E_TARGET_MAX;++i)
+	{
+		if (on_off[0][i]==false)
+			pic->mem_regs_init[i]=0;
+	}
+	for (int y=0;y<m_height;++y)
+	{
+		size_t size=pic->raster_lines[y].instructions.size();
+		SRasterInstruction *__restrict rastinsns = &pic->raster_lines[y].instructions[0];
+		for (size_t i=0;i<size;++i)
+		{
+			unsigned char target=rastinsns[i].loose.target;
+			if (target<E_TARGET_MAX && on_off[y][target]==false)
+				rastinsns[i].loose.target=E_TARGET_MAX;
+		}		
+	}
 }
 
 distance_accum_t RastaConverter::ExecuteRasterProgram(raster_picture *pic)
@@ -1724,6 +1839,10 @@ distance_accum_t RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 	reg_a=0;
 	reg_x=0;
 	reg_y=0;
+
+	if (!cfg.on_off_file.empty())
+		TurnOffRegisters(pic);
+
 	memset(sprite_shift_regs,0,sizeof(sprite_shift_regs));
 	memcpy(mem_regs,pic->mem_regs_init,sizeof(pic->mem_regs_init));
 	memset(sprites_memory,0,sizeof(sprites_memory));

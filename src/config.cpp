@@ -119,6 +119,7 @@ void Configuration::Process(int argc, char *argv[])
 	}
 
 	details_file = parser.getValue("details","");
+	on_off_file = parser.getValue("onoff","");
 
 	string save_val = parser.getValue("save","0");
 	save_period=String2Value<int>(save_val);

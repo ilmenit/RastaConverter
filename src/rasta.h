@@ -211,7 +211,7 @@ private:
 	BITMAP *output_bitmap;
 	BITMAP *destination_bitmap;
 
-	vector < vector <unsigned char> > details_data;	
+	vector < vector <unsigned char> > details_data;		
 
 	vector < screen_line > m_picture; 
 	vector<distance_t> m_picture_all_errors[128]; 
@@ -252,6 +252,7 @@ private:
 	inline int GetInstructionCycles(const SRasterInstruction &instr);
 
 	distance_accum_t ExecuteRasterProgram(raster_picture *);
+	void TurnOffRegisters(raster_picture *pic);
 
 	void LoadDetailsMap();
 
@@ -280,6 +281,7 @@ private:
 
 	e_target FindClosestColorRegister(int index, int x,int y, bool &restart_line, distance_t& error);
 
+	void LoadOnOffFile(const char *filename);
 	void SaveRasterProgram(string name);
 	void SavePMG(string name);
 	bool SaveScreenData(const char *filename);

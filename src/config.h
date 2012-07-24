@@ -39,6 +39,7 @@ struct Configuration {
 	std::string palette_file;
 	std::string details_file;
 	std::string command_line;
+	std::string on_off_file;
 
 	e_distance_function dstf;
 	e_distance_function pre_dstf;

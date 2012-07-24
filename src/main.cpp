@@ -58,7 +58,6 @@ int main(int argc, char *argv[])
 	LoadAtariPalette(rasta.cfg.palette_file);
 
 	rasta.LoadInputBitmap();
-
 	if (rasta.ProcessInit())
 	{
 		rasta.FindBestSolution();

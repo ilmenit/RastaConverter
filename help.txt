@@ -126,6 +126,26 @@ Command line options:
   RastaConverter will save the current solution and exit when this limit is
   reached.
 
+/onoff=OnOff File
+  Text file that describes where to turn on and turn off usable registers. The format of each line in "OnOff file" is:
+
+REGISTER OFF|ON FROM TO
+
+  REGISTER is one of the following registers: COLOR0,COLOR1,COLOR2,COLBAK,COLPM0,COLPM1,COLPM2,COLPM3,HPOSP0,HPOSP1,HPOSP2,HPOSP3
+  OFF turns off the usage of registers in lines, ON turns on. ON is default for all the registers in the whole picture.
+  FROM is line number in picture starting from 0
+  TO is line number in picture up to Picture Height-1
+
+  Every line in "OnOff file" is processed one after another.
+
+  Example:
+  To turn off usage of player 0 and player 1 in picture of height 240 pixels use the following OnOff file:
+
+COLPM0 OFF 0 239
+HPOSP0 OFF 0 239
+COLPM1 OFF 0 239
+HPOSP1 OFF 0 239
+
 /preprocess
   If this switch exists then RastaConverter generates and saves only destination picture.
 

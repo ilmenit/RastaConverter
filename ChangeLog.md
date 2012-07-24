@@ -1,7 +1,14 @@
 ChangeLog
 =========
 
-RastaConverterBeta5.1      2012-07-17  Ilmenit
+RastaConverterBeta6      2012-07-!!!!!!!!!!! Ilmenit
+----------------------------------------------
+
+* Fixed bug causing crash with /dither=knoll + /preprocess 
+* /onoff option added to control used registers
+
+
+RastaConverterBeta5.1      2012-07-18  Ilmenit
 ----------------------------------------------
 
 * Fix for the /continue bug that appeared in Beta5
