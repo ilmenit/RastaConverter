@@ -1,7 +1,37 @@
+/*
+
+Phaeron sprite repositioning:
+
+static const int kOverlapShifts[4] = {0,1,0,2};
+static const int kOverlapOffsets[4] = {0,1,0,3};
+
+// Check if there is overlap with a previous image. If so, we need to merge
+// the contents of the shift register.
+VDASSERT(ptx < px);   
+
+if (ptx >= 0) {
+	const int size = mPlayerSize[player];
+	int offset = px - ptx + kOverlapOffsets[size];
+
+	if (offset >= 0) {
+		offset >>= kOverlapShifts[size];
+
+		if (offset < 8)
+			data |= mPlayerShiftData[player] << offset;
+	}
+}
+
+ptx is the previous trigger position, in color clocks, and px is the new 
+trigger position.
+
+*/
+
 // TODO:
-// - wykorzystanie gotowego -dst
+// - fix /picture_colors
+// - using existing -dst, change -dst to filename-dst, not output-dst for continue
 // - add multithreading
 // - fix bug with sprite repositioning
+// - screen redraw of input and destination pictures
 
 const char *program_version="Beta6";
 
@@ -987,12 +1017,12 @@ void RastaConverter::OtherDithering()
 					DiffuseError( x-2, y+1, 5.0/48.0, qe.r,qe.g,qe.b);
 					DiffuseError( x  , y+1, 7.0/48.0, qe.r,qe.g,qe.b);
 					DiffuseError( x+1, y+1, 5.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+1, y+1, 3.0/48.0, qe.r,qe.g,qe.b);
+					DiffuseError( x+2, y+1, 3.0/48.0, qe.r,qe.g,qe.b);
 					DiffuseError( x-1, y+2, 1.0/48.0, qe.r,qe.g,qe.b);
 					DiffuseError( x-2, y+2, 3.0/48.0, qe.r,qe.g,qe.b);
 					DiffuseError( x  , y+2, 5.0/48.0, qe.r,qe.g,qe.b);
 					DiffuseError( x+1, y+2, 3.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+1, y+2, 1.0/48.0, qe.r,qe.g,qe.b);
+					DiffuseError( x+2, y+2, 1.0/48.0, qe.r,qe.g,qe.b);
 				}
 			}
 			unsigned char color_index=FindAtariColorIndex(out_pixel);
@@ -1826,6 +1856,51 @@ void RastaConverter::TurnOffRegisters(raster_picture *pic)
 	}
 }
 
+void RastaConverter::OptimizeRasterProgram(raster_picture *pic)
+{
+	struct previous_reg_usage {
+		int i;
+		int y;
+	};
+	/*
+		E_RASTER_LDA,
+		E_RASTER_LDX,
+		E_RASTER_LDY,
+	*/
+
+	previous_reg_usage p_usage[3]=  // a,x,y;
+	{ 
+		{ -1, -1 },
+		{ -1, -1 },
+		{ -1, -1 }
+	};
+
+	for (int y=0;y<m_height;++y)
+	{
+		size_t size=pic->raster_lines[y].instructions.size();
+		SRasterInstruction *__restrict rastinsns = &pic->raster_lines[y].instructions[0];
+		for (size_t i=0;i<size;++i)
+		{
+			unsigned char ins=rastinsns[i].loose.instruction;
+			if (ins<=E_RASTER_LDY)
+			{
+				if (p_usage[ins].i != -1)
+				{
+					// nop previous usage of this register
+					pic->raster_lines[ p_usage[ins].y ].instructions[ p_usage[ins].i ].loose.instruction=E_RASTER_NOP;
+				}
+				p_usage[ins].i=i;
+				p_usage[ins].y=y;
+			}
+			else if (ins>=E_RASTER_STA)
+			{
+				p_usage[ins-E_RASTER_STA].i=-1;
+			}
+
+		}	
+	}
+}
+
 distance_accum_t RastaConverter::ExecuteRasterProgram(raster_picture *pic)
 {
 	int x,y; // currently processed pixel
@@ -2401,7 +2476,9 @@ void RastaConverter::SaveBestSolution()
 	m_pic=m_best_pic;
 	ExecuteRasterProgram(&m_pic);
 	ShowLastCreatedPicture();
-	SaveRasterProgram(string(cfg.output_file+".rp"));
+	SaveRasterProgram(string(cfg.output_file+".rp"),&m_pic);
+	OptimizeRasterProgram(&m_pic);
+	SaveRasterProgram(string(cfg.output_file+".opt"),&m_pic);
 	SavePMG(string(cfg.output_file+".pmg"));
 	SaveScreenData  (string(cfg.output_file+".mic").c_str());
 	SavePicture     (cfg.output_file,output_bitmap);
@@ -2860,12 +2937,10 @@ bool RastaConverter::Resume1()
 	return true;
 }
 
-void RastaConverter::SaveRasterProgram(string name)
+void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 {
 	int y;
 	Message("Saving Raster Program");
-
-	raster_picture &pic = m_best_pic;
 
 	FILE *fp=fopen(string(name+".ini").c_str(),"wt+");
 	if (!fp)
@@ -2877,10 +2952,10 @@ void RastaConverter::SaveRasterProgram(string name)
 
 	fprintf(fp,"\n; Initial values \n");
 
-	for(y=0;y<sizeof(pic.mem_regs_init);++y)
+	for(y=0;y<sizeof(pic->mem_regs_init);++y)
 	{
 		fprintf(fp,"\tlda ");
-		fprintf(fp,"#$%02X\n",pic.mem_regs_init[y]);		
+		fprintf(fp,"#$%02X\n",pic->mem_regs_init[y]);		
 		fprintf(fp,"\tsta ");
 		fprintf(fp,"%s\n",mem_regs_names[y]);		
 	}
@@ -2920,10 +2995,10 @@ void RastaConverter::SaveRasterProgram(string name)
 	for(y=0;y<input_bitmap->h;++y)
 	{
 		fprintf(fp,"line%d\n",y);
-		size_t prog_len=pic.raster_lines[y].instructions.size();
+		size_t prog_len=pic->raster_lines[y].instructions.size();
 		for (size_t i=0;i<prog_len;++i)
 		{
-			SRasterInstruction instr=pic.raster_lines[y].instructions[i];
+			SRasterInstruction instr=pic->raster_lines[y].instructions[i];
 			bool save_target=false;
 			bool save_value=false;
 			fprintf(fp,"\t");
@@ -2971,7 +3046,7 @@ void RastaConverter::SaveRasterProgram(string name)
 			}
 			fprintf(fp,"\n");			
 		}
-		for (int cycle=pic.raster_lines[y].cycles;cycle<free_cycles;cycle+=2)
+		for (int cycle=pic->raster_lines[y].cycles;cycle<free_cycles;cycle+=2)
 		{
 			fprintf(fp,"\tnop ; filler\n");
 		}

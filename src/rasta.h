@@ -252,6 +252,8 @@ private:
 	inline int GetInstructionCycles(const SRasterInstruction &instr);
 
 	distance_accum_t ExecuteRasterProgram(raster_picture *);
+	void OptimizeRasterProgram(raster_picture *);
+
 	void TurnOffRegisters(raster_picture *pic);
 
 	void LoadDetailsMap();
@@ -282,7 +284,7 @@ private:
 	e_target FindClosestColorRegister(int index, int x,int y, bool &restart_line, distance_t& error);
 
 	void LoadOnOffFile(const char *filename);
-	void SaveRasterProgram(string name);
+	void SaveRasterProgram(string name, raster_picture *pic);
 	void SavePMG(string name);
 	bool SaveScreenData(const char *filename);
 	bool SavePicture(string filename, BITMAP *to_save);

@@ -6,6 +6,8 @@ RastaConverterBeta6      2012-07-!!!!!!!!!!! Ilmenit
 
 * Fixed bug causing crash with /dither=knoll + /preprocess 
 * /onoff option added to control used registers
+* Fix in Jarvis dithering
+* Optimized version of raster program (.rp) is saved as .opt
 
 
 RastaConverterBeta5.1      2012-07-18  Ilmenit
