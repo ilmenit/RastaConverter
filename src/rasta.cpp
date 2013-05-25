@@ -1,31 +1,3 @@
-/*
-
-Phaeron sprite repositioning:
-
-static const int kOverlapShifts[4] = {0,1,0,2};
-static const int kOverlapOffsets[4] = {0,1,0,3};
-
-// Check if there is overlap with a previous image. If so, we need to merge
-// the contents of the shift register.
-VDASSERT(ptx < px);   
-
-if (ptx >= 0) {
-	const int size = mPlayerSize[player];
-	int offset = px - ptx + kOverlapOffsets[size];
-
-	if (offset >= 0) {
-		offset >>= kOverlapShifts[size];
-
-		if (offset < 8)
-			data |= mPlayerShiftData[player] << offset;
-	}
-}
-
-ptx is the previous trigger position, in color clocks, and px is the new 
-trigger position.
-
-*/
-
 // TODO:
 // - fix /picture_colors
 // - using existing -dst, change -dst to filename-dst, not output-dst for continue
@@ -48,7 +20,7 @@ const char *program_version="Beta6";
 #include <set>
 #include <algorithm>
 #include <string>
-#include "FreeImage.h"
+#include <FreeImage.h>
 #include <allegro.h> 
 #include "CommandLineParser.h"
 #include "string_conv.h"
@@ -1108,7 +1080,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 		stringstream sl(line);
 		string reg, value;
 		e_target target=E_TARGET_MAX;
-		unsigned int from, to;
+		int from, to;
 
 		sl >> reg >> value >> from >> to;
 
@@ -1165,7 +1137,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 			error(err.c_str());
 		}
 		// fill 
-		for (size_t l=from;l<=to;++l)
+		for (int l=from;l<=to;++l)
 		{
 			on_off[l][target] = (value=="ON");
 		}
@@ -1365,11 +1337,11 @@ void RastaConverter::KnollDithering()
 {
 	Message("Knoll Dithering             ");
 
-	for(unsigned c=0; c<128; ++c)
+	for(unsigned int c=0; c<128; ++c)
 	{
 		luma[c] = atari_palette[c].r*299 + atari_palette[c].g*587 + atari_palette[c].b*114;
 	}
-	for(unsigned y=0; y<m_height; ++y)
+	for(unsigned int y=0; y<m_height; ++y)
 	{
 		if (!cfg.preprocess_only)
 		{
