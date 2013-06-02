@@ -146,3 +146,17 @@ $RECYCLE.BIN/
 
 # Mac crap
 .DS_Store
+allegro-4.4.2-mt.dll
+FreeImage.dll
+output.png
+output.png-dst.png
+output.png-src.png
+output.png.csv
+output.png.lahc
+output.png.mic
+output.png.opt
+output.png.opt.ini
+output.png.pmg
+output.png.rp
+output.png.rp.ini
+test.png

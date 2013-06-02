@@ -20,6 +20,9 @@ enum e_init_type {
 enum e_dither_type {
 	E_DITHER_NONE,
 	E_DITHER_FLOYD,
+	E_DITHER_RFLOYD,
+	E_DITHER_LINE,
+	E_DITHER_LINE2,
 	E_DITHER_CHESS,
 	E_DITHER_SIMPLE,
 	E_DITHER_2D,
@@ -31,6 +34,7 @@ enum e_distance_function {
 	E_DISTANCE_EUCLID,
 	E_DISTANCE_YUV,
 	E_DISTANCE_CIEDE,
+	E_DISTANCE_CIE94,
 };
 
 struct Configuration {
@@ -54,10 +58,10 @@ struct Configuration {
 	int contrast;
 	double gamma;
 	int save_period;
-
-	bool picture_colors_only;
+	unsigned long initial_seed;
 
 	bool preprocess_only;
+	int threads;
 	int width;
 	int height;
 	unsigned long long max_evals;

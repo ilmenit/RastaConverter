@@ -1,16 +1,7 @@
-// TODO:
-// - fix /picture_colors
-// - using existing -dst, change -dst to filename-dst, not output-dst for continue
-// - add multithreading
-// - fix bug with sprite repositioning
-// - screen redraw of input and destination pictures
-
-const char *program_version="Beta6";
+const char *program_version="Beta7";
 
 #pragma warning (disable: 4312)
 #pragma warning (disable: 4996)
-
-#define M_PI 3.14159265358979323846
 
 #include <math.h>
 #include <cmath>
@@ -19,9 +10,23 @@ const char *program_version="Beta6";
 #include <map>
 #include <set>
 #include <algorithm>
+#include <functional>
 #include <string>
-#include <FreeImage.h>
+#include <sys/timeb.h>
+#include "FreeImage.h"
+
 #include <allegro.h> 
+
+#undef int8_t
+#undef uint8_t
+#undef int16_t
+#undef uint16_t
+#undef int32_t
+#undef uint32_t
+#undef int64_t
+#undef uint64_t
+#include <stdint.h>
+
 #include "CommandLineParser.h"
 #include "string_conv.h"
 #include <assert.h>
@@ -35,10 +40,14 @@ const char *program_version="Beta6";
 #include <iomanip>
 #include <iterator>
 
-#include <allegro.h> 
 #include "rasta.h"
 #include "main.h"
 #include "mt19937int.h"
+#include "LinearAllocator.h"
+#include "LineCache.h"
+#include "Program.h"
+#include "Evaluator.h"
+#include "TargetPicture.h"
 
 // Cycle where WSYNC starts - 105?
 #define WSYNC_START 104
@@ -46,12 +55,8 @@ const char *program_version="Beta6";
 
 // global variables
 int solutions=1;
-const int sprite_screen_color_cycle_start=48;
-const int sprite_size=32;
 
 bool quiet=false;
-
-extern bool operator<(const rgb &l, const rgb &r);
 
 void quit_function(void)
 {
@@ -86,7 +91,7 @@ int random(int range)
 void ShowHelp()
 {
 	if (!quiet)
-		error("RastaConverter by Jakub Debski '2012\n\nRastaConverter.exe InputFile [options]\n\nRead help.txt for help");
+		error("RastaConverter by Jakub Debski 2012-2013\n\nRastaConverter.exe InputFile [options]\n\nRead help.txt for help");
 }
 
 extern int screen_color_depth;
@@ -95,15 +100,15 @@ extern int desktop_height;
 
 bool user_closed_app=false;
 
-f_rgb_distance distance_function;
-
 void Message(char *message)
 {
 	if (quiet)
 		return;
 
+	acquire_screen();
 	rectfill(screen,0,440,640,460,0);
 	textprintf_ex(screen, font, 0, 440, makecol(0xF0,0xF0,0xF0), 0, "%s", message);
+	release_screen();
 }
 
 void Message(char *message, int i)
@@ -111,8 +116,10 @@ void Message(char *message, int i)
 	if (quiet)
 		return;
 
+	acquire_screen();
 	rectfill(screen,0,440,640,460,0);
 	textprintf_ex(screen, font, 0, 440, makecol(0xF0,0xF0,0xF0), 0, "%s %d", message,i);
+	release_screen();
 }
 
 
@@ -122,222 +129,11 @@ using namespace Epoch::Foundation;
 #define PIXEL2RGB(p) (*((rgb*) &p))
 #define RGB2PIXEL(p) (*((int*) &p))
 
-unsigned char reg_a, reg_x, reg_y;
-
-unsigned char mem_regs[E_TARGET_MAX+1]; // +1 for HITCLR
-unsigned char sprite_shift_regs[4];
-unsigned char sprite_shift_start_array[256];
-
 set < unsigned char > color_indexes_on_dst_picture;
 
-bool on_off[240][E_TARGET_MAX]; // global for speed-up
+OnOffMap on_off;
 
-class linear_allocator
-{
-public:
-	linear_allocator()
-		: chunk_list(NULL)
-		, alloc_left(0)
-	{
-	}
-
-	~linear_allocator()
-	{
-		clear();
-	}
-
-	void clear()
-	{
-		while(chunk_list)
-		{
-			chunk_node *next = chunk_list->next;
-
-			free(chunk_list);
-
-			chunk_list = next;
-		}
-
-		alloc_left = 0;
-	}
-
-	template<class T>
-	T *allocate()
-	{
-		return new(allocate(sizeof(T))) T;
-	}
-
-	void *allocate(size_t n)
-	{
-		n = (n + 7) & ~7;
-
-		if (alloc_left < n)
-		{
-			size_t to_alloc = 1048576 - 64 - sizeof(chunk_node);
-
-			if (to_alloc < n)
-				to_alloc = n;
-
-			chunk_node *new_node = (chunk_node *)malloc(sizeof(chunk_node) + to_alloc);
-			new_node->next = chunk_list;
-			chunk_list = new_node;
-			alloc_ptr = (char *)(new_node + 1);
-			alloc_left = to_alloc;
-		}
-
-		void *p = alloc_ptr;
-		alloc_ptr += n;
-		alloc_left -= n;
-		return p;
-	}
-
-private:
-	struct chunk_node
-	{
-		chunk_node *next;
-		void *align_pad;
-	};
-
-	chunk_node *chunk_list;
-	char *alloc_ptr;
-	size_t alloc_left;
-};
-
-linear_allocator line_cache_linear_allocator;
-
-struct line_machine_state
-{
-	unsigned char reg_a;
-	unsigned char reg_x;
-	unsigned char reg_y;
-	unsigned char mem_regs[E_TARGET_MAX];
-
-	void capture()
-	{
-		this->reg_a = ::reg_a;
-		this->reg_x = ::reg_x;
-		this->reg_y = ::reg_y;
-
-		memcpy(this->mem_regs, ::mem_regs, sizeof this->mem_regs);
-	}
-
-	void apply() const
-	{
-		::reg_a = this->reg_a;
-		::reg_x = this->reg_x;
-		::reg_y = this->reg_y;
-		memcpy(::mem_regs, this->mem_regs, sizeof this->mem_regs);
-	}
-};
-
-struct line_cache_key
-{
-	line_machine_state entry_state;
-	const SRasterInstruction *insns;
-	unsigned insn_count;
-	unsigned insn_hash;
-
-	uint32_t hash()
-	{
-		uint32_t hash = 0;
-		
-		hash += (size_t)entry_state.reg_a;
-		hash += (size_t)entry_state.reg_x << 8;
-		hash += (size_t)entry_state.reg_y << 16;
-		hash += insn_count << 24;
-
-		for(int i=0; i<E_TARGET_MAX; ++i)
-			hash += (size_t)entry_state.mem_regs[i] << (8*(i & 3));
-
-		hash += insn_hash;
-
-		return hash;
-	}
-};
-
-bool operator==(const line_cache_key& key1, const line_cache_key& key2)
-{
-	if (key1.insn_hash != key2.insn_hash) return false;
-	if (key1.entry_state.reg_a != key2.entry_state.reg_a) return false;
-	if (key1.entry_state.reg_x != key2.entry_state.reg_x) return false;
-	if (key1.entry_state.reg_y != key2.entry_state.reg_y) return false;
-	if (memcmp(key1.entry_state.mem_regs, key2.entry_state.mem_regs, sizeof key1.entry_state.mem_regs)) return false;
-
-	if (key1.insn_count != key2.insn_count) return false;
-
-	uint32_t diff = 0;
-	for(unsigned i=0; i<key1.insn_count; ++i)
-		diff |= (key1.insns[i].packed ^ key2.insns[i].packed);
-
-	if (diff)
-		return false;
-
-	return true;
-}
-
-struct line_cache_result
-{
-	distance_accum_t line_error;
-	line_machine_state new_state;
-	unsigned char *color_row;
-	unsigned char *target_row;
-	unsigned char sprite_data[4][8];
-};
-
-class line_cache
-{
-public:
-	typedef pair<line_cache_key, line_cache_result> value_type;
-
-	struct hash_node
-	{
-		uint32_t hash;
-		value_type *value;
-	};
-
-	typedef vector<hash_node> hash_list;
-
-	void clear()
-	{
-		for(int i=0; i<1024; ++i)
-		{
-			hash_table[i].clear();
-		}
-	}
-
-	const line_cache_result *find(const line_cache_key& key, uint32_t hash) const
-	{
-		const hash_list& hl = hash_table[hash & 1023];
-
-		for(hash_list::const_reverse_iterator it = hl.rbegin(), itEnd = hl.rend(); it != itEnd; ++it)
-		{
-			if (it->hash == hash && key == it->value->first)
-				return &it->value->second;
-		}
-
-		return NULL;
-	}
-
-	line_cache_result& insert(const line_cache_key& key, uint32_t hash)
-	{
-		hash_list& hl = hash_table[hash & 1023];
-
-		value_type *value = line_cache_linear_allocator.allocate<value_type>();
-		value->first = key;
-
-		hash_node node = { hash, value };
-		hl.push_back(node);
-		return value->second;
-	}
-
-private:
-
-	hash_list hash_table[1024];
-};
-
-vector<line_cache> line_caches;
-const size_t LINE_CACHE_INSN_POOL_SIZE = 1048576*4;
-SRasterInstruction line_cache_insn_pool[LINE_CACHE_INSN_POOL_SIZE];
-size_t line_cache_insn_pool_level = 0;
+Evaluator eval;
 
 char *mem_regs_names[E_TARGET_MAX+1]=
 {
@@ -355,15 +151,6 @@ char *mem_regs_names[E_TARGET_MAX+1]=
 	"HPOSP3",
 	"HITCLR",
 };
-
-int free_cycles=0; // must be set depending on the mode, PMG, LMS etc.
-ScreenCycle screen_cycles[CYCLES_MAX];
-
-// we limit PMG memory to visible 240 bytes
-unsigned char sprites_memory[240][4][8]; // we convert it to 240 bytes of PMG memory at the end of processing.
-
-rgb atari_palette[128]; // 128 colors in mode 15!
-
 
 void create_cycles_table()
 {
@@ -387,49 +174,8 @@ void create_cycles_table()
 			cpu_xpos++;
 		}
 	}
-	free_cycles=cpu_xpos-1;
-	if (free_cycles%2 != 0)
-		--free_cycles;
-
-	free_cycles=53; // !!! by experience
 
 	screen_cycles[cpu_xpos-1].length=(antic_xpos-24)*2;
-	return;
-}
-
-bool LoadAtariPalette(string filename)
-{
-	Message("Loading palette");
-	size_t i;
-	rgb col;
-	col.a=0;
-	FILE *fp=fopen(filename.c_str(),"rb");
-	if (!fp)
-	{
-		fp=fopen((string("palettes/")+filename).c_str(),"rb");
-		if (!fp)
-		{
-			fp=fopen((string("palettes/")+filename+string(".act")).c_str(),"rb");
-			if (!fp)
-			{
-				fp=fopen((string("palettes/")+filename+string(".pal")).c_str(),"rb");
-				if (!fp)
-					error("Error opening .act palette file");
-			}
-		}
-	}
-	for (i=0;i<256;++i)
-	{
-		col.r=fgetc(fp);
-		col.g=fgetc(fp);
-		col.b=fgetc(fp);
-		// limit it to 128 colors!
-		// use every second color
-		if (i%2==0)
-			atari_palette[i >> 1] = col;
-	}
-	fclose(fp);
-	return true;
 }
 
 char *mutation_names[E_MUTATION_MAX]=
@@ -445,185 +191,6 @@ char *mutation_names[E_MUTATION_MAX]=
 	"Chg Val to Col",
 };
 
-inline void RGBtoYUV(double r, double g, double b, double &y, double &u, double &v)
-{
-	y = 0.299*r + 0.587*g + 0.114*b;
-	u= (b-y)*0.565;
-	v= (r-y)*0.713;
-}
-
-#define MAX_COLOR_DISTANCE (255*255*3)
-
-distance_t RGByuvDistance(const rgb &col1, const rgb &col2)
-{
-	int dr = col2.r - col1.r;
-	int dg = col2.g - col1.g;
-	int db = col2.b - col1.b;
-
-	float dy = 0.299f*dr + 0.587f*dg + 0.114f*db;
-	float du = (db-dy)*0.565f;
-	float dv = (dr-dy)*0.713f;
-
-	float d = dy*dy + du*du + dv*dv;
-
-	if (d > (float)DISTANCE_MAX)
-		d = (float)DISTANCE_MAX;
-
-	return (distance_t)d;
-}
-
-double cbrt(double d) {
-  if (d < 0.0) {
-    return -cbrt(-d);
-  }
-  else {
-    return pow(d,1.0/3.0);
-  }
-}
-
-
-map < rgb, LabLch > rgb_lab_map;
-
-static void RGB2LAB(const rgb &c, LabLch &result)
-{
-	if (rgb_lab_map.find(c)!=rgb_lab_map.end())
-	{
-		result=rgb_lab_map[c];
-	}
-	else
-	{
-                int ir = c.r;
-                int ig = c.g;
-                int ib = c.b;
-
-                float fr = ((float) ir) / 255.0;
-                float fg = ((float) ig) / 255.0;
-                float fb = ((float) ib) / 255.0;
-
-                if (fr > 0.04045)
-                        fr = (float) pow((fr + 0.055) / 1.055, 2.4);
-                else
-                        fr = fr / 12.92;
-
-                if (fg > 0.04045)
-                        fg = (float) pow((fg + 0.055) / 1.055, 2.4);
-                else
-                        fg = fg / 12.92;
-
-                if (fb > 0.04045)
-                        fb = (float) pow((fb + 0.055) / 1.055, 2.4);
-                else
-                        fb = fb / 12.92;
-
-                // Use white = D65
-                const float x = fr * 0.4124 + fg * 0.3576 + fb * 0.1805;
-                const float y = fr * 0.2126 + fg * 0.7152 + fb * 0.0722;
-                const float z = fr * 0.0193 + fg * 0.1192 + fb * 0.9505;
-
-                float vx = x / 0.95047;
-                float vy = y;
-                float vz = z / 1.08883;
-
-                if (vx > 0.008856)
-                        vx = (float) cbrt(vx);
-                else
-                        vx = (7.787 * vx) + (16.0 / 116.0);
-
-                if (vy > 0.008856)
-                        vy = (float) cbrt(vy);
-                else
-                        vy = (7.787 * vy) + (16.0 / 116.0);
-
-                if (vz > 0.008856)
-                        vz = (float) cbrt(vz);
-                else
-                        vz = (7.787 * vz) + (16.0 / 116.0);
-
-                result.lab.L = 116.0 * vy - 16.0;
-                result.lab.a = 500.0 * (vx - vy);
-                result.lab.b = 200.0 * (vy - vz);
-
-				rgb_lab_map[c]=result;
-	}
-}
-
-double CIEDE2000(const double L1,const double a1,const double b1, 
-                const double L2,const double a2,const double b2) 
-{ 
-	double Lmean = (L1 + L2) / 2.0; 
-	double C1 =  sqrt(a1*a1 + b1*b1); 
-	double C2 =  sqrt(a2*a2 + b2*b2); 
-	double Cmean = (C1 + C2) / 2.0; 
-
-	double G =  ( 1 - sqrt( pow(Cmean, 7.0) / (pow(Cmean, 7.0) + pow(25, 7.0)) ) ) / 2; 
-	double a1prime = a1 * (1 + G); 
-	double a2prime = a2 * (1 + G); 
-
-	double C1prime =  sqrt(a1prime*a1prime + b1*b1); 
-	double C2prime =  sqrt(a2prime*a2prime + b2*b2); 
-	double Cmeanprime = (C1prime + C2prime) / 2;  
-	  		
-	double h1prime =  atan2(b1, a1prime) + 2*M_PI * (atan2(b1, a1prime)<0 ? 1 : 0);
-	double h2prime =  atan2(b2, a2prime) + 2*M_PI * (atan2(b2, a2prime)<0 ? 1 : 0);
-	double Hmeanprime =  ((abs(h1prime - h2prime) > M_PI) ? (h1prime + h2prime + 2*M_PI) / 2 : (h1prime + h2prime) / 2); 
-	  		
-	double T =  1.0 - 0.17 * cos(Hmeanprime - M_PI/6.0) + 0.24 * cos(2*Hmeanprime) + 0.32 * cos(3*Hmeanprime + M_PI/30) - 0.2 * cos(4*Hmeanprime - 21*M_PI/60); 
-
-	double deltahprime =  ((abs(h1prime - h2prime) <= M_PI) ? h2prime - h1prime : (h2prime <= h1prime) ? h2prime - h1prime + 2*M_PI : h2prime - h1prime - 2*M_PI); 
-
-	double deltaLprime = L2 - L1; 
-	double deltaCprime = C2prime - C1prime; 
-	double deltaHprime =  2.0 * sqrt(C1prime*C2prime) * sin(deltahprime / 2.0); 
-	double SL =  1.0 + ( (0.015*(Lmean - 50)*(Lmean - 50)) / (sqrt( 20 + (Lmean - 50)*(Lmean - 50) )) ); 
-	double SC =  1.0 + 0.045 * Cmeanprime; 
-	double SH =  1.0 + 0.015 * Cmeanprime * T; 
-
-	double deltaTheta =  (30 * M_PI / 180) * exp(-((180/M_PI*Hmeanprime-275)/25)*((180/M_PI*Hmeanprime-275)/25));
-	double RC =  (2 * sqrt(pow(Cmeanprime, 7.0) / (pow(Cmeanprime, 7.0) + pow(25.0, 7.0))));
-	double RT =  (-RC * sin(2 * deltaTheta));
-
-	double KL = 1;
-	double KC = 1;
-	double KH = 1;
-
-	double deltaE = /*sqrt */(
-	((deltaLprime/(KL*SL)) * (deltaLprime/(KL*SL))) +
-	((deltaCprime/(KC*SC)) * (deltaCprime/(KC*SC))) +
-	((deltaHprime/(KH*SH)) * (deltaHprime/(KH*SH))) +
-	(RT * (deltaCprime/(KC*SC)) * (deltaHprime/(KH*SH)))
-	);
-
-	return deltaE;
-} 
-
-distance_t RGBCIEDE2000Distance(const rgb &col1, const rgb &col2)
-{
-	LabLch first,second;
-	RGB2LAB(col1,first);
-	RGB2LAB(col2,second);
-
-	double dist= CIEDE2000(first.lab.L,first.lab.a,first.lab.b, 
-                second.lab.L,second.lab.a,second.lab.b);
-	return dist;
-}
-
-distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2)
-{
-	int distance=0;
-
-	// euclidian distance
-	int dr = col1.r - col2.r;
-	int dg = col1.g - col2.g;
-	int db = col1.b - col2.b;
-
-	int d = dr*dr + dg*dg + db*db;
-
-	if (d > DISTANCE_MAX)
-		d = DISTANCE_MAX;
-
-	return (distance_t)d;
-}
-
 void resize_rgb_picture(vector < screen_line > *picture, size_t width, size_t height)
 {
 	size_t y;
@@ -634,35 +201,11 @@ void resize_rgb_picture(vector < screen_line > *picture, size_t width, size_t he
 	}
 }
 
-void resize_target_picture(vector < line_target > *picture, size_t width, size_t height)
+void RastaConverter::LoadAtariPalette()
 {
-	size_t y;
-	picture->resize(height);
-	for (y=0;y<height;++y)
-	{
-		(*picture)[y].Resize(width);
-	}
-}
-
-bool LoadAtariPalette(string filename);
-
-unsigned char FindAtariColorIndex(const rgb &col)
-{
-	unsigned char i;
-	// Find the most similar color in the Atari Palette
-	unsigned char most_similar=0;
-	double distance;
-	double min_distance=DBL_MAX;
-	for(i=0;i<128;++i)
-	{
-		distance = distance_function(col,atari_palette[i]);
-		if (distance < min_distance)
-		{
-			min_distance=distance;
-			most_similar=i;
-		}
-	}
-	return most_similar;
+	Message("Loading palette");
+	if (!::LoadAtariPalette(cfg.palette_file))
+		error("Error opening .act palette file");
 }
 
 bool RastaConverter::SavePicture(string filename, BITMAP *to_save)
@@ -699,7 +242,7 @@ void RastaConverter::SaveStatistics(const char *fn)
 		return;
 
 	fprintf(f, "Iterations,Seconds,Score\n");
-	for(statistics_list::const_iterator it(m_statistics.begin()), itEnd(m_statistics.end());
+	for(statistics_list::const_iterator it(m_eval_gstate.m_statistics.begin()), itEnd(m_eval_gstate.m_statistics.end());
 		it != itEnd;
 		++it)
 	{
@@ -717,11 +260,11 @@ void RastaConverter::SaveLAHC(const char *fn)
 	if (!f)
 		return;
 
-	fprintf(f, "%lu\n",(unsigned long) m_previous_results.size());
-	fprintf(f, "%lu\n",(unsigned long) m_previous_results_index);
-	for (size_t i=0;i<m_previous_results.size();++i)
+	fprintf(f, "%lu\n",(unsigned long) m_eval_gstate.m_previous_results.size());
+	fprintf(f, "%lu\n",(unsigned long) m_eval_gstate.m_previous_results_index);
+	for (size_t i=0;i<m_eval_gstate.m_previous_results.size();++i)
 	{
-		fprintf(f, "%Lf\n",m_previous_results[i]);
+		fprintf(f, "%Lf\n",m_eval_gstate.m_previous_results[i]);
 	}
 	fclose(f);
 }
@@ -732,6 +275,23 @@ bool RastaConverter::LoadInputBitmap()
 	fbitmap = FreeImage_Load(FreeImage_GetFileType(cfg.input_file.c_str()), cfg.input_file.c_str(), 0);
 	if (!fbitmap)
 		error("Error loading input file");
+
+	unsigned int input_width=FreeImage_GetWidth(fbitmap);
+	unsigned int input_height=FreeImage_GetHeight(fbitmap);
+
+	if (cfg.height==-1) // set height automatic to keep screen proportions
+	{
+		float iw=input_width;
+		float ih=input_height;
+		if ( iw/ih > (320.0/240.0) ) // 4:3 = 320:240
+		{
+			ih=input_height / (input_width/320.0);
+			cfg.height=(int) ih;
+		}
+		else
+			cfg.height=240;
+	}
+	
 	fbitmap=FreeImage_Rescale(fbitmap,cfg.width,cfg.height,cfg.rescale_filter);
 
 	if (screen_color_depth==32)
@@ -753,25 +313,6 @@ bool RastaConverter::LoadInputBitmap()
 	m_width=(int) cfg.width;
 
 	return true;
-}
-
-void RastaConverter::SetDistanceFunction(e_distance_function dst)
-{
-	//////////////////////////////////////////////////////////////////////////
-	// Set color distance
-
-	switch (dst)
-	{
-	case E_DISTANCE_EUCLID:
-		distance_function = RGBEuclidianDistance;
-		break;
-	case E_DISTANCE_CIEDE:
-		distance_function = RGBCIEDE2000Distance;
-		break;
-	default:
-		distance_function = RGByuvDistance;
-	}
-
 }
 
 void RastaConverter::InitLocalStructure()
@@ -801,26 +342,10 @@ void RastaConverter::InitLocalStructure()
 		}
 	}
 
-	line_caches.resize(m_height);
-
 	// Show our picture
 	if (!cfg.preprocess_only)
 	{
-		clear_bitmap(screen);
-		if (desktop_width>=320*3)
-		{
-			stretch_blit(input_bitmap,screen,0,0,input_bitmap->w,input_bitmap->h,0,0,input_bitmap->w*2,input_bitmap->h);
-			textprintf_ex(screen, font, 0, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Source");
-			textprintf_ex(screen, font, input_bitmap->w*2, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Current output");
-			textprintf_ex(screen, font, input_bitmap->w*4, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Destination");
-		}
-		else
-		{
-			blit(input_bitmap,screen,0,0,0,0,input_bitmap->w,input_bitmap->h);
-			textprintf_ex(screen, font, 0, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Source");
-			textprintf_ex(screen, font, input_bitmap->w, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Current output");
-			textprintf_ex(screen, font, input_bitmap->w*2, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Destination");
-		}
+		ShowInputBitmap();
 	}
 }
 
@@ -840,8 +365,6 @@ void RastaConverter::LoadDetailsMap()
 	int x,y;
 
 	details_data.resize(m_height);	
-	blit(input_bitmap,destination_bitmap,0,0,0,0,destination_bitmap->w,destination_bitmap->h);
-
 	for (y=0;y<m_height;++y)
 	{
 		details_data[y].resize(m_width);
@@ -854,10 +377,7 @@ void RastaConverter::LoadDetailsMap()
 			if ((x+y)%2==0)
 				putpixel( destination_bitmap,x,y,makecol(details_data[y][x],details_data[y][x],details_data[y][x]));
 		}
-		if (desktop_width>=320*3)
-			stretch_blit(destination_bitmap,screen,0,0,destination_bitmap->w,destination_bitmap->h,0,0,destination_bitmap->w*2,destination_bitmap->h);
-		else
-			blit(destination_bitmap,screen,0,0,0,0,destination_bitmap->w,destination_bitmap->h);
+		ShowDestinationBitmap();
 	}
 	FreeImage_Unload(fbitmap);
 };
@@ -869,22 +389,34 @@ void RastaConverter::GeneratePictureErrorMap()
 
 	unsigned int details_multiplier=255;
 
+	const int w = input_bitmap->w;
+	const int h = input_bitmap->h;
+
 	for(int i=0; i<128; ++i)
 	{
-		m_picture_all_errors[i].resize(input_bitmap->w * input_bitmap->h);
+		m_picture_all_errors[i].resize(w * h);
 
 		const rgb ref = atari_palette[i];
 
 		distance_t *dst = &m_picture_all_errors[i][0];
-		for (int y=0; y<input_bitmap->h; ++y)
+		for (int y=0; y<h; ++y)
 		{
 			const screen_line& srcrow = m_picture[y];
 
-			for (int x=0;x<input_bitmap->w;++x)
+			if (!details_data.empty())
 			{
-				if (!details_data.empty())
-					details_multiplier=255+details_data[y][x]*cfg.details_strength;
-				*dst++ = (distance_function(srcrow[x], ref)*details_multiplier)/255;
+				for (int x=0; x<w; ++x)
+				{
+					details_multiplier = 255+details_data[y][x]*cfg.details_strength;
+					*dst++ = (distance_function(srcrow[x], ref)*details_multiplier)/255;
+				}
+			}
+			else
+			{
+				for (int x=0; x<w; ++x)
+				{
+					*dst++ = distance_function(srcrow[x], ref);
+				}
 			}
 		}
 	}
@@ -943,22 +475,24 @@ void RastaConverter::OtherDithering()
 
 				if (cfg.dither==E_DITHER_FLOYD)
 				{
-					/* Standard Floyd–Steinberg uses 4 pixels to diffuse */
-
-					if (flip)
+					/* Standard Floyd-Steinberg uses 4 pixels to diffuse */
+					DiffuseError( x-1, y,   7.0/16.0, qe.r,qe.g,qe.b);
+					DiffuseError( x+1, y+1, 3.0/16.0, qe.r,qe.g,qe.b);
+					DiffuseError( x  , y+1, 5.0/16.0, qe.r,qe.g,qe.b);
+					DiffuseError( x-1, y+1, 1.0/16.0, qe.r,qe.g,qe.b);
+				}
+				else if (cfg.dither==E_DITHER_LINE)
+				{
+					// line dithering that reduces number of colors in line
+					if (y%2==0)
 					{
-						DiffuseError( x-1, y,   7.0/16.0, qe.r,qe.g,qe.b);
-						DiffuseError( x+1, y+1, 3.0/16.0, qe.r,qe.g,qe.b);
-						DiffuseError( x  , y+1, 5.0/16.0, qe.r,qe.g,qe.b);
-						DiffuseError( x-1, y+1, 1.0/16.0, qe.r,qe.g,qe.b);
+						DiffuseError( x, y+1, 0.5, qe.r,qe.g,qe.b);
 					}
-					else
-					{
-						DiffuseError( x+1, y,   7.0/16.0, qe.r,qe.g,qe.b);
-						DiffuseError( x-1, y+1, 3.0/16.0, qe.r,qe.g,qe.b);
-						DiffuseError( x  , y+1, 5.0/16.0, qe.r,qe.g,qe.b);
-						DiffuseError( x+1, y+1, 1.0/16.0, qe.r,qe.g,qe.b);
-					}
+				}
+				else if (cfg.dither==E_DITHER_LINE2)
+				{
+					// line dithering
+					DiffuseError( x, y+1, 0.5, qe.r,qe.g,qe.b);
 				}
 				else if (cfg.dither==E_DITHER_CHESS)
 				{
@@ -1003,13 +537,65 @@ void RastaConverter::OtherDithering()
 			int color=RGB2PIXEL(out_pixel);
 			putpixel(destination_bitmap,x,y,color);
 		}
+		ShowDestinationLine(y);
 	}
 }
 
+void RastaConverter::ShowInputBitmap()
+{
+	if (!cfg.preprocess_only)
+	{
+		acquire_screen();
+		if (desktop_width>=320*3)
+		{
+			stretch_blit(input_bitmap,screen,0,0,input_bitmap->w,input_bitmap->h,0,0,input_bitmap->w*2,input_bitmap->h);
+			textprintf_ex(screen, font, 0, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Source");
+			textprintf_ex(screen, font, input_bitmap->w*2, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Current output");
+			textprintf_ex(screen, font, input_bitmap->w*4, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Destination");
+		}
+		else
+		{
+			blit(input_bitmap,screen,0,0,0,0,input_bitmap->w,input_bitmap->h);
+			textprintf_ex(screen, font, 0, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Source");
+			textprintf_ex(screen, font, input_bitmap->w, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Current output");
+			textprintf_ex(screen, font, input_bitmap->w*2, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Destination");
+		}
+		release_screen();
+	}
+}
+
+void RastaConverter::ShowDestinationLine(int y)
+{
+	if (!cfg.preprocess_only)
+	{
+		acquire_screen();
+		if (desktop_width>=320*3)
+			stretch_blit(destination_bitmap,screen,0,y,destination_bitmap->w,1,input_bitmap->w*4,y,destination_bitmap->w*2,1);
+		else
+			blit(destination_bitmap,screen,0,y,input_bitmap->w*2,y,destination_bitmap->w,1);
+		release_screen();				
+	}
+}
+
+void RastaConverter::ShowDestinationBitmap()
+{
+	if (!cfg.preprocess_only)
+	{
+		acquire_screen();
+		if (desktop_width>=320*3)
+			stretch_blit(destination_bitmap,screen,0,0,destination_bitmap->w,destination_bitmap->h,input_bitmap->w*4,0,destination_bitmap->w*2,destination_bitmap->h);
+		else
+			blit(destination_bitmap,screen,0,0,input_bitmap->w*2,0,destination_bitmap->w,destination_bitmap->h);
+		release_screen();
+	}
+}
+
+
+
 void RastaConverter::PrepareDestinationPicture()
 {
-	int x,y;
 	Message("Preparing Destination Picture");
+	clear_bitmap(destination_bitmap);
 
 	// Draw new picture on the screen
 	if (cfg.dither!=E_DITHER_NONE)
@@ -1024,10 +610,12 @@ void RastaConverter::PrepareDestinationPicture()
 	}
 	else
 	{
-		for (y=0;y<m_height;++y)
+		for (int y=0;y<m_height;++y)
 		{
-			for (x=0;x<m_width;++x)
+			for (int x=0;x<m_width;++x)
 			{
+				if (user_closed_app)
+					break;
 				rgb out_pixel=m_picture[y][x];
 				unsigned char color_index=FindAtariColorIndex(out_pixel);
 				color_indexes_on_dst_picture.insert(color_index);	
@@ -1035,6 +623,7 @@ void RastaConverter::PrepareDestinationPicture()
 				int color=RGB2PIXEL(out_pixel);
 				putpixel(destination_bitmap,x,y,color);
 			}
+			ShowDestinationLine(y);
 		}
 	}
 	if (user_closed_app)
@@ -1042,26 +631,23 @@ void RastaConverter::PrepareDestinationPicture()
 
 	if (!cfg.preprocess_only)
 	{
-		if (desktop_width>=320*3)
-			stretch_blit(destination_bitmap,screen,0,0,destination_bitmap->w,destination_bitmap->h,input_bitmap->w*4,0,destination_bitmap->w*2,destination_bitmap->h);
-		else
-			blit(destination_bitmap,screen,0,0,input_bitmap->w*2,0,destination_bitmap->w,destination_bitmap->h);
+		ShowDestinationBitmap();
 	}
 
-	for (y=0;y<input_bitmap->h;++y)
+	for (int y=0;y<input_bitmap->h;++y)
 	{
-		for (x=0;x<input_bitmap->w;++x)
+		for (int x=0;x<input_bitmap->w;++x)
 		{
 			int color = getpixel(destination_bitmap,x,y);
 			rgb out_pixel=PIXEL2RGB(color);
-			m_picture[y][x]=out_pixel; // copy it always - it is used by the colour distance cache m_picture_all_errors
+			m_picture[y][x]=out_pixel; // copy it always - it is used by the color distance cache m_picture_all_errors
 		}
 	}
 }
 
 void RastaConverter::LoadOnOffFile(const char *filename)
 {
-	memset(on_off,true,sizeof(on_off));
+	memset(on_off.on_off,true,sizeof(on_off.on_off));
 
 	// 1. Resize the on_off table and full it with true
 	fstream f;
@@ -1080,7 +666,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 		stringstream sl(line);
 		string reg, value;
 		e_target target=E_TARGET_MAX;
-		int from, to;
+		unsigned int from, to;
 
 		sl >> reg >> value >> from >> to;
 
@@ -1108,7 +694,8 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 			err+=line;
 			error(err.c_str());
 		}
-		if (from>m_height-1 || to>m_height-1)
+
+		if ((int)from > m_height-1 || (int)to > m_height-1)
 		{
 			string err="OnOff file: Range value greater than picture height in line ";
 			err+=Value2String<unsigned int>(y);
@@ -1137,9 +724,9 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 			error(err.c_str());
 		}
 		// fill 
-		for (int l=from;l<=to;++l)
+		for (size_t l=from;l<=to;++l)
 		{
-			on_off[l][target] = (value=="ON");
+			on_off.on_off[l][target] = (value=="ON");
 		}
 		++y;
 	}
@@ -1174,13 +761,33 @@ bool RastaConverter::ProcessInit()
 	if (user_closed_app)
 		return false;
 
-	if (cfg.picture_colors_only)
-		LimitPaletteToExistingColors();
-
 	if (user_closed_app)
 		return false;
 
 	GeneratePictureErrorMap();
+
+
+	m_eval_gstate.m_max_evals = cfg.max_evals;
+	m_eval_gstate.m_save_period = cfg.save_period;
+
+	for(int i=0; i<128; ++i)
+		m_picture_all_errors_array[i] = m_picture_all_errors[i].data();
+
+	m_evaluators.resize(cfg.threads);
+
+	unsigned long long randseed = cfg.initial_seed;
+
+	for(size_t i=0; i<m_evaluators.size(); ++i)
+	{
+		// seed=0 would lock up the LFSR
+		if (!randseed)
+			++randseed;
+
+		m_evaluators[i].Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, randseed);
+
+		randseed += 187927 * i;
+	}
+
 	return true;
 }
 
@@ -1219,10 +826,10 @@ bool RastaConverter::SaveScreenData(const char *filename)
 		for (x=0;x<m_width;x+=4)
 		{
 			unsigned char pix=0;
-			a=ConvertColorRegisterToRawData((e_target)m_created_picture_targets[y][x]);
-			b=ConvertColorRegisterToRawData((e_target)m_created_picture_targets[y][x+1]);
-			c=ConvertColorRegisterToRawData((e_target)m_created_picture_targets[y][x+2]);
-			d=ConvertColorRegisterToRawData((e_target)m_created_picture_targets[y][x+3]);
+			a=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x]);
+			b=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+1]);
+			c=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+2]);
+			d=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+3]);
 			pix |= a<<6;
 			pix |= b<<4;
 			pix |= c<<2;
@@ -1333,28 +940,55 @@ MixingPlan RastaConverter::DeviseBestMixingPlan(rgb color)
 	return result;
 }
 
-void RastaConverter::KnollDithering()
+void RastaConverter::ParallelFor(int from, int to, void *(*start_routine)(void*))
 {
-	Message("Knoll Dithering             ");
+	void *status;
+	pthread_attr_t attr;
+	vector <  pthread_t > threads;
+	vector <  parallel_for_arg_t > threads_arg;
+	/* Initialize and set thread detached attribute */
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-	for(unsigned int c=0; c<128; ++c)
+	threads.resize(cfg.threads);
+	threads_arg.resize(cfg.threads);
+
+	int step=abs(to-from)/cfg.threads;
+	for (int t=0;t<cfg.threads;++t)
 	{
-		luma[c] = atari_palette[c].r*299 + atari_palette[c].g*587 + atari_palette[c].b*114;
+		threads_arg[t].this_ptr=this;
+		threads_arg[t].from=from;
+		if (t==cfg.threads-1) // last one
+			threads_arg[t].to=to;
+		else
+			threads_arg[t].to=from+step;
+		pthread_create(&threads[t], &attr, start_routine, &threads_arg[t]);
+		from+=step;
 	}
-	for(unsigned int y=0; y<m_height; ++y)
+	pthread_attr_destroy(&attr);
+	for (int t=0;t<cfg.threads;++t)
 	{
-		if (!cfg.preprocess_only)
-		{
-			if (desktop_width>=320*3)
-				hline(screen,m_width*2,y,m_width*4,makecol(0xFF,0xFF,0x0));
-			else
-				hline(screen,m_width,y,m_width*2,makecol(0xFF,0xFF,0x0));
-		}
+		pthread_join(threads[t], &status);
+	}	
+	return;
+}
 
-		for(unsigned x=0; x<m_width; ++x)
+// This is still quite ugly, KnollDitheringParallel should be passed in *arg so this helper could be generic
+void *RastaConverter::KnollDitheringParallelHelper(void *arg)
+{
+	parallel_for_arg_t *param=(parallel_for_arg_t *)arg;
+	((RastaConverter *)param->this_ptr)->KnollDitheringParallel(param->from,param->to);
+	return NULL;
+}
+
+void RastaConverter::KnollDitheringParallel(int from, int to)
+{
+	for(int y=from; y<to; ++y)
+	{
+		for(unsigned x=0; x<(unsigned)m_width; ++x)
 		{
 			if (user_closed_app)
-				return;
+				break;
 
 			rgb r_color = m_picture[y][x];
 			unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
@@ -1363,11 +997,21 @@ void RastaConverter::KnollDithering()
 			color_indexes_on_dst_picture.insert(color_index);	
 			rgb out_pixel = atari_palette[color_index];
 
-			//			out_pixel = atari_palette[FindAtariColorIndex(out_pixel)];
 			int color=RGB2PIXEL(out_pixel);
 			putpixel(destination_bitmap,x,y,color);
 		}
+		ShowDestinationLine(y);
 	}
+}
+
+void RastaConverter::KnollDithering()
+{
+	Message("Knoll Dithering             ");
+	for(unsigned c=0; c<128; ++c)
+	{
+		luma[c] = atari_palette[c].r*299 + atari_palette[c].g*587 + atari_palette[c].b*114;
+	}
+	ParallelFor(0,m_height,KnollDitheringParallelHelper);
 }
 
 void RastaConverter::ClearErrorMap()
@@ -1618,20 +1262,6 @@ void RastaConverter::CreateRandomRasterPicture(raster_picture *r)
 	}
 }
 
-
-inline int RastaConverter::GetInstructionCycles(const SRasterInstruction &instr)
-{
-	switch(instr.loose.instruction)
-	{
-	case E_RASTER_NOP:
-	case E_RASTER_LDA:
-	case E_RASTER_LDX:
-	case E_RASTER_LDY:
-		return 2;
-	}
-	return 4;
-}
-
 void RastaConverter::DiffuseError( int x, int y, double quant_error, double e_r,double e_g,double e_b)
 {
 	if (! (x>=0 && x<m_width && y>=0 && y<m_height) )
@@ -1654,178 +1284,6 @@ void RastaConverter::DiffuseError( int x, int y, double quant_error, double e_r,
 	else if (p.g<0)
 		p.g=0;
 	error_map[y][x]=p;
-}
-
-e_target RastaConverter::FindClosestColorRegister(int index, int x,int y, bool &restart_line, distance_t& best_error)
-{
-	distance_t distance;
-	int sprite_bit;
-	int best_sprite_bit;
-	e_target result=E_COLBAK;
-	distance_t min_distance = DISTANCE_MAX;
-	bool sprite_covers_colbak=false;
-
-	// check sprites
-
-	// Sprites priority is 0,1,2,3
-
-	for (int temp=E_COLPM0;temp<=E_COLPM3;++temp)
-	{
-		int sprite_pos=sprite_shift_regs[temp-E_COLPM0];
-
-		int sprite_x=sprite_pos-sprite_screen_color_cycle_start;
-
-		unsigned x_offset = (unsigned)(x - sprite_x);
-		if (x_offset < sprite_size)		// (x>=sprite_x && x<sprite_x+sprite_size)
-		{
-			sprite_bit=x_offset >> 2; // bit of this sprite memory
-			assert(sprite_bit<8);
-
-			sprite_covers_colbak=true;
-
-//			distance = T_distance_function(pixel,atari_palette[mem_regs[temp]/2]);
-			distance = m_picture_all_errors[mem_regs[temp]/2][index];
-			if (sprites_memory[y][temp-E_COLPM0][sprite_bit])
-			{
-				// priority of sprites - next sprites are hidden below that one, so they are not processed
-				best_sprite_bit=sprite_bit;
-				result=(e_target) temp;
-				min_distance = distance;
-				break;
-			}
-			if (distance<min_distance)
-			{
-				best_sprite_bit=sprite_bit;
-				result=(e_target) temp;
-				min_distance=distance;
-			}
-		}
-	}
-
-	// check standard colors
-
-	int last_color_register;
-
-	if (sprite_covers_colbak)
-		last_color_register=E_COLOR2; // COLBAK is not used
-	else
-		last_color_register=E_COLBAK;
-
-	for (int temp=E_COLOR0;temp<=last_color_register;++temp)
-	{
-//		distance = T_distance_function(pixel,atari_palette[mem_regs[temp]/2]);
-		distance = m_picture_all_errors[mem_regs[temp]/2][index];
-		if (distance<min_distance)
-		{
-			min_distance=distance;
-			result=(e_target) temp;
-		}
-	}
-
-	// the best color is in sprite, then set the proper bit of the sprite memory and then restart this line
-	if (result>=E_COLPM0 && result<=E_COLPM3)
-	{
-		// if PMG bit has been modified, then restart this line, because previous pixels of COLBAK may be covered
-		if (sprites_memory[y][result-E_COLPM0][best_sprite_bit]==false)
-		{
-			restart_line=true;
-			sprites_memory[y][result-E_COLPM0][best_sprite_bit]=true;
-		}
-
-	}
-
-	best_error = min_distance;
-
-	return result;
-}
-
-
-inline void RastaConverter::ExecuteInstruction(const SRasterInstruction &instr, int x)
-{
-	int reg_value=-1;
-	switch(instr.loose.instruction)
-	{
-	case E_RASTER_LDA:
-		reg_a=instr.loose.value;
-		break;
-	case E_RASTER_LDX:
-		reg_x=instr.loose.value;
-		break;
-	case E_RASTER_LDY:
-		reg_y=instr.loose.value;
-		break;
-	case E_RASTER_STA:
-		reg_value=reg_a;
-		break;
-	case E_RASTER_STX:
-		reg_value=reg_x;
-		break;
-	case E_RASTER_STY:
-		reg_value=reg_y;
-		break;
-	}
-
-	if (reg_value!=-1)
-	{
-		const unsigned hpos_index = (unsigned)(instr.loose.target - E_HPOSP0);
-		if (hpos_index < 4) 
-		{
-			sprite_shift_start_array[mem_regs[instr.loose.target]] &= ~(1 << hpos_index);
-			mem_regs[instr.loose.target]=reg_value;
-			sprite_shift_start_array[mem_regs[instr.loose.target]] |= (1 << hpos_index);
-		} 
-		else 
-		{
-			mem_regs[instr.loose.target]=reg_value;
-		}
-	}
-}
-
-void ResetSpriteShiftStartArray()
-{
-	memset(sprite_shift_start_array, 0, sizeof sprite_shift_start_array);
-
-	for(int i=0; i<4; ++i)
-		sprite_shift_start_array[mem_regs[i+E_HPOSP0]] |= (1 << i);
-}
-
-unsigned char old_reg_a,old_reg_x,old_reg_y;
-unsigned char old_mem_regs[E_TARGET_MAX+1]; // +1 for HITCLR
-
-void StoreLineRegs()
-{
-	old_reg_a=reg_a;
-	old_reg_x=reg_x;
-	old_reg_y=reg_y;
-	memcpy(old_mem_regs,mem_regs,sizeof(mem_regs)-1); // -1 for HITCLR
-}
-
-void RestoreLineRegs()
-{
-	reg_a=old_reg_a;
-	reg_x=old_reg_x;
-	reg_y=old_reg_y;
-	memcpy(mem_regs,old_mem_regs,sizeof(mem_regs)-1); // -1 for HITCLR
-}
-
-void RastaConverter::TurnOffRegisters(raster_picture *pic)
-{
-	for (size_t i=0;i<E_TARGET_MAX;++i)
-	{
-		if (on_off[0][i]==false)
-			pic->mem_regs_init[i]=0;
-	}
-	for (int y=0;y<m_height;++y)
-	{
-		size_t size=pic->raster_lines[y].instructions.size();
-		SRasterInstruction *__restrict rastinsns = &pic->raster_lines[y].instructions[0];
-		for (size_t i=0;i<size;++i)
-		{
-			unsigned char target=rastinsns[i].loose.target;
-			if (target<E_TARGET_MAX && on_off[y][target]==false)
-				rastinsns[i].loose.target=E_TARGET_MAX;
-		}		
-	}
 }
 
 void RastaConverter::OptimizeRasterProgram(raster_picture *pic)
@@ -1873,287 +1331,38 @@ void RastaConverter::OptimizeRasterProgram(raster_picture *pic)
 	}
 }
 
-distance_accum_t RastaConverter::ExecuteRasterProgram(raster_picture *pic)
-{
-	int x,y; // currently processed pixel
-
-	int cycle;
-	int next_instr_offset;
-	int ip; // instruction pointer
-
-	const SRasterInstruction *__restrict instr;
-
-	reg_a=0;
-	reg_x=0;
-	reg_y=0;
-
-	if (!cfg.on_off_file.empty())
-		TurnOffRegisters(pic);
-
-	memset(sprite_shift_regs,0,sizeof(sprite_shift_regs));
-	memcpy(mem_regs,pic->mem_regs_init,sizeof(pic->mem_regs_init));
-	memset(sprites_memory,0,sizeof(sprites_memory));
-	
-	bool restart_line=false;
-	bool shift_start_array_dirty = true;
-	distance_accum_t total_error = 0;
-
-	for (y=0;y<m_height;++y)
-	{
-		if (restart_line)
-		{
-			RestoreLineRegs();
-			shift_start_array_dirty = true;
-		}
-		else
-		{
-			StoreLineRegs();
-		}
-
-		// snapshot current machine state
-		const SRasterInstruction *__restrict rastinsns = &pic->raster_lines[y].instructions[0];
-		const int rastinsncnt = pic->raster_lines[y].instructions.size();
-
-		line_cache_key lck;
-		lck.entry_state.capture();
-		lck.insns = rastinsns;
-		lck.insn_count = rastinsncnt;
-		lck.insn_hash = pic->raster_lines[y].hash;
-
-		const uint32_t lck_hash = lck.hash();
-
-		// check line cache
-		unsigned char * __restrict created_picture_row = &m_created_picture[y][0];
-		unsigned char * __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
-
-		const line_cache_result *cached_line_result = line_caches[y].find(lck, lck_hash);
-		if (cached_line_result)
-		{
-			// sweet! cache hit!!
-			cached_line_result->new_state.apply();
-			memcpy(created_picture_row, cached_line_result->color_row, m_width);
-			memcpy(created_picture_targets_row, cached_line_result->target_row, m_width);
-			memcpy(sprites_memory[y], cached_line_result->sprite_data, sizeof sprites_memory[y]);
-			shift_start_array_dirty = true;
-
-			total_error += cached_line_result->line_error;
-			continue;
-		}
-
-		if (shift_start_array_dirty)
-		{
-			shift_start_array_dirty = false;
-
-			ResetSpriteShiftStartArray();
-		}
-
-		restart_line=false;
-		ip=0;
-		cycle=0;
-		next_instr_offset=screen_cycles[cycle].offset;
-
-		// on new line clear sprite shifts and wait to be taken from mem_regs
-		memset(sprite_shift_regs,0,sizeof(sprite_shift_regs));
-
-		if (!rastinsncnt)
-			next_instr_offset = 1000;
-
-		const int picture_row_index = m_width * y;
-
-		distance_accum_t total_line_error = 0;
-
-		for (x=-sprite_screen_color_cycle_start;x<176;++x)
-		{
-			// check position of sprites
-			const int sprite_check_x = x + sprite_screen_color_cycle_start;
-
-#if 1
-			const unsigned char sprite_start_mask = sprite_shift_start_array[sprite_check_x];
-
-			if (sprite_start_mask)
-			{
-				if (sprite_start_mask & 1) sprite_shift_regs[0] = mem_regs[E_HPOSP0];
-				if (sprite_start_mask & 2) sprite_shift_regs[1] = mem_regs[E_HPOSP1];
-				if (sprite_start_mask & 4) sprite_shift_regs[2] = mem_regs[E_HPOSP2];
-				if (sprite_start_mask & 8) sprite_shift_regs[3] = mem_regs[E_HPOSP3];
-			}
-#else
-			for (int spr=0;spr<4;++spr)
-			{
-				if (sprite_check_x == mem_regs[spr+E_HPOSP0])
-					sprite_shift_regs[spr]=mem_regs[spr+E_HPOSP0];
-			}
-#endif
-
-			while(next_instr_offset<x && ip<rastinsncnt) // execute instructions
-			{
-				// check position of sprites
-
-				instr = &rastinsns[ip++];
-
-				if (cycle<4) // in the previous line
-					ExecuteInstruction(*instr,x+200);
-				else
-					ExecuteInstruction(*instr,x);
-
-				cycle+=GetInstructionCycles(*instr);
-				next_instr_offset=screen_cycles[cycle].offset;
-				if (ip >= rastinsncnt)
-					next_instr_offset = 1000;
-			}
-
-			if ((unsigned)x < (unsigned)m_width)		// x>=0 && x<m_width
-			{
-				// put pixel closest to one of the current color registers
-				distance_t closest_dist;
-				e_target closest_register = FindClosestColorRegister(picture_row_index + x,x,y,restart_line,closest_dist);
-				total_line_error += closest_dist;
-				created_picture_row[x]=mem_regs[closest_register] >> 1;
-				created_picture_targets_row[x]=closest_register;
-			}
-		}
-
-		if (restart_line)
-		{
-			--y;
-		}
-		else
-		{
-			total_error += total_line_error;
-
-			// add this to line cache
-			if (line_cache_insn_pool_level + rastinsncnt > LINE_CACHE_INSN_POOL_SIZE)
-			{
-				// flush line cache
-				for(int y2=0; y2<m_height; ++y2)
-					line_caches[y2].clear();
-
-				line_cache_linear_allocator.clear();
-				line_cache_insn_pool_level = 0;
-			}
-
-			// relocate insns to pool
-			SRasterInstruction *new_insns = line_cache_insn_pool + line_cache_insn_pool_level;
-			lck.insns = new_insns;
-			memcpy(new_insns, rastinsns, rastinsncnt * sizeof(rastinsns[0]));
-			line_cache_insn_pool_level += rastinsncnt;
-
-			line_cache_result& result_state = line_caches[y].insert(lck, lck_hash);
-
-			result_state.line_error = total_line_error;
-			result_state.new_state.capture();
-			result_state.color_row = (unsigned char *)line_cache_linear_allocator.allocate(m_width);
-			memcpy(result_state.color_row, created_picture_row, m_width);
-
-			result_state.target_row = (unsigned char *)line_cache_linear_allocator.allocate(m_width);
-			memcpy(result_state.target_row, created_picture_targets_row, m_width);
-
-			memcpy(result_state.sprite_data, sprites_memory[y], sizeof result_state.sprite_data);
-		}
-	}
-
-	return total_error;
-}
-
-template<fn_rgb_distance& T_distance_function>
-distance_accum_t RastaConverter::CalculateLineDistance(const screen_line &r, const screen_line &l)
-{
-	const int width = r.size();
-	distance_accum_t distance=0;
-
-	for (int x=0;x<width;++x)
-	{
-		rgb in_pixel = r[x];
-		rgb out_pixel = l[x];
-		distance += T_distance_function(in_pixel,out_pixel);
-	}
-	return distance;
-};
-
-double RastaConverter::EvaluateCreatedPicture(void)
-{
-	int y; // currently processed pixel
-	distance_accum_t distance=0;
-	++m_evaluations;
-
-	int error_index = 0;
-	for (y=0;y<m_height;++y)
-	{
-		const unsigned char *index_src_row = &m_created_picture[y][0];
-
-		for(int x=0; x<m_width; ++x)
-			distance += m_picture_all_errors[index_src_row[x]][error_index++];
-	}
-
-	return distance;
-}
-
-void RastaConverter::LimitPaletteToExistingColors()
-{
-	int first_color=-1;
-	for (int i=0;i<128;++i)
-	{
-		// if color is not on the picture
-		if (color_indexes_on_dst_picture.find(i)!=color_indexes_on_dst_picture.end())
-		{
-			first_color=i;
-			break;
-		}
-	}
-	if (first_color==-1)
-	{
-		assert(first_color!=-1);
-		return; // this should not happen...
-	}
-
-	for (int i=0;i<128;++i)
-	{
-		if (color_indexes_on_dst_picture.find(i)==color_indexes_on_dst_picture.end())
-			atari_palette[i]=atari_palette[first_color];
-	}
-}
-
 void RastaConverter::FindPossibleColors()
 {
-	m_possible_colors_for_each_line.resize(m_height);
+	m_eval_gstate.m_possible_colors_for_each_line.resize(m_height);
 	set < unsigned char > set_of_colors;
 
 	// For each screen line set the possible colors
+	vector < unsigned char > vector_of_colors;
 	for (int l=m_height-1;l>=0 && !user_closed_app;--l)
 	{
-		vector < unsigned char > vector_of_colors;
-#if 1
+		acquire_screen();
 		if (desktop_width>=320*3)
 			hline(screen,m_width*2,l,m_width*4,makecol(0xFF,0xFF,0xFF));
 		else
 			hline(screen,m_width,l,m_width*2,makecol(0xFF,0xFF,0xFF));
+		release_screen();
 
 		for (int x=0;x<m_width;++x)
 			set_of_colors.insert(FindAtariColorIndex(m_picture[l][x])*2);				
 
 		// copy set to vector
-		copy(set_of_colors.begin(), set_of_colors.end(), back_inserter(vector_of_colors));
-#else
-		vector_of_colors.push_back(0);
-#endif
-		m_possible_colors_for_each_line[l]=vector_of_colors;
+		vector_of_colors.resize(set_of_colors.size());
+		copy(set_of_colors.begin(), set_of_colors.end(), vector_of_colors.data());
+		m_eval_gstate.m_possible_colors_for_each_line[l]=vector_of_colors;
 	}
 }
 
 void RastaConverter::Init()
 {
-	if (cfg.continue_processing)
-	{
-		m_best_result=ExecuteRasterProgram(&m_best_pic); 
-	}
-	else
+	if (!cfg.continue_processing)
 	{
 		raster_picture m(m_height);
 		init_finished=false;
-
-		m_evaluations=0;
-		m_last_best_evaluation=0;
-		m_previous_results_index=0;
 
 		if (color_indexes_on_dst_picture.size()<5)
 			CreateLowColorRasterPicture(&m);
@@ -2163,189 +1372,12 @@ void RastaConverter::Init()
 			CreateEmptyRasterPicture(&m);
 		else // LESS or SMART
 			CreateSmartRasterPicture(&m);
-		m_best_result=ExecuteRasterProgram(&m); 
-		m_best_pic=m;
-	}
 
-	ShowLastCreatedPicture();
+		m_eval_gstate.m_best_pic = m;
+	}
 
 	if (!user_closed_app)
 		init_finished=true;
-}
-
-void RastaConverter::MutateLine(raster_line &prog)
-{
-	// hline(screen,m_width*2,m_currently_mutated_y,m_width*4,makecol(0xFF,0xFF,0xFF));
-
-	int r=random(prog.instructions.size());
-	for (int i=0;i<=r;++i) 
-	{
-		MutateOnce(prog);
-	}
-
-	prog.rehash();
-}
-
-void RastaConverter::MutateOnce(raster_line &prog)
-{
-	int i1,i2,c,x;
-
-	i1=random(prog.instructions.size());
-	i2=i1;
-	if (prog.instructions.size()>2)
-	{
-		do 
-		{
-			i2=random(prog.instructions.size());
-		} while (i1==i2);
-	}
-
-	SRasterInstruction temp;
-
-	int mutation=random(E_MUTATION_MAX);
-	switch(mutation)
-	{
-	case E_MUTATION_COPY_LINE_TO_NEXT_ONE:
-		if (m_currently_mutated_y<m_height-1)
-		{
-			int next_y = m_currently_mutated_y+1;
-			raster_line &next_line=m_pic.raster_lines[next_y];
-			prog=next_line;
-			m_current_mutations[E_MUTATION_COPY_LINE_TO_NEXT_ONE]++;
-			break;
-		}
-	case E_MUTATION_PUSH_BACK_TO_PREV:
-		if (m_currently_mutated_y>0)
-		{
-			int prev_y = m_currently_mutated_y-1;
-			raster_line &prev_line=m_pic.raster_lines[prev_y];
-			c = GetInstructionCycles(prog.instructions[i1]);
-			if (prev_line.cycles+c<free_cycles)
-			{
-				// add it to prev line but do not remove it from the current
-				prev_line.cycles+=c;
-				prev_line.instructions.push_back(prog.instructions[i1]);
-				m_current_mutations[E_MUTATION_PUSH_BACK_TO_PREV]++;
-				break;
-			}
-		}
-	case E_MUTATION_SWAP_LINE_WITH_PREV_ONE:
-		if (m_currently_mutated_y>0)
-		{
-			int prev_y = m_currently_mutated_y-1;
-			raster_line &prev_line=m_pic.raster_lines[prev_y];
-			prog.swap(prev_line);
-			m_current_mutations[E_MUTATION_SWAP_LINE_WITH_PREV_ONE]++;
-			break;
-		}
-	case E_MUTATION_ADD_INSTRUCTION:
-		if (prog.cycles+2<free_cycles)
-		{
-			if (prog.cycles+4<free_cycles && random(2)) // 4 cycles instructions
-			{
-				temp.loose.instruction=(e_raster_instruction) (E_RASTER_STA+random(3));
-				temp.loose.value=(random(128)*2);
-				temp.loose.target=(e_target) (random(E_TARGET_MAX));
-				prog.instructions.insert(prog.instructions.begin()+i1,temp);
-				prog.cycles+=4;
-			}
-			else
-			{
-				temp.loose.instruction=(e_raster_instruction) (E_RASTER_LDA+random(4));
-				if (random(2))
-					temp.loose.value=(random(128)*2);
-				else
-					temp.loose.value=m_possible_colors_for_each_line[m_currently_mutated_y][random(m_possible_colors_for_each_line[m_currently_mutated_y].size())];
-
-				temp.loose.target=(e_target) (random(E_TARGET_MAX));
-				c=random(m_picture[m_currently_mutated_y].size());
-				temp.loose.value=FindAtariColorIndex(m_picture[m_currently_mutated_y][c])*2;
-				prog.instructions.insert(prog.instructions.begin()+i1,temp);
-				prog.cycles+=2;
-			}
-			m_current_mutations[E_MUTATION_ADD_INSTRUCTION]++;
-			break;
-		}
-	case E_MUTATION_REMOVE_INSTRUCTION:
-		if (prog.cycles>4)
-		{
-			c = GetInstructionCycles(prog.instructions[i1]);
-			if (prog.cycles-c>0)
-			{
-				prog.cycles-=c;
-				prog.instructions.erase(prog.instructions.begin()+i1);
-				assert(prog.cycles>0);
-				m_current_mutations[E_MUTATION_REMOVE_INSTRUCTION]++;
-				break;
-			}
-		}
-	case E_MUTATION_SWAP_INSTRUCTION:
-		if (prog.instructions.size()>2)
-		{
-			temp=prog.instructions[i1];
-			prog.instructions[i1]=prog.instructions[i2];
-			prog.instructions[i2]=temp;
-			m_current_mutations[E_MUTATION_SWAP_INSTRUCTION]++;
-			break;
-		}
-	case E_MUTATION_CHANGE_TARGET:
-		prog.instructions[i1].loose.target=(e_target) (random(E_TARGET_MAX));
-		m_current_mutations[E_MUTATION_CHANGE_TARGET]++;
-		break;
-	case E_MUTATION_CHANGE_VALUE_TO_COLOR:
-		if ((prog.instructions[i1].loose.target>=E_HPOSP0 && prog.instructions[i1].loose.target<=E_HPOSP3))
-		{
-			x=mem_regs[prog.instructions[i1].loose.target]-sprite_screen_color_cycle_start;
-			x+=random(sprite_size);
-		}
-		else
-		{
-			c=0;
-			// find color in the next raster column
-			for (x=0;x<i1-1;++x)
-			{
-				if (prog.instructions[x].loose.instruction<=E_RASTER_NOP)
-					c+=2;
-				else
-					c+=4; // cycles
-			}
-			while(random(5)==0)
-				++c;
-
-			if (c>=free_cycles)
-				c=free_cycles-1;
-			x=screen_cycles[c].offset;
-			x+=random(screen_cycles[c].length);
-		}
-		if (x<0 || x>=m_width)
-			x=random(m_width);
-		i2=m_currently_mutated_y;
-		// check color in next lines
-		while(random(5)==0 && i2+1 < (int)m_picture.size())
-			++i2;
-		prog.instructions[i1].loose.value=FindAtariColorIndex(m_picture[i2][x])*2;
-		m_current_mutations[E_MUTATION_CHANGE_VALUE_TO_COLOR]++;
-		break;
-	case E_MUTATION_CHANGE_VALUE:
-		if (random(10)==0)
-		{
-			if (random(2))
-				prog.instructions[i1].loose.value=(random(128)*2);
-			else
-				prog.instructions[i1].loose.value=m_possible_colors_for_each_line[m_currently_mutated_y][random(m_possible_colors_for_each_line[m_currently_mutated_y].size())];
-		}
-		else
-		{
-			c=1;
-			if (random(2))
-				c*=-1;
-			if (random(2))
-				c*=16;
-			prog.instructions[i1].loose.value+=c;
-		}
-		m_current_mutations[E_MUTATION_CHANGE_VALUE]++;
-		break;
-	}	
 }
 
 void RastaConverter::TestRasterProgram(raster_picture *pic)
@@ -2381,62 +1413,14 @@ void RastaConverter::TestRasterProgram(raster_picture *pic)
 	}
 }
 
-void RastaConverter::MutateRasterProgram(raster_picture *pic)
-{
-	// find the best line to modify
-	m_current_mutations.clear();
-
-	if (random(10)==0) // mutate random init mem reg
-	{
-		int c=1;
-		if (random(2))
-			c*=-1;
-		if (random(2))
-			c*=16;
-
-		int targ;
-		do {
-			targ = random(E_TARGET_MAX);
-		} while (targ == E_COLBAK);
-
-		pic->mem_regs_init[targ]+=c;
-	}
-
-	if (m_currently_mutated_y>=(int) pic->raster_lines.size())
-		m_currently_mutated_y=0;
-	if (m_currently_mutated_y<0)
-		m_currently_mutated_y=pic->raster_lines.size()-1;
-
-	raster_line &current_line=pic->raster_lines[m_currently_mutated_y];
-	MutateLine(current_line);
-
-	if (random(20)==0)
-	{
-		for (int t=0;t<10;++t)
-		{
-			if (random(2) && m_currently_mutated_y>0)
-				--m_currently_mutated_y;
-			else
-				m_currently_mutated_y=random(pic->raster_lines.size());
-
-			raster_line &current_line=pic->raster_lines[m_currently_mutated_y];
-			MutateLine(current_line);
-		}
-	}
-}
-
 void RastaConverter::ShowMutationStats()
 {
-	map < int, int >::iterator m,_m;
-	for (m=m_current_mutations.begin(),_m=m_current_mutations.end();m!=_m;++m)
-	{
-		m_mutation_stats[m->first]+=m->second;
-	}
+	acquire_screen();
 	for (int i=0;i<E_MUTATION_MAX;++i)
 	{
-		textprintf_ex(screen, font, 0, 330+10*i, makecol(0xF0,0xF0,0xF0), 0, "%s  %d", mutation_names[i],m_mutation_stats[i]);
+		textprintf_ex(screen, font, 0, 330+10*i, makecol(0xF0,0xF0,0xF0), 0, "%s  %d", mutation_names[i], m_eval_gstate.m_mutation_stats[i]);
 	}
-
+	release_screen();
 }
 
 void RastaConverter::SaveBestSolution()
@@ -2444,13 +1428,14 @@ void RastaConverter::SaveBestSolution()
 	if (!init_finished)
 		return;
 
-	// execute raster program for the best created picture to set f.e. PMG data
-	m_pic=m_best_pic;
-	ExecuteRasterProgram(&m_pic);
+	// Note that we are assuming that we have exclusive access to global state.
+
+	raster_picture pic = m_eval_gstate.m_best_pic;
+
 	ShowLastCreatedPicture();
-	SaveRasterProgram(string(cfg.output_file+".rp"),&m_pic);
-	OptimizeRasterProgram(&m_pic);
-	SaveRasterProgram(string(cfg.output_file+".opt"),&m_pic);
+	SaveRasterProgram(string(cfg.output_file+".rp"), &pic);
+	OptimizeRasterProgram(&pic);
+	SaveRasterProgram(string(cfg.output_file+".opt"), &pic);
 	SavePMG(string(cfg.output_file+".pmg"));
 	SaveScreenData  (string(cfg.output_file+".mic").c_str());
 	SavePicture     (cfg.output_file,output_bitmap);
@@ -2471,24 +1456,12 @@ void Wait(int t)
 }
 
 RastaConverter::RastaConverter()
-	: m_last_best_evaluation(0)
-	, m_evaluations(0)
-	, m_currently_mutated_y(0)
-	, init_finished(false)
-	, m_best_result(DBL_MAX)
+	: init_finished(false)
 {
 }
 
 void RastaConverter::FindBestSolution()
 {
-	m_created_picture.resize(m_height);
-	for(int i=0; i<m_height; ++i)
-		m_created_picture[i].resize(m_width, 0);
-
-	resize_target_picture(&m_created_picture_targets,input_bitmap->w,input_bitmap->h);
-
-	memset(m_mutation_stats,0,sizeof(m_mutation_stats));
-
 	if (user_closed_app)
 		return;
 
@@ -2499,32 +1472,29 @@ void RastaConverter::FindBestSolution()
 
 	Init();
 
-	if (!cfg.continue_processing)
-	{
-		// For all k ( 0.. L-1 ) Ck=C(s)
-		// Set initial state for Late Acceptance Hill Climbing
-		m_previous_results.resize(solutions);
-		for(int i=0; i<solutions; ++i)
-			m_previous_results[i]=m_best_result;
-	}
-
 	const time_t time_start = time(NULL);
-	m_currently_mutated_y=0;
 
+	acquire_screen();
 	textprintf_ex(screen, font, 0, 280, makecol(0xF0,0xF0,0xF0), 0, "Press 'S' to save.");
-	textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %llu", m_evaluations);
+	textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %llu", m_eval_gstate.m_evaluations);
+	release_screen();
 
-	unsigned last_eval = 0;
 	bool clean_first_evaluation = cfg.continue_processing;
 	clock_t last_rate_check_time = clock();
 
-	while(!key[KEY_ESC] && !user_closed_app && m_evaluations < cfg.max_evals)
+	bool pending_update = false;
+
+	// spin up only one evaluator -- we need its result before the rest can go
+
+	pthread_mutex_lock(&m_eval_gstate.m_mutex);
+	m_evaluators[0].Start();
+
+	double rate = 0;
+	unsigned long long last_eval = 0;
+	bool eval_inited = false;
+
+	while(!key[KEY_ESC] && !user_closed_app)
 	{
-		if (cfg.save_period!=0)
-		{
-			if (m_evaluations%cfg.save_period==0)
-				SaveBestSolution();
-		}
 		if (key[KEY_S] || key[KEY_D])
 		{
 			SaveBestSolution();
@@ -2533,87 +1503,95 @@ void RastaConverter::FindBestSolution()
 			Message("Saved.               ");
 		}
 
-		if (m_best_result==0)
+		if (eval_inited)
 		{
-			Message("FINISHED: distance=0");
-			Wait(1);
-			continue;
-		}
-
-		size_t v=m_previous_results_index % solutions;
-		double current_distance=m_previous_results[v];
-
-		raster_picture new_picture(m_height);
-		new_picture=m_best_pic;
-		m_pic=new_picture;
-
-		// If this is the first evaluation after a continue, we don't do any mutations in order to
-		// get the correct statistic. This avoids taking the first mutation unconditionally.
-		if (clean_first_evaluation)
-			clean_first_evaluation = false;
-		else
-			MutateRasterProgram(&new_picture);
-
-		double result = ExecuteRasterProgram(&new_picture); ++m_evaluations;
-
-		if (m_evaluations%1000==0)
-		{
-			double rate = 0;
 			clock_t next_rate_check_time = clock();
 
-			if (next_rate_check_time > last_rate_check_time)
+			if (next_rate_check_time > last_rate_check_time + CLOCKS_PER_SEC / 4)
 			{
 				double clock_delta = (double)(next_rate_check_time - last_rate_check_time);
-				rate = 1000.0 * (double)CLOCKS_PER_SEC / clock_delta;
+				rate = (double)(m_eval_gstate.m_evaluations - last_eval) * (double)CLOCKS_PER_SEC / clock_delta;
 
 				// clamp the rate if it is ridiculous... Allegro uses an unbounded sprintf(). :(
 				if (rate < 0 || rate > 10000000.0)
 					rate = 0;
 
 				last_rate_check_time = next_rate_check_time;
-			}
+				last_eval = m_eval_gstate.m_evaluations;
 
-			last_eval = m_evaluations;
-			textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %10llu  LastBest: %10llu  Cached ins: %8u Rate: %6.1f", m_evaluations,m_last_best_evaluation, line_cache_insn_pool_level, rate);
-			textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", NormalizeScore(m_best_result));
-		}
+				if (pending_update)
+				{
+					pending_update = false;
+					ShowLastCreatedPicture();
+				}
 
-		// store this solution 
-		if ( result<current_distance )
-		{
-			// show it only if mutation gives better picture and if a minimum amount of evals have gone by
-			if (result<m_best_result && m_evaluations - last_eval >= 500)
-			{
-				last_eval = m_evaluations;
-				ShowLastCreatedPicture();
-				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %10llu  LastBest: %10llu  Cached ins: %8u", m_evaluations,m_last_best_evaluation, line_cache_insn_pool_level);
-				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", NormalizeScore(result));
+				acquire_screen();
+				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %10llu  LastBest: %10llu  Rate: %6.1f", m_eval_gstate.m_evaluations, m_eval_gstate.m_last_best_evaluation, rate);
+				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", NormalizeScore(m_eval_gstate.m_best_result));
+				release_screen();
 				ShowMutationStats();
 			}
-
-			if (result<current_distance)
-			{
-				m_last_best_evaluation=m_evaluations;
-				m_previous_results[v]=result;
-				m_best_pic=new_picture;
-				m_best_result=result;
-			}
 		}
 
-		// I have tried to choose next mutation place depending on the error distance in the created picture, but the result was worse than that:
-		--m_currently_mutated_y;
+		__timeb64 t;
+		_ftime(&t);
 
-		if (m_evaluations % 10000 == 0)
+		timespec deadline;
+		deadline.tv_sec = t.time;
+		deadline.tv_nsec = t.millitm * 1000000 + 250000000;
+		if (deadline.tv_nsec >= 1000000000)
 		{
-			statistics_point stats;
-			stats.evaluations = m_evaluations;
-			stats.seconds = (unsigned)(time(NULL) - time_start);
-			stats.distance = current_distance;
-
-			m_statistics.push_back(stats);
+			deadline.tv_nsec -= 1000000000;
+			++deadline.tv_sec;
 		}
-		++m_previous_results_index;
+
+		if (ETIMEDOUT == pthread_cond_timedwait(&m_eval_gstate.m_condvar_update, &m_eval_gstate.m_mutex, &deadline))
+			continue;
+
+		if (m_eval_gstate.m_update_initialized)
+		{
+			m_eval_gstate.m_update_initialized = false;
+
+			for(size_t i=1; i<m_evaluators.size(); ++i)
+				m_evaluators[i].Start();
+
+			eval_inited = true;
+			pending_update = true;
+		}
+
+		if (m_eval_gstate.m_update_improvement)
+		{
+			m_eval_gstate.m_update_improvement = false;
+
+			pending_update = true;
+		}
+
+		if (m_eval_gstate.m_update_autosave)
+		{
+			m_eval_gstate.m_update_autosave = false;
+			SaveBestSolution();
+		}
+
+		if (m_eval_gstate.m_finished)
+		{
+			if (m_eval_gstate.m_best_result==0)
+			{
+				Message("FINISHED: distance=0");
+				Wait(1);
+			}
+
+			break;
+		}
 	}
+
+	m_eval_gstate.m_finished = true;
+
+	while(m_eval_gstate.m_threads_active > 0)
+	{
+		pthread_cond_wait(&m_eval_gstate.m_condvar_update, &m_eval_gstate.m_mutex);
+	}
+
+	pthread_mutex_unlock(&m_eval_gstate.m_mutex);
 }
 
 void RastaConverter::ShowLastCreatedPicture()
@@ -2624,17 +1602,18 @@ void RastaConverter::ShowLastCreatedPicture()
 	{
 		for (x=0;x<m_width;++x)
 		{
-			rgb atari_color=atari_palette[m_created_picture[y][x]];
+			rgb atari_color=atari_palette[m_eval_gstate.m_created_picture[y][x]];
 			int color=RGB2PIXEL(atari_color);
 			putpixel(output_bitmap,x,y,color);
 		}
 	}
 
-
+	acquire_screen();
 	if (desktop_width>=320*3)
-		stretch_blit(output_bitmap,screen,0,0,output_bitmap->w,output_bitmap->h,input_bitmap->w*2,0,output_bitmap->w*2,destination_bitmap->h);
+		stretch_blit(output_bitmap,screen,0,0,output_bitmap->w,output_bitmap->h,input_bitmap->w*2,0,output_bitmap->w*2,output_bitmap->h);
 	else
 		blit(output_bitmap,screen,0,0,m_width,0,m_width,m_height);
+	release_screen();
 }
 
 void RastaConverter::SavePMG(string name)
@@ -2666,9 +1645,9 @@ void RastaConverter::SavePMG(string name)
 			for (bit=0;bit<8;++bit)
 			{
 				if (y > (size_t)m_height)
-					sprites_memory[y][sprite][bit]=0;
+					m_eval_gstate.m_sprites_memory[y][sprite][bit]=0;
 
-				b|=(sprites_memory[y][sprite][bit])<<(7-bit);
+				b|=(m_eval_gstate.m_sprites_memory[y][sprite][bit])<<(7-bit);
 			}
 			fprintf(fp," %02X",b);
 			if (y%16==7)
@@ -2774,12 +1753,12 @@ void RastaConverter::LoadLAHC(string name)
 	unsigned long index;
 	fscanf(f, "%lu\n",&no_elements);
 	fscanf(f, "%lu\n",&index);
-	m_previous_results_index=index;
+	m_eval_gstate.m_previous_results_index=index;
 	for (size_t i=0;i<(size_t) no_elements;++i)
 	{
 		double dst=0;
 		fscanf(f, "%Lf\n",&dst);
-		m_previous_results.push_back(dst);
+		m_eval_gstate.m_previous_results.push_back(dst);
 	}
 	fclose(f);
 }
@@ -2818,15 +1797,15 @@ void RastaConverter::LoadRegInits(string name)
 					break;
 				case E_RASTER_STA:
 					if (instr.loose.target != E_TARGET_MAX)
-						m_best_pic.mem_regs_init[instr.loose.target] = a;
+						m_eval_gstate.m_best_pic.mem_regs_init[instr.loose.target] = a;
 					break;
 				case E_RASTER_STX:
 					if (instr.loose.target != E_TARGET_MAX)
-						m_best_pic.mem_regs_init[instr.loose.target] = x;
+						m_eval_gstate.m_best_pic.mem_regs_init[instr.loose.target] = x;
 					break;
 				case E_RASTER_STY:
 					if (instr.loose.target != E_TARGET_MAX)
-						m_best_pic.mem_regs_init[instr.loose.target] = y;
+						m_eval_gstate.m_best_pic.mem_regs_init[instr.loose.target] = y;
 					break;
 			}
 		}
@@ -2844,7 +1823,6 @@ void RastaConverter::LoadRasterProgram(string name)
 		error("Error loading Raster Program");
 
 	string line;
-	reg_a=0;
 
 	SRasterInstruction instr;
 	raster_line current_raster_line;
@@ -2861,7 +1839,7 @@ void RastaConverter::LoadRasterProgram(string name)
 		// get info about the file
 		pos=line.find("; Evaluations:");
 		if (pos!=string::npos)
-			m_evaluations=String2Value<unsigned int>(line.substr(pos+15));
+			m_eval_gstate.m_evaluations=String2Value<unsigned int>(line.substr(pos+15));
 
 		pos=line.find("; InputName:");
 		if (pos!=string::npos)
@@ -2884,7 +1862,7 @@ void RastaConverter::LoadRasterProgram(string name)
 		if (line.find("cmp byt2")!=string::npos && current_raster_line.cycles>0)
 		{
 			current_raster_line.rehash();
-			m_best_pic.raster_lines.push_back(current_raster_line);
+			m_eval_gstate.m_best_pic.raster_lines.push_back(current_raster_line);
 			current_raster_line.cycles=0;
 			current_raster_line.instructions.clear();
 			line_started = false;
@@ -2900,7 +1878,7 @@ void RastaConverter::LoadRasterProgram(string name)
 	}
 }
 
-bool RastaConverter::Resume1()
+bool RastaConverter::Resume()
 {
 	LoadRegInits("output.png.rp.ini");
 	LoadRasterProgram("output.png.rp");
@@ -2953,8 +1931,8 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
 	fprintf(fp,"; InputName: %s\n",cfg.input_file.c_str());
 	fprintf(fp,"; CmdLine: %s\n",cfg.command_line.c_str());
-	fprintf(fp,"; Evaluations: %u\n",m_evaluations);
-	fprintf(fp,"; Score: %g\n",NormalizeScore(m_best_result));
+	fprintf(fp,"; Evaluations: %u\n", m_eval_gstate.m_evaluations);
+	fprintf(fp,"; Score: %g\n",NormalizeScore(m_eval_gstate.m_best_result));
 	fprintf(fp,"; ---------------------------------- \n");
 
 	fprintf(fp,"; Proper offset \n");
@@ -3032,7 +2010,6 @@ double RastaConverter::NormalizeScore(double raw_score)
 {
 	return raw_score / (((double)m_width*(double)m_height)*(MAX_COLOR_DISTANCE/10000));
 }
-
 
 void close_button_procedure()
 {

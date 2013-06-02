@@ -1,4 +1,13 @@
 #include <allegro.h> 
+#undef int8_t
+#undef uint8_t
+#undef int16_t
+#undef uint16_t
+#undef int32_t
+#undef uint32_t
+#undef int64_t
+#undef uint64_t
+#include <stdint.h>
 #include "rasta.h"
 
 extern bool quiet;
@@ -8,9 +17,22 @@ int desktop_height;
 
 void quit_function(void);
 void close_button_procedure();
+void switch_in_callback(void);
 
 bool LoadAtariPalette(string filename);
 void create_cycles_table();
+
+RastaConverter rasta;
+
+// redraw destination pictures
+void switch_in_callback(void)
+{
+	acquire_screen();
+	clear_bitmap(screen);
+	release_screen();
+	rasta.ShowDestinationBitmap();
+	rasta.ShowInputBitmap();
+}
 
 int main(int argc, char *argv[])
 {	
@@ -25,11 +47,10 @@ int main(int argc, char *argv[])
 	Configuration cfg;
 	cfg.Process(argc, argv);
 
-	RastaConverter rasta;
 	if (cfg.continue_processing)
 	{
 		quiet=true;
-		rasta.Resume1();
+		rasta.Resume();
 		rasta.cfg.continue_processing=true;
 		quiet=false;
 	}
@@ -49,13 +70,14 @@ int main(int argc, char *argv[])
 
 		set_display_switch_mode(SWITCH_BACKGROUND);
 		set_window_close_hook(close_button_procedure);
+		set_display_switch_callback(SWITCH_IN, switch_in_callback);
 
 		set_window_title(rasta.cfg.command_line.c_str());
 	}
 	else
 		quiet=true;
 
-	LoadAtariPalette(rasta.cfg.palette_file);
+	rasta.LoadAtariPalette();
 
 	rasta.LoadInputBitmap();
 	if (rasta.ProcessInit())

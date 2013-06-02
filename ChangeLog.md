@@ -1,14 +1,20 @@
 ChangeLog
 =========
 
-RastaConverterBeta6      2012-07-!!!!!!!!!!! Ilmenit
+RastaConverterBeta7      2013-06-01 Ilmenit & Phaeron
 ----------------------------------------------
 
+* MULTI-THREADED version - many thanks to Phaeron!
 * Fixed bug causing crash with /dither=knoll + /preprocess 
-* /onoff option added to control used registers
-* Fix in Jarvis dithering
+* /onoff option added to control used registers - basic version
 * Optimized version of raster program (.rp) is saved as .opt
-
+* Changed default options to: /filter=box /pal=laoo
+* /height is automatically assigned to keep proportion of the screen if width:height is higher than 4:3
+* Fixed screen redraw when switching the application window
+* New dithering types: line and line2
+* Fixed Jarvis dithering
+* Fix in floyd dithering - should't produce that many vertical stripes
+* /picture_colors was buggy. Removed.
 
 RastaConverterBeta5.1      2012-07-18  Ilmenit
 ----------------------------------------------

@@ -1,4 +1,4 @@
-RastaConverter by Jakub 'Ilmenit' Debski / 04.2012
+RastaConverter by Jakub 'Ilmenit' Debski
 
 Usage:
 RastaConverter.exe InputFile [options]
@@ -26,7 +26,7 @@ Command line options:
   using other graphics program.
 
 /h=Output Height
-  Default: 240.
+  Default: Proportional to picture size rescaled to 320xheight or 240.
   Generated file height. The speed of the optimization process depends on the height.
   
 /continue
@@ -34,10 +34,9 @@ Command line options:
   be careful not to overwrite them with other instance of RastaConverter. 
 
 /pal=Palette File
-  Default: Palettes\altirra.act
+  Default: Palettes\laoo.act
   The output quality depends a lot on similarity between chosen Atari palette and the image palette.
   The default palette covers a large color range and is close to real Atari palette.
-  Converting GFX from C64 it is usually better to use: /pal=Palettes\laoo.act     
   You can also use shorcuts: /pal=laoo and the converter will try to load palette from 'Palettes\laoo.act'
   
 /dither=Dithering Type
@@ -46,7 +45,9 @@ Command line options:
   'floyd' is Floyd-Steinberg dithering - more "random" than chessboard dithering
   '2d' and 'simple' are between chess and floyd.
   'jarvis' dithering is more artistic
-  'knoll' is similar to Adobe patented pattern dithering algorithm
+  'knoll' is similar to Adobe patented pattern dithering algorithm. Very slow with /predistance=ciede (which is default!).
+  'line' dithering that tries to keep low number of color changes in line
+  'line2' similar to 'line'
 
 /dither_val=Dithering strength
   Default: 1, should be set from 0.0 to 3.0. 
@@ -66,10 +67,8 @@ Command line options:
   Default: 1
 
 /filter=Resize filter
-  Default: lanczos, other recommended: box  
+  Default: box
   Filter used to resize the picture to the Atari width=160 color pixels (40 bytes). 
-  For most of the pictures the default filter is the best, but converting pictures from C64
-  /filter=box is recommended - it preserves details better.
 	Possible filters are: lanczos, box, bicubic, bilinear, bspline, catmullrom
 
 /brightness=[-100,100]
@@ -83,10 +82,6 @@ Command line options:
 /gamma=[0.0-8.0]
   Default: 1.0
   Gamma color corection.
-
-/picture_colors
-  Limits palette to colors existing in the destination picture. No average colors will be used.
-  This is the default behavior when the number of unique colors on the picture is less than 5.
 
 /init=Initial optimization state
    Default: random
@@ -117,10 +112,11 @@ Command line options:
   ciede - uses the best visual color distance algorithm CIEDE2000, but can be very slow.
 
 /predistance=Color distance function for preprocess
-  Default: ciede, other options: euclid, ciede
+  Default: ciede, other options: euclid, yuv
 
   This option sets the preprocess color distance function to create destination picture.
   For the rest of the optimization the distance set by the /distance is used.
+  The default option /predistance=ciede is VERY slow with Knoll dithering.
     
 /max_evals=Maximum number of evaluations
   RastaConverter will save the current solution and exit when this limit is
@@ -157,6 +153,6 @@ HPOSP1 OFF 0 239
   be stopped f.e. by power outage. If you run many instances of RastaConverter /o option may be useful.
 
 Example:
-RastaConverter.exe c64.png /filter=box /h=200 /pal=laoo /s=1000
+RastaConverter.exe c64.png /threads=8 /s=1000
 
 

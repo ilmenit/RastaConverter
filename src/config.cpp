@@ -63,24 +63,28 @@ void Configuration::Process(int argc, char *argv[])
 
 	input_file = parser.getValue("i","NoFileName");
 	output_file = parser.getValue("o","output.png");
-	palette_file = parser.getValue("pal","Palettes/altirra.act");
+	palette_file = parser.getValue("pal","Palettes/laoo.act");
 
 	if (parser.switchExists("palette"))
-		palette_file = parser.getValue("palette","Palettes/altirra.act");
+		palette_file = parser.getValue("palette","Palettes/laoo.act");
 
 	string dst_name = parser.getValue("distance","yuv");
 	if (dst_name=="euclid")
 		dstf=E_DISTANCE_EUCLID;
-	else if (dst_name=="ciede")
+	else if (dst_name=="ciede" || dst_name=="ciede2000")
 		dstf=E_DISTANCE_CIEDE;
+	else if (dst_name=="cie94")
+		dstf=E_DISTANCE_CIE94;
 	else 
 		dstf=E_DISTANCE_YUV;
 
 	dst_name = parser.getValue("predistance","ciede");
 	if (dst_name=="euclid")
 		pre_dstf=E_DISTANCE_EUCLID;
-	else if (dst_name=="ciede")
+	else if (dst_name=="ciede" || dst_name=="ciede2000")
 		pre_dstf=E_DISTANCE_CIEDE;
+	else if (dst_name=="cie94")
+		pre_dstf=E_DISTANCE_CIE94;
 	else 
 		pre_dstf=E_DISTANCE_YUV;
 
@@ -88,6 +92,12 @@ void Configuration::Process(int argc, char *argv[])
 	string dither_value = parser.getValue("dither","none");
 	if (dither_value=="floyd")
 		dither=E_DITHER_FLOYD;
+	else if (dither_value=="rfloyd")
+		dither=E_DITHER_RFLOYD;
+	else if (dither_value=="line")
+		dither=E_DITHER_LINE;
+	else if (dither_value=="line2")
+		dither=E_DITHER_LINE2;
 	else if (dither_value=="chess" || dither_value=="cdither")
 		dither=E_DITHER_CHESS;
 	else if (dither_value=="2d")
@@ -110,16 +120,25 @@ void Configuration::Process(int argc, char *argv[])
 
 	string seed_val;
 	seed_val = parser.getValue("seed","random");
+
 	if (seed_val=="random")
-		init_genrand( (unsigned long) time( NULL ));
+		initial_seed = (unsigned long) time( NULL );
 	else
 	{
-		unsigned long seed=String2Value<unsigned long>(seed_val);
-		init_genrand( seed );
+		initial_seed = String2Value<unsigned long>(seed_val);
 	}
+
+	init_genrand( initial_seed );
 
 	details_file = parser.getValue("details","");
 	on_off_file = parser.getValue("onoff","");
+
+	threads = String2Value<int>(parser.getValue("threads", "1"));
+	if (threads < 1)
+		threads = 1;
+
+	if (threads > 32)
+		threads = 32;
 
 	string save_val = parser.getValue("save","0");
 	save_period=String2Value<int>(save_val);
@@ -157,12 +176,6 @@ void Configuration::Process(int argc, char *argv[])
 		gamma=0;
 	if (gamma>8)
 		gamma=8;
-
-
-	if (parser.switchExists("picture_colors"))
-		picture_colors_only=true;
-	else
-		picture_colors_only=false;
 	
 	if (!parser.switchExists("i"))
 	{
@@ -181,7 +194,7 @@ void Configuration::Process(int argc, char *argv[])
 
 	width=160; // constant in RastaConverter!
 
-	string rescale_filter_value = parser.getValue("filter","lanczos");
+	string rescale_filter_value = parser.getValue("filter","box");
 	if (rescale_filter_value=="box")
 		rescale_filter=FILTER_BOX;
 	else if (rescale_filter_value=="bicubic")
@@ -204,8 +217,10 @@ void Configuration::Process(int argc, char *argv[])
 	else
 		init_type=E_INIT_SMART;
 
-	string height_value = parser.getValue("h","240");
+	string height_value = parser.getValue("h","-1");
 	height=String2Value<int>(height_value);
+	if (height>240)
+		height=240;
 
 	string max_evals_value = parser.getValue("max_evals","1000000000000000000");
 	max_evals=String2Value<unsigned long long>(max_evals_value);

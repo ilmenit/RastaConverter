@@ -6,12 +6,20 @@ struct rgb {
 	unsigned char g;
 	unsigned char r;
 	unsigned char a;
-	bool operator==(const rgb &ar)
+	bool operator==(const rgb &ar) const
 	{
 		if (r==ar.r && g==ar.g && b==ar.b)
 			return true;
 		else
 			return false;
+	}
+};
+
+struct rgb_hash
+{
+	size_t operator()(const rgb& c) const
+	{
+		return c.b + ((size_t)c.g << 8) + ((size_t)c.r << 16) + ((size_t)c.a << 24);
 	}
 };
 
@@ -48,5 +56,7 @@ struct rgb_error {
 		r=0;
 	}
 };
+
+bool operator<(const rgb &l, const rgb &r);
 
 #endif
