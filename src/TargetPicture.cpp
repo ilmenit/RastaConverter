@@ -55,6 +55,7 @@ void SetDistanceFunction(e_distance_function dst)
 		break;
 	case E_DISTANCE_CIE94:
 		distance_function = RGBCIE94Distance;
+		break;
 	default:
 		distance_function = RGByuvDistance;
 	}

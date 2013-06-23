@@ -1,4 +1,4 @@
-const char *program_version="Beta7";
+const char *program_version="Beta7.1";
 
 #pragma warning (disable: 4312)
 #pragma warning (disable: 4996)

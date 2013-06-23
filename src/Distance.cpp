@@ -44,10 +44,10 @@ double cbrt(double d) {
 }
 
 
-typedef std::unordered_map < rgb, LabLch, rgb_hash > rgb_lab_map_t;
+typedef std::unordered_map < rgb, Lab, rgb_hash > rgb_lab_map_t;
 rgb_lab_map_t rgb_lab_map;
 
-static void RGB2LAB(const rgb &c, LabLch &result)
+static void RGB2LAB(const rgb &c, Lab &result)
 {
 	static pthread_rwlock_t rwlock=PTHREAD_RWLOCK_INITIALIZER;
 	pthread_rwlock_rdlock(&rwlock);  
@@ -61,7 +61,7 @@ static void RGB2LAB(const rgb &c, LabLch &result)
 	pthread_rwlock_unlock(&rwlock);  
 
 	pthread_rwlock_wrlock(&rwlock);  
-	auto r = rgb_lab_map.insert(rgb_lab_map_t::value_type(c, LabLch()));
+	auto r = rgb_lab_map.insert(rgb_lab_map_t::value_type(c, Lab()));
 	pthread_rwlock_unlock(&rwlock);  
 
 	if (!r.second)
@@ -117,36 +117,42 @@ static void RGB2LAB(const rgb &c, LabLch &result)
                 else
                         vz = (7.787f * vz) + (16.0f / 116.0f);
 
-                result.lab.L = 116.0f * vy - 16.0f;
-                result.lab.a = 500.0f * (vx - vy);
-                result.lab.b = 200.0f * (vy - vz);
-
+                result.L = 116.0f * vy - 16.0f;
+                result.a = 500.0f * (vx - vy);
+                result.b = 200.0f * (vy - vz);
 				r.first->second = result;
 	}
 }
 
 double CIE94(const double L1,const double a1,const double b1, 
 	const double L2,const double a2,const double b2) 
-{ 
-	double dl = L1 - L2;
-	double da = a1 - a2;
-	double db = b1 - b2;
-	double c1 = sqrt(a1 * a1 + b1 * b1);
-	double c2 = sqrt(a2 * a2 + b2 * b2);
-	double dc = c1 - c2;
-	double dh = sqrt((da * da) + (db * db) - (dc * dc));
+{
+		const double WHTL=1; //Weighting factors depending on the application (1 = default)
+		const double WHTC=1;
+		const double WHTH=1;		
 
-	double col_cie_kl=1.000;	// KL: 1.000 for graphics, 2.000 for textile
-	double col_cie_k1=0.045;	// K1: 0.045 for graphics, 0.048 for textile
-	double col_cie_k2=0.015;    // K2: 0.015 for graphics, 0.014 for textile
-
-	// Divide by the relevant factors
-	dl /= col_cie_kl;
-	dc /= (1 + (col_cie_k1 * c1));
-	dh /= (1 + (col_cie_k2 * c1));
-
-	return dl*dl + dc*dc + dh*dh;
+		double xC1 = sqrt( ( a1*a1 ) + ( b1*b1 ) );
+		double xC2 = sqrt( ( a2*a2 ) + ( b2*b2 ) );
+		double xDL = L2 - L1;
+		double xDC = xC2 - xC1;
+		double xDE = sqrt( ( ( L1 - L2 ) * ( L1 - L2 ) ) + ( ( a1 - a2 ) * ( a1 - a2 ) )+ ( ( b1 - b2 ) * ( b1 - b2 ) ) );
+		double xDH;
+		if ( sqrt( xDE ) > ( sqrt( abs( xDL ) ) + sqrt( abs( xDC ) ) ) ) 
+		{
+			xDH = sqrt( ( xDE * xDE ) - ( xDL * xDL ) - ( xDC * xDC ) );
+		}
+		else
+		{
+			xDH = 0;
+		}
+		double xSC = 1 + ( 0.045 * xC1 );
+		double xSH = 1 + ( 0.015 * xC1 );
+		xDL /= WHTL;
+		xDC /= WHTC * xSC;
+		xDH /= WHTH * xSH;
+		return sqrt( xDL*xDL + xDC*xDC + xDH*xDH );
 }
+
 
 double CIEDE2000(const double L1,const double a1,const double b1, 
                 const double L2,const double a2,const double b2) 
@@ -199,24 +205,24 @@ double CIEDE2000(const double L1,const double a1,const double b1,
 
 distance_t RGBCIE94Distance(const rgb &col1, const rgb &col2)
 {
-	LabLch first,second;
+	Lab first,second;
 	RGB2LAB(col1,first);
 	RGB2LAB(col2,second);
 
-	double dist= CIE94(first.lab.L,first.lab.a,first.lab.b, 
-		second.lab.L,second.lab.a,second.lab.b);
+	double dist= CIE94(first.L,first.a,first.b, 
+		               second.L,second.a,second.b);
 	return (distance_t)dist;
 }
 
 
 distance_t RGBCIEDE2000Distance(const rgb &col1, const rgb &col2)
 {
-	LabLch first,second;
+	Lab first,second;
 	RGB2LAB(col1,first);
 	RGB2LAB(col2,second);
 
-	double dist= CIEDE2000(first.lab.L,first.lab.a,first.lab.b, 
-                second.lab.L,second.lab.a,second.lab.b);
+	double dist= CIEDE2000(first.L,first.a,first.b, 
+                second.L,second.a,second.b);
 	return (distance_t)dist;
 }
 

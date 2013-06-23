@@ -23,18 +23,11 @@ struct rgb_hash
 	}
 };
 
-struct LabLch
+struct Lab
 {
-                struct{
-                        double L;
-                        double a;
-                        double b;
-                }lab;
-                struct{
-                        double L;
-                        double c;
-                        double h;
-                }lch;
+    double L;
+    double a;
+    double b;
 };
 
 
