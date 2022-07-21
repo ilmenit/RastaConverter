@@ -20,5 +20,5 @@ Examples
 ![Example3](http://github.com/ilmenit/RastaConverter/raw/master/examples/ilmenit-fairey_wood.xex-output.png)
 ![Example4](http://github.com/ilmenit/RastaConverter/raw/master/examples/ilmenit-landscape.xex-output.png)
 
-Atari executables for those and many other pictures can be downloaded [here](http://github.com/ilmenit/RastaConverter/raw/master/examples/atari-executables.zip).
+Atari executables for those and many other pictures can be downloaded [here](https://github.com/ilmenit/RastaConverter/blob/master/examples/atari-executables.zip?raw=true).
 
