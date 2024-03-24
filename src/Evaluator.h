@@ -89,7 +89,8 @@ public:
 	template<fn_rgb_distance& T_distance_function>
 	distance_accum_t CalculateLineDistance(const screen_line &r, const screen_line &l);
 
-	inline void ExecuteInstruction(const SRasterInstruction &instr, int x);
+	//inline void ExecuteInstruction(const SRasterInstruction &instr, int x);
+	inline void ExecuteInstruction(const SRasterInstruction &instr, int sprite_check_x, sprites_row_memory_t &spriterow, distance_accum_t &total_line_error);
 
 	void MutateRasterProgram(raster_picture *pic);
 	void MutateLine(raster_line &, raster_picture &pic);
@@ -104,6 +105,8 @@ private:
 	void StoreLineRegs();
 	void RestoreLineRegs();
 	void ResetSpriteShiftStartArray();
+	
+	void StartSpriteShift(int mem_reg);
 
 	unsigned m_width;
 	unsigned m_height;
@@ -127,6 +130,7 @@ private:
 	register_state m_old_reg_state;
 
 	unsigned char m_sprite_shift_regs[4];
+	unsigned char m_sprite_shift_emitted[4];
 	unsigned char m_sprite_shift_start_array[256];
 
 	insn_sequence_cache m_insn_seq_cache;

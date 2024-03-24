@@ -50,7 +50,7 @@ ipch/
 *.opensdf
 *.sdf
 *.cachefile
-src/.vs/*
+.vs/*
 
 # Visual Studio profiler
 *.psess

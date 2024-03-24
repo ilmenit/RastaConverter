@@ -1,4 +1,4 @@
-const char *program_version="Beta7.1";
+const char *program_version="Beta8";
 
 #pragma warning (disable: 4312)
 #pragma warning (disable: 4996)
@@ -1526,8 +1526,8 @@ void RastaConverter::FindBestSolution()
 				}
 
 				acquire_screen();
-				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %10llu  LastBest: %10llu  Rate: %6.1f", m_eval_gstate.m_evaluations, m_eval_gstate.m_last_best_evaluation, rate);
-				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f", NormalizeScore(m_eval_gstate.m_best_result));
+				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %10llu  LastBest: %10llu  Rate: %6.1f  ", m_eval_gstate.m_evaluations, m_eval_gstate.m_last_best_evaluation, rate);
+				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f  ", NormalizeScore(m_eval_gstate.m_best_result));
 				release_screen();
 				ShowMutationStats();
 			}

@@ -282,9 +282,18 @@ e_target Evaluator::FindClosestColorRegister(sprites_row_memory_t& spriterow, in
 
 			sprite_covers_colbak=true;
 
+			// never shifted out remaining sprite pixels combine with sprite memory
+			int sprite_leftover_pixel = 0;
+			int sprite_leftover = x_offset + m_sprite_shift_emitted[temp - E_COLPM0];
+			if (sprite_leftover < sprite_size)
+			{
+				int sprite_leftover_bit = sprite_leftover >> 2;
+				sprite_leftover_pixel = spriterow[temp - E_COLPM0][sprite_leftover_bit];
+			}
+
 //			distance = T_distance_function(pixel,atari_palette[mem_regs[temp]/2]);
 			distance = m_picture_all_errors[m_mem_regs[temp]/2][index];
-			if (spriterow[temp-E_COLPM0][sprite_bit])
+			if (spriterow[temp-E_COLPM0][sprite_bit] || sprite_leftover_pixel)
 			{
 				// priority of sprites - next sprites are hidden below that one, so they are not processed
 				best_sprite_bit=sprite_bit;
@@ -458,10 +467,14 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 			if (sprite_start_mask)
 			{
-				if (sprite_start_mask & 1) m_sprite_shift_regs[0] = m_mem_regs[E_HPOSP0];
-				if (sprite_start_mask & 2) m_sprite_shift_regs[1] = m_mem_regs[E_HPOSP1];
-				if (sprite_start_mask & 4) m_sprite_shift_regs[2] = m_mem_regs[E_HPOSP2];
-				if (sprite_start_mask & 8) m_sprite_shift_regs[3] = m_mem_regs[E_HPOSP3];
+				//if (sprite_start_mask & 1) m_sprite_shift_regs[0] = m_mem_regs[E_HPOSP0];
+				//if (sprite_start_mask & 2) m_sprite_shift_regs[1] = m_mem_regs[E_HPOSP1];
+				//if (sprite_start_mask & 4) m_sprite_shift_regs[2] = m_mem_regs[E_HPOSP2];
+				//if (sprite_start_mask & 8) m_sprite_shift_regs[3] = m_mem_regs[E_HPOSP3];
+				if (sprite_start_mask & 1) StartSpriteShift(E_HPOSP0);
+				if (sprite_start_mask & 2) StartSpriteShift(E_HPOSP1);
+				if (sprite_start_mask & 4) StartSpriteShift(E_HPOSP2);
+				if (sprite_start_mask & 8) StartSpriteShift(E_HPOSP3);
 			}
 
 			while(next_instr_offset<x && ip<rastinsncnt) // execute instructions
@@ -470,10 +483,11 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 				instr = &rastinsns[ip++];
 
-				if (cycle<4) // in the previous line
-					ExecuteInstruction(*instr,x+200);
-				else
-					ExecuteInstruction(*instr,x);
+				//if (cycle<4) // in the previous line
+				//	ExecuteInstruction(*instr,x+200);
+				//else
+				//	ExecuteInstruction(*instr,x);
+				ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
 
 				cycle+=GetInstructionCycles(*instr);
 				next_instr_offset=screen_cycles[cycle].offset;
@@ -535,7 +549,8 @@ distance_accum_t Evaluator::CalculateLineDistance(const screen_line &r, const sc
 	return distance;
 };
 
-inline void Evaluator::ExecuteInstruction(const SRasterInstruction &instr, int x)
+//inline void Evaluator::ExecuteInstruction(const SRasterInstruction &instr, int x)
+inline void Evaluator::ExecuteInstruction(const SRasterInstruction &instr, int sprite_check_x, sprites_row_memory_t &spriterow, distance_accum_t &total_line_error)
 {
 	int reg_value=-1;
 	switch(instr.loose.instruction)
@@ -565,6 +580,33 @@ inline void Evaluator::ExecuteInstruction(const SRasterInstruction &instr, int x
 		const unsigned hpos_index = (unsigned)(instr.loose.target - E_HPOSP0);
 		if (hpos_index < 4) 
 		{
+			// Check for unemulated 5 to 6 colour clock latency issues on player hpos changes.
+			// Unexpected horizontal lines appear in pictures otherwise when viewed on real
+			// hardware and modern emulators.
+			// This change strongly discourages the use of the solution for the line but does not
+			// make the problem horizontal lines show on screen when RastaConverter is running.
+			const int sprite_old_x = m_mem_regs[instr.loose.target];
+			const int sprite_new_x = reg_value;
+			const int sprites_visible_left = sprite_screen_color_cycle_start - sprite_size;
+			const int sprites_visible_right = sprite_screen_color_cycle_start + 160-1;
+			if (sprite_old_x != sprite_new_x && sprite_new_x >= sprites_visible_left && sprite_new_x <= sprites_visible_right)
+			{
+				// check if anything to display
+				int sprite_bits;
+				const int sprite = hpos_index;
+				for (sprite_bits = 7; sprite_bits >= 0; --sprite_bits)
+				{
+					if (spriterow[sprite][sprite_bits])
+						break;
+				}
+				if (sprite_bits >= 0 && sprite_old_x - sprite_check_x <= 6 && sprite_old_x - sprite_check_x > 0)
+					// too late to prevent display at old position
+					total_line_error += 100000;
+				if (sprite_bits >= 0 && sprite_new_x - sprite_check_x <= 6 && sprite_new_x - sprite_check_x > 0)
+					// too late to change display to new position
+					total_line_error += 100000;
+			}
+
 			m_sprite_shift_start_array[m_mem_regs[instr.loose.target]] &= ~(1 << hpos_index);
 			m_mem_regs[instr.loose.target]=reg_value;
 			m_sprite_shift_start_array[m_mem_regs[instr.loose.target]] |= (1 << hpos_index);
@@ -574,6 +616,20 @@ inline void Evaluator::ExecuteInstruction(const SRasterInstruction &instr, int x
 			m_mem_regs[instr.loose.target]=reg_value;
 		}
 	}
+}
+
+void Evaluator::StartSpriteShift(int mem_reg)
+{
+	unsigned char sprite_self_overlap = m_mem_regs[mem_reg] - m_sprite_shift_regs[mem_reg-E_HPOSP0];
+	if (sprite_self_overlap > 0 && sprite_self_overlap < sprite_size)
+		// number of sprite bits shifted out from the old position
+		m_sprite_shift_emitted[mem_reg-E_HPOSP0] = sprite_self_overlap;
+	else
+		// default is all sprite bits shifted out, no leftover
+		m_sprite_shift_emitted[mem_reg-E_HPOSP0] = sprite_size;
+
+	// new shift out starting now at this position
+	m_sprite_shift_regs[mem_reg-E_HPOSP0] = m_mem_regs[mem_reg];
 }
 
 void Evaluator::MutateLine(raster_line &prog, raster_picture &pic)
