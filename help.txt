@@ -3,20 +3,20 @@ RastaConverter by Jakub 'Ilmenit' Debski
 Usage:
 RastaConverter.exe InputFile [options]
 
-To save the output during the optimization process press 's' key.
+To save the output during the optimization process, press the 's' key.
 
 Copy created output files to the Generator directory and run 'build.bat' to create executable file.
 
 The application displays three images:
 - the left one is the original picture resized to Atari width.
 - the right one is the original picture mapped to choosen Atari palette. This is our goal to reach.
-- the cental one is preview of the output picture.
+- the central one is a preview of the output picture.
 
-If the colors on the right image are wrong (f.e. too gray) then try some different palette file
-or remap original picture to choosen palette file using other tool f.e. Timanthes.
+If the colors on the right image are wrong (e.g. too gray) then try a different palette file
+or remap original picture to choosen palette file using other another tool e.g. Timanthes.
 Below on the screen are some statistics from the optimization process.
 With the current algorithm the longer you wait, the better results you get. 
-For some pictures more than 1 million of evaluations is needed to get really good results.
+For some pictures, more than 1 million evaluations are needed to get really good results.
 
 Command line options:
 
@@ -46,7 +46,7 @@ Command line options:
   '2d' and 'simple' are between chess and floyd.
   'jarvis' dithering is more artistic
   'knoll' is similar to Adobe patented pattern dithering algorithm. Very slow with /predistance=ciede (which is default!).
-  'line' dithering that tries to keep low number of color changes in line
+  'line' dithering that tries to keep a low number of color changes on the line
   'line2' similar to 'line'
 
 /dither_val=Dithering strength
@@ -119,8 +119,7 @@ Command line options:
   The default option /predistance=ciede is VERY slow with Knoll dithering.
     
 /max_evals=Maximum number of evaluations
-  RastaConverter will save the current solution and exit when this limit is
-  reached.
+  RastaConverter will save the current solution and exit when this limit is reached.
 
 /onoff=OnOff File
   Text file that describes where to turn on and turn off usable registers. The format of each line in "OnOff file" is:
@@ -150,7 +149,7 @@ HPOSP1 OFF 0 239
 /save=number of solutions
   Default: 0
   Saves best solution after every 'n' evaluations. This is useful for a long-run optimizations, when the run can
-  be stopped f.e. by power outage. If you run many instances of RastaConverter /o option may be useful.
+  be stopped by power outage for example. If you run many instances of RastaConverter /o option may be useful.
 
 Example:
 RastaConverter.exe c64.png /threads=8 /s=1000
