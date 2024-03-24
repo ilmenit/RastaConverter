@@ -49,6 +49,11 @@ const char *program_version="Beta8";
 #include "Evaluator.h"
 #include "TargetPicture.h"
 
+#ifndef _MSC_EXTENSIONS
+#define __timeb64 timeb
+#define _ftime ftime
+#endif
+
 // Cycle where WSYNC starts - 105?
 #define WSYNC_START 104
 // Normal screen CPU cycle 24-104 = 80 cycles = 160 color cycles
@@ -661,7 +666,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 	{
 		if (line.empty())
 			continue;
-		std::transform(line.begin(), line.end(), line.begin(), toupper);
+		std::transform(line.begin(), line.end(), line.begin(), ::toupper);
 
 		stringstream sl(line);
 		string reg, value;
