@@ -5,6 +5,7 @@
 #include "Distance.h"
 #include "rgb.h"
 
+#undef M_PI
 const double M_PI = 3.14159265358979323846;
 
 using namespace std;

@@ -1,8 +1,10 @@
 #ifndef RASTA_H
 #define RASTA_H
 
+#ifdef _MSC_VER
 #pragma warning (disable: 4312)
 #pragma warning (disable: 4996)
+#endif
 
 #include <math.h>
 #include <vector>

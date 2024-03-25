@@ -2,6 +2,7 @@
 #define INSNSEQUENCECACHE_H
 
 #include <stdint.h>
+#include <cstring>
 
 #include "RasterInstruction.h"
 #include "LinearAllocator.h"

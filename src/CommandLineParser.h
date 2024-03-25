@@ -10,14 +10,13 @@ For commercial use, a written permission from the author is required.
 This code is given without any warranties. You should use it at your own risk. Author is NOT
 liable for any damage caused due to use of this code even if incidental.
 */
+#pragma once
 #if !defined(AFX_COMMANDLINEVALUEPAIRS_H__C9352603_89D1_4382_B303_6367A5FCB40B__INCLUDED_)
 #define AFX_COMMANDLINEVALUEPAIRS_H__C9352603_89D1_4382_B303_6367A5FCB40B__INCLUDED_
 
 #if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
-
 #pragma warning (disable:4786)
+#endif // _MSC_VER > 1000
 
 // Standard Libs
 

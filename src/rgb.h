@@ -1,6 +1,8 @@
 #ifndef RGB_H
 #define RGB_H
 
+#include <cstddef>
+
 struct rgb {
 	unsigned char b;
 	unsigned char g;

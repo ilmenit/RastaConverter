@@ -8,6 +8,7 @@
 #include "LineCache.h"
 #include "TargetPicture.h"
 #include "mt19937int.h"
+#include <cfloat>
 
 const size_t CACHE_SIZE_LIMIT = 64*1024*1024;
 
