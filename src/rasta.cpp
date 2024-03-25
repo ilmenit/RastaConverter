@@ -1,7 +1,9 @@
 const char *program_version="Beta8";
 
+#ifdef _MSC_VER
 #pragma warning (disable: 4312)
 #pragma warning (disable: 4996)
+#endif
 
 #include <math.h>
 #include <cmath>
@@ -34,7 +36,7 @@ const char *program_version="Beta8";
 #include <float.h>
 #include <iostream>
 #include <fstream>
-#include <strstream>
+#include <sstream>
 #include <sstream>
 #include <ctype.h>
 #include <iomanip>
@@ -105,7 +107,7 @@ extern int desktop_height;
 
 bool user_closed_app=false;
 
-void Message(char *message)
+static void Message(const char *message)
 {
 	if (quiet)
 		return;
@@ -116,22 +118,27 @@ void Message(char *message)
 	release_screen();
 }
 
-void Message(char *message, int i)
-{
-	if (quiet)
-		return;
-
-	acquire_screen();
-	rectfill(screen,0,440,640,460,0);
-	textprintf_ex(screen, font, 0, 440, makecol(0xF0,0xF0,0xF0), 0, "%s %d", message,i);
-	release_screen();
-}
-
-
 using namespace std;
 using namespace Epoch::Foundation;
 
-#define PIXEL2RGB(p) (*((rgb*) &p))
+static rgb PIXEL2RGB(uint32_t &p)
+{
+	rgb x;
+	x.b = (p      )&0xFF;
+	x.g = (p >> 8 )&0xFF;
+	x.r = (p >> 16)&0xFF;
+	x.a = (p >> 24)&0xFF;
+	return x;
+}
+static rgb PIXEL2RGB(RGBQUAD &q)
+{
+	rgb x;
+	x.b = q.rgbBlue;
+	x.g = q.rgbGreen;
+	x.r = q.rgbRed;
+	x.a = q.rgbReserved;
+	return x;
+}
 #define RGB2PIXEL(p) (*((int*) &p))
 
 set < unsigned char > color_indexes_on_dst_picture;
@@ -140,7 +147,7 @@ OnOffMap on_off;
 
 Evaluator eval;
 
-char *mem_regs_names[E_TARGET_MAX+1]=
+const char *mem_regs_names[E_TARGET_MAX+1]=
 {
 	"COLOR0",
 	"COLOR1",
@@ -183,7 +190,7 @@ void create_cycles_table()
 	screen_cycles[cpu_xpos-1].length=(antic_xpos-24)*2;
 }
 
-char *mutation_names[E_MUTATION_MAX]=
+const char *mutation_names[E_MUTATION_MAX]=
 {
 	"PushBack2Prev ",
 	"Copy2NextLine ",
@@ -269,7 +276,7 @@ void RastaConverter::SaveLAHC(const char *fn)
 	fprintf(f, "%lu\n",(unsigned long) m_eval_gstate.m_previous_results_index);
 	for (size_t i=0;i<m_eval_gstate.m_previous_results.size();++i)
 	{
-		fprintf(f, "%Lf\n",m_eval_gstate.m_previous_results[i]);
+		fprintf(f, "%Lf\n",(long double)m_eval_gstate.m_previous_results[i]);
 	}
 	fclose(f);
 }
@@ -643,7 +650,7 @@ void RastaConverter::PrepareDestinationPicture()
 	{
 		for (int x=0;x<input_bitmap->w;++x)
 		{
-			int color = getpixel(destination_bitmap,x,y);
+			uint32_t color = getpixel(destination_bitmap,x,y);
 			rgb out_pixel=PIXEL2RGB(color);
 			m_picture[y][x]=out_pixel; // copy it always - it is used by the color distance cache m_picture_all_errors
 		}
@@ -811,6 +818,8 @@ unsigned char ConvertColorRegisterToRawData(e_target t)
 		return 2;
 	case E_COLOR2:
 		return 3;
+	default:
+		;
 	}
 	assert(0); // this should never happen
 	return -1;
@@ -1059,7 +1068,7 @@ void RastaConverter::CreateEmptyRasterPicture(raster_picture *r)
 	i.loose.instruction=E_RASTER_NOP;
 	i.loose.target=E_COLBAK;
 	i.loose.value=0;
-	int size = FreeImage_GetWidth(fbitmap);
+	FreeImage_GetWidth(fbitmap);
 	// in line 0 we set init registers
 	for (size_t y=0;y<r->raster_lines.size();++y)
 	{
@@ -1642,7 +1651,7 @@ void RastaConverter::SavePMG(string name)
 
 	for(sprite=0;sprite<4;++sprite)
 	{
-		fprintf(fp,"player%d\n",sprite);
+		fprintf(fp,"player%d\n",(int)sprite);
 		fprintf(fp,"\t.he 00 00 00 00 00 00 00 00");
 		for (y=0;y<240;++y)
 		{
@@ -1665,13 +1674,13 @@ void RastaConverter::SavePMG(string name)
 
 bool GetInstructionFromString(const string& line, SRasterInstruction &instr)
 {
-	static char *load_names[3]=
+	static const char *load_names[3]=
 	{
 		"lda",
 		"ldx",
 		"ldy",
 	};
-	static char *store_names[3]=
+	static const char *store_names[3]=
 	{
 		"sta",
 		"stx",
@@ -1761,7 +1770,7 @@ void RastaConverter::LoadLAHC(string name)
 	m_eval_gstate.m_previous_results_index=index;
 	for (size_t i=0;i<(size_t) no_elements;++i)
 	{
-		double dst=0;
+		long double dst=0;
 		fscanf(f, "%Lf\n",&dst);
 		m_eval_gstate.m_previous_results.push_back(dst);
 	}
@@ -1894,7 +1903,6 @@ bool RastaConverter::Resume()
 
 void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 {
-	int y;
 	Message("Saving Raster Program");
 
 	FILE *fp=fopen(string(name+".ini").c_str(),"wt+");
@@ -1907,7 +1915,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 
 	fprintf(fp,"\n; Initial values \n");
 
-	for(y=0;y<sizeof(pic->mem_regs_init);++y)
+	for(size_t y=0;y<sizeof(pic->mem_regs_init);++y)
 	{
 		fprintf(fp,"\tlda ");
 		fprintf(fp,"#$%02X\n",pic->mem_regs_init[y]);		
@@ -1936,7 +1944,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
 	fprintf(fp,"; InputName: %s\n",cfg.input_file.c_str());
 	fprintf(fp,"; CmdLine: %s\n",cfg.command_line.c_str());
-	fprintf(fp,"; Evaluations: %u\n", m_eval_gstate.m_evaluations);
+	fprintf(fp,"; Evaluations: %lu\n", (long unsigned)m_eval_gstate.m_evaluations);
 	fprintf(fp,"; Score: %g\n",NormalizeScore(m_eval_gstate.m_best_result));
 	fprintf(fp,"; ---------------------------------- \n");
 
@@ -1947,7 +1955,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	fprintf(fp,"\tnop\n");
 	fprintf(fp,"\tcmp byt2;\n");
 
-	for(y=0;y<input_bitmap->h;++y)
+	for(int y=0;y<input_bitmap->h;++y)
 	{
 		fprintf(fp,"line%d\n",y);
 		size_t prog_len=pic->raster_lines[y].instructions.size();
