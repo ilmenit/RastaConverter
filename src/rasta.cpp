@@ -555,7 +555,7 @@ void RastaConverter::OtherDithering()
 
 void RastaConverter::ShowInputBitmap()
 {
-	if (!cfg.preprocess_only)
+	if (!cfg.preprocess_only && input_bitmap)
 	{
 		acquire_screen();
 		if (desktop_width>=320*3)
@@ -591,7 +591,7 @@ void RastaConverter::ShowDestinationLine(int y)
 
 void RastaConverter::ShowDestinationBitmap()
 {
-	if (!cfg.preprocess_only)
+	if (!cfg.preprocess_only && destination_bitmap)
 	{
 		acquire_screen();
 		if (desktop_width>=320*3)
