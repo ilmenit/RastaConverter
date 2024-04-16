@@ -1,6 +1,17 @@
 ChangeLog
 =========
 
+RastaConverterBeta9      2024-04-17 
+* fixed sprite repositioning bug (sheddy, phaeron)
+* removed dependency on Allegro 4 library, replaced by SDL2
+* 64bit version released
+* removed threads limit for /threads param
+* by default auto-save enabled (each 100K iterations)
+* improved build for Linux (dmsc, polluks)
+* improved help file (snicklin99)
+* LLVM compiler used for extra speed (sheddy)
+* removed --help parameter that was pointing to help.txt file
+
 RastaConverterBeta7      2013-06-01 Ilmenit & Phaeron
 ----------------------------------------------
 

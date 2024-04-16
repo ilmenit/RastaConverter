@@ -1,17 +1,12 @@
+#include <time.h>
+#include <list>
 #include "config.h"
 #include "string_conv.h"
-#include <time.h>
 #include "mt19937int.h"
-
-#include <list>
 
 using namespace std;
 
 extern int solutions;
-
-void ShowHelp();
-void error(char *e);
-void error(char *e, int i);
 
 void Configuration::ProcessCmdLine()
 {
@@ -137,10 +132,10 @@ void Configuration::Process(int argc, char *argv[])
 	if (threads < 1)
 		threads = 1;
 
-	if (threads > 32)
-		threads = 32;
+	// no more threads limit
 
-	string save_val = parser.getValue("save","0");
+	// auto-save is on by default
+	string save_val = parser.getValue("save","100000");
 	save_period=String2Value<int>(save_val);
 
 	string details_val2 = parser.getValue("details_val","0.5");
@@ -186,11 +181,7 @@ void Configuration::Process(int argc, char *argv[])
 			if (temp.find("/")==string::npos)
 				input_file=temp;
 		}
-		else
-			ShowHelp();
 	}
-	if (parser.switchExists("help") || parser.nonInterpretedExists("--help") || parser.switchExists("?"))
-		ShowHelp();
 
 	width=160; // constant in RastaConverter!
 

@@ -147,9 +147,13 @@ HPOSP1 OFF 0 239
 /seed = seed for the random number generator
 
 /save=number of solutions
-  Default: 0
+  Default: 100000
+  To disable set: 0
   Saves best solution after every 'n' evaluations. This is useful for a long-run optimizations, when the run can
   be stopped by power outage for example. If you run many instances of RastaConverter /o option may be useful.
+
+/threads=number of threads
+  Set number of processing threads running in parallel (1 to your number of cores).
 
 Example:
 RastaConverter.exe c64.png /threads=8 /s=1000
