@@ -1,6 +1,6 @@
 #pragma once
 
-#ifndef NO_GUI
+#ifdef NO_GUI
 
 #include <string>
 #include "FreeImage.h"

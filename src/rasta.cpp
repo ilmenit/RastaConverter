@@ -83,7 +83,7 @@ void RastaConverter::Message(std::string message)
 	if (quiet)
 		return;
 
-	gui.DisplayText(0, 440, message);
+	gui.DisplayText(0, 440, message + string("                    "));
 }
 
 using namespace std;
@@ -762,7 +762,6 @@ bool RastaConverter::ProcessInit()
 		randseed += 187927 * i;
 	}
 
-	Message("                                             ");
 	return true;
 }
 
@@ -1417,10 +1416,9 @@ RastaConverter::RastaConverter()
 
 void RastaConverter::MainLoop()
 {
+	Message("Optimization started.");
 
-	input_bitmap = FreeImage_Allocate(cfg.width, cfg.height, 24);
 	output_bitmap = FreeImage_Allocate(cfg.width, cfg.height, 24);
-	destination_bitmap = FreeImage_Allocate(cfg.width, cfg.height, 24);
 
 	FindPossibleColors();
 
@@ -1465,6 +1463,22 @@ void RastaConverter::MainLoop()
 
 				ShowMutationStats();
 
+				switch (gui.NextFrame())
+				{
+				case GUI_command::SAVE:
+					SaveBestSolution();
+					Message("Saved.");
+					break;
+				case GUI_command::STOP:
+					running = false;
+					break;
+				case GUI_command::REDRAW:
+					ShowInputBitmap();
+					ShowDestinationBitmap();
+					ShowLastCreatedPicture();
+					ShowMutationStats();
+					break;
+				}
 			}
 		}
 
@@ -1513,24 +1527,6 @@ void RastaConverter::MainLoop()
 			{
 				Message("FINISHED: distance=0");
 			}
-			break;
-		}
-
-		switch (gui.NextFrame())
-		{
-		case GUI_command::SAVE:
-			SaveBestSolution();
-			Message("Saved.               ");
-			break;
-		case GUI_command::STOP:
-			running = false;
-			break;
-		case GUI_command::REDRAW:
-			ShowInputBitmap();
-			ShowDestinationBitmap();
-			ShowLastCreatedPicture();
-			ShowMutationStats();
-//			gui.NextFrame();
 			break;
 		}
 	}

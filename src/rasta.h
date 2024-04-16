@@ -15,7 +15,6 @@
 #include <set>
 #include <algorithm>
 #include <string>
-
 #include "FreeImage.h"
 #include "CommandLineParser.h"
 #include "config.h"
@@ -41,7 +40,7 @@ class RastaConverter {
 private:
 
 #ifdef NO_GUI
-	RastaConsole gui
+	RastaConsole gui;
 #else;
 	RastaSDL gui;
 #endif

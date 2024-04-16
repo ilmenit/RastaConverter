@@ -1,4 +1,4 @@
-#ifndef NO_GUI
+#ifdef NO_GUI
 #include "RastaConsole.h"
 #include <iostream>
 
