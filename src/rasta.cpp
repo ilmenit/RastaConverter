@@ -17,8 +17,6 @@ const char *program_version="Beta8";
 #include <sys/timeb.h>
 #include "FreeImage.h"
 
-#include <allegro.h> 
-
 #undef int8_t
 #undef uint8_t
 #undef int16_t
@@ -65,25 +63,9 @@ int solutions=1;
 
 bool quiet=false;
 
-void quit_function(void)
+void RastaConverter::Error(std::string e)
 {
-	allegro_exit();
-	exit(0);
-}
-
-void error(const char *e)
-{
-	if (!quiet)
-		allegro_message(e);
-	allegro_exit();
-	exit(1);
-}
-
-void error(const char *e, int i)
-{
-	if (!quiet)
-		allegro_message("%s %d",e,i);
-	allegro_exit();
+	gui.Error(e);
 	exit(1);
 }
 
@@ -95,41 +77,18 @@ int random(int range)
 	return genrand_int32()%range;
 }
 
-void ShowHelp()
-{
-	if (!quiet)
-		error("RastaConverter by Jakub Debski 2012-2013\n\nRastaConverter.exe InputFile [options]\n\nRead help.txt for help");
-}
 
-extern int screen_color_depth;
-extern int desktop_width;
-extern int desktop_height;
-
-bool user_closed_app=false;
-
-static void Message(const char *message)
+void RastaConverter::Message(std::string message)
 {
 	if (quiet)
 		return;
 
-	acquire_screen();
-	rectfill(screen,0,440,640,460,0);
-	textprintf_ex(screen, font, 0, 440, makecol(0xF0,0xF0,0xF0), 0, "%s", message);
-	release_screen();
+	gui.DisplayText(0, 440, message);
 }
 
 using namespace std;
 using namespace Epoch::Foundation;
 
-static rgb PIXEL2RGB(uint32_t &p)
-{
-	rgb x;
-	x.b = (p      )&0xFF;
-	x.g = (p >> 8 )&0xFF;
-	x.r = (p >> 16)&0xFF;
-	x.a = (p >> 24)&0xFF;
-	return x;
-}
 static rgb PIXEL2RGB(RGBQUAD &q)
 {
 	rgb x;
@@ -139,7 +98,16 @@ static rgb PIXEL2RGB(RGBQUAD &q)
 	x.a = q.rgbReserved;
 	return x;
 }
-#define RGB2PIXEL(p) (*((int*) &p))
+
+static RGBQUAD RGB2PIXEL(rgb& val)
+{
+	RGBQUAD fpixel;
+	fpixel.rgbRed = val.r;
+	fpixel.rgbGreen = val.g;
+	fpixel.rgbBlue = val.b;
+	return fpixel;
+}
+
 
 set < unsigned char > color_indexes_on_dst_picture;
 
@@ -217,36 +185,47 @@ void RastaConverter::LoadAtariPalette()
 {
 	Message("Loading palette");
 	if (!::LoadAtariPalette(cfg.palette_file))
-		error("Error opening .act palette file");
+		Error("Error opening .act palette file");
 }
 
-bool RastaConverter::SavePicture(string filename, BITMAP *to_save)
+// Function to rescale FIBITMAP to double its width
+FIBITMAP* RescaleFIBitmapDoubleWidth(FIBITMAP* originalFiBitmap) {
+	int originalWidth = FreeImage_GetWidth(originalFiBitmap);
+	int originalHeight = FreeImage_GetHeight(originalFiBitmap);
+
+	// Calculate the new width as double the original width
+	int newWidth = originalWidth * 2;
+
+	// Use FreeImage_Rescale to create a new bitmap with the new dimensions
+	FIBITMAP* rescaledFiBitmap = FreeImage_Rescale(originalFiBitmap, newWidth, originalHeight, FILTER_BOX);
+
+	return rescaledFiBitmap;
+}
+
+bool RastaConverter::SavePicture(const std::string& filename, FIBITMAP* to_save)
 {
-	Message("Saving picture");
+	// Assuming to_save is already in the correct format and size
+	// No need to create a new bitmap or stretch_blit
 
-	BITMAP *expected_bitmap = create_bitmap_ex(screen_color_depth,cfg.width*2,cfg.height);
+	FIBITMAP* stretched = RescaleFIBitmapDoubleWidth(to_save);
 
-	stretch_blit(to_save,expected_bitmap,0,0,to_save->w,to_save->h,0,0,expected_bitmap->w,expected_bitmap->h);
-	// copy expected bitmap to FreeImage bitmap to save it as png
-	FIBITMAP *f_outbitmap = FreeImage_Allocate(expected_bitmap->w,expected_bitmap->h, 24);	
+	// Flip the image vertically
+	FreeImage_FlipVertical(stretched);
 
-	int x,y;
-	int color;
-	for (y=0;y<expected_bitmap->h;++y)
+	// Save the image as a PNG
+	if (FreeImage_Save(FIF_PNG, stretched, filename.c_str()))
 	{
-		for (x=0;x<expected_bitmap->w;++x)
-		{
-			color = getpixel( expected_bitmap,x,y);
-			FreeImage_SetPixelColor(f_outbitmap, x, y, (RGBQUAD *)&color);
-		}
+		// If the image is saved successfully
+		FreeImage_Unload(stretched);
+		return true;
 	}
-
-	FreeImage_FlipVertical(f_outbitmap);
-	FreeImage_Save(FIF_PNG,f_outbitmap,filename.c_str());
-	FreeImage_Unload(f_outbitmap);
-	return true;
+	else
+	{
+		// If there was an error saving the image
+		Error(string("Error saving picture.")+filename);
+		return false;
+	}
 }
-
 void RastaConverter::SaveStatistics(const char *fn)
 {
 	FILE *f = fopen(fn, "w");
@@ -284,17 +263,17 @@ void RastaConverter::SaveLAHC(const char *fn)
 bool RastaConverter::LoadInputBitmap()
 {
 	Message("Loading and initializing file");
-	fbitmap = FreeImage_Load(FreeImage_GetFileType(cfg.input_file.c_str()), cfg.input_file.c_str(), 0);
-	if (!fbitmap)
-		error("Error loading input file");
+	input_bitmap = FreeImage_Load(FreeImage_GetFileType(cfg.input_file.c_str()), cfg.input_file.c_str(), 0);
+	if (!input_bitmap)
+		Error(string("Error loading input file: ") + cfg.input_file);
 
-	unsigned int input_width=FreeImage_GetWidth(fbitmap);
-	unsigned int input_height=FreeImage_GetHeight(fbitmap);
+	unsigned int input_width=FreeImage_GetWidth(input_bitmap);
+	unsigned int input_height=FreeImage_GetHeight(input_bitmap);
 
 	if (cfg.height==-1) // set height automatic to keep screen proportions
 	{
-		float iw=input_width;
-		float ih=input_height;
+		double iw= (double) input_width;
+		double ih= (double) input_height;
 		if ( iw/ih > (320.0/240.0) ) // 4:3 = 320:240
 		{
 			ih=input_height / (input_width/320.0);
@@ -304,22 +283,14 @@ bool RastaConverter::LoadInputBitmap()
 			cfg.height=240;
 	}
 	
-	fbitmap=FreeImage_Rescale(fbitmap,cfg.width,cfg.height,cfg.rescale_filter);
+	input_bitmap = FreeImage_Rescale(input_bitmap,cfg.width,cfg.height,cfg.rescale_filter);
+	input_bitmap = FreeImage_ConvertTo24Bits(input_bitmap);
 
-	if (screen_color_depth==32)
-		fbitmap=FreeImage_ConvertTo32Bits(fbitmap);
-	else
-		fbitmap=FreeImage_ConvertTo24Bits(fbitmap);
+	FreeImage_AdjustBrightness(input_bitmap,cfg.brightness);
+	FreeImage_AdjustContrast(input_bitmap,cfg.contrast);
+	FreeImage_AdjustGamma(input_bitmap,cfg.gamma);
 
-	FreeImage_AdjustBrightness(fbitmap,cfg.brightness);
-	FreeImage_AdjustContrast(fbitmap,cfg.contrast);
-	FreeImage_AdjustGamma(fbitmap,cfg.gamma);
-
-	FreeImage_FlipVertical(fbitmap);
-
-	input_bitmap  = create_bitmap_ex(screen_color_depth,cfg.width,cfg.height);
-	output_bitmap  = create_bitmap_ex(screen_color_depth,cfg.width,cfg.height);
-	destination_bitmap  = create_bitmap_ex(screen_color_depth,cfg.width,cfg.height);
+	FreeImage_FlipVertical(input_bitmap);
 
 	m_height=(int) cfg.height;
 	m_width=(int) cfg.width;
@@ -329,28 +300,29 @@ bool RastaConverter::LoadInputBitmap()
 
 void RastaConverter::InitLocalStructure()
 {
-	int x,y;
+	unsigned x,y;
 
 	//////////////////////////////////////////////////////////////////////////
 	// Set our structure size
 
-	resize_rgb_picture(&m_picture,input_bitmap->w,input_bitmap->h);
+	unsigned width = FreeImage_GetWidth(input_bitmap);
+	unsigned height = FreeImage_GetHeight(input_bitmap);
+	resize_rgb_picture(&m_picture, width, height);
 
 	// Copy data to input_bitmap and to our structure
 	RGBQUAD fpixel;
 	rgb atari_color;
-	for (y=0;y<input_bitmap->h;++y)
+	for (y=0;y<height;++y)
 	{
-		for (x=0;x<input_bitmap->w;++x)
+		for (x=0;x<width;++x)
 		{
-			FreeImage_GetPixelColor(fbitmap, x, y, &fpixel);
-			putpixel( input_bitmap,x,y,makecol(fpixel.rgbRed,fpixel.rgbGreen,fpixel.rgbBlue));
+			FreeImage_GetPixelColor(input_bitmap, x, y, &fpixel);
 			atari_color=PIXEL2RGB(fpixel);
 			m_picture[y][x]=atari_color;
 			fpixel.rgbRed=atari_color.r;
 			fpixel.rgbGreen=atari_color.g;
 			fpixel.rgbBlue=atari_color.b;
-			FreeImage_SetPixelColor(fbitmap, x, y, &fpixel);
+			FreeImage_SetPixelColor(input_bitmap, x, y, &fpixel);
 		}
 	}
 
@@ -366,7 +338,7 @@ void RastaConverter::LoadDetailsMap()
 	Message("Loading details map");
 	FIBITMAP *fbitmap = FreeImage_Load(FreeImage_GetFileType(cfg.details_file.c_str()), cfg.details_file.c_str(), 0);
 	if (!fbitmap)
-		error("Error loading details file");
+		Error(string("Error loading details file: ") + cfg.details_file);
 	fbitmap=FreeImage_Rescale(fbitmap,cfg.width,cfg.height,FILTER_BOX);
 	fbitmap = FreeImage_ConvertTo24Bits(fbitmap);	
 
@@ -386,8 +358,11 @@ void RastaConverter::LoadDetailsMap()
 			FreeImage_GetPixelColor(fbitmap, x, y, &fpixel);
 			// average as brightness
 			details_data[y][x]=(unsigned char) ( (int) ( (int)fpixel.rgbRed + (int)fpixel.rgbGreen + (int)fpixel.rgbBlue)/3);
+			fpixel.rgbRed = details_data[y][x];
+			fpixel.rgbGreen = details_data[y][x];
+			fpixel.rgbBlue = details_data[y][x];
 			if ((x+y)%2==0)
-				putpixel( destination_bitmap,x,y,makecol(details_data[y][x],details_data[y][x],details_data[y][x]));
+				FreeImage_SetPixelColor(destination_bitmap, x, y, &fpixel);
 		}
 		ShowDestinationBitmap();
 	}
@@ -401,8 +376,8 @@ void RastaConverter::GeneratePictureErrorMap()
 
 	unsigned int details_multiplier=255;
 
-	const int w = input_bitmap->w;
-	const int h = input_bitmap->h;
+	const int w = (int)FreeImage_GetWidth(input_bitmap);
+	const int h = (int)FreeImage_GetHeight(input_bitmap);
 
 	for(int i=0; i<128; ++i)
 	{
@@ -419,8 +394,8 @@ void RastaConverter::GeneratePictureErrorMap()
 			{
 				for (int x=0; x<w; ++x)
 				{
-					details_multiplier = 255+details_data[y][x]*cfg.details_strength;
-					*dst++ = (distance_function(srcrow[x], ref)*details_multiplier)/255;
+					details_multiplier = 255+ (unsigned int)(((double)details_data[y][x])*cfg.details_strength);
+					*dst++ = (details_multiplier*distance_function(srcrow[x], ref))/255;
 				}
 			}
 			else
@@ -438,10 +413,11 @@ void RastaConverter::OtherDithering()
 {
 	int y;
 
-	const int w = input_bitmap->w;
+	const int w = FreeImage_GetWidth(input_bitmap);
+	const int h = FreeImage_GetHeight(input_bitmap);
 	const int w1 = w - 1;
 
-	for (y=0;y<input_bitmap->h;++y)
+	for (y=0;y<h;++y)
 	{
 		const bool flip = y & 1;
 
@@ -546,8 +522,8 @@ void RastaConverter::OtherDithering()
 			unsigned char color_index=FindAtariColorIndex(out_pixel);
 			color_indexes_on_dst_picture.insert(color_index);	
 			out_pixel = atari_palette[color_index];
-			int color=RGB2PIXEL(out_pixel);
-			putpixel(destination_bitmap,x,y,color);
+			RGBQUAD color=RGB2PIXEL(out_pixel);
+			FreeImage_SetPixelColor(destination_bitmap,x,y,&color);
 		}
 		ShowDestinationLine(y);
 	}
@@ -555,51 +531,28 @@ void RastaConverter::OtherDithering()
 
 void RastaConverter::ShowInputBitmap()
 {
-	if (!cfg.preprocess_only)
-	{
-		acquire_screen();
-		if (desktop_width>=320*3)
-		{
-			stretch_blit(input_bitmap,screen,0,0,input_bitmap->w,input_bitmap->h,0,0,input_bitmap->w*2,input_bitmap->h);
-			textprintf_ex(screen, font, 0, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Source");
-			textprintf_ex(screen, font, input_bitmap->w*2, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Current output");
-			textprintf_ex(screen, font, input_bitmap->w*4, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Destination");
-		}
-		else
-		{
-			blit(input_bitmap,screen,0,0,0,0,input_bitmap->w,input_bitmap->h);
-			textprintf_ex(screen, font, 0, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Source");
-			textprintf_ex(screen, font, input_bitmap->w, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Current output");
-			textprintf_ex(screen, font, input_bitmap->w*2, input_bitmap->h+10, makecol(0x80,0x80,0x80), 0, "Destination");
-		}
-		release_screen();
-	}
+	unsigned int width = FreeImage_GetWidth(input_bitmap);
+	unsigned int height = FreeImage_GetHeight(input_bitmap);
+	gui.DisplayBitmap(0, 0, input_bitmap);
+	gui.DisplayText(0, height + 10, "Source");
+	gui.DisplayText(width * 2, height + 10, "Current output");
+	gui.DisplayText(width * 4, height + 10, "Destination");
 }
 
 void RastaConverter::ShowDestinationLine(int y)
 {
 	if (!cfg.preprocess_only)
 	{
-		acquire_screen();
-		if (desktop_width>=320*3)
-			stretch_blit(destination_bitmap,screen,0,y,destination_bitmap->w,1,input_bitmap->w*4,y,destination_bitmap->w*2,1);
-		else
-			blit(destination_bitmap,screen,0,y,input_bitmap->w*2,y,destination_bitmap->w,1);
-		release_screen();				
+		unsigned int width = FreeImage_GetWidth(destination_bitmap);
+		unsigned int where_x = FreeImage_GetWidth(input_bitmap);
+
+		gui.DisplayBitmapLine(where_x, y, y, destination_bitmap);
 	}
 }
 
 void RastaConverter::ShowDestinationBitmap()
 {
-	if (!cfg.preprocess_only)
-	{
-		acquire_screen();
-		if (desktop_width>=320*3)
-			stretch_blit(destination_bitmap,screen,0,0,destination_bitmap->w,destination_bitmap->h,input_bitmap->w*4,0,destination_bitmap->w*2,destination_bitmap->h);
-		else
-			blit(destination_bitmap,screen,0,0,input_bitmap->w*2,0,destination_bitmap->w,destination_bitmap->h);
-		release_screen();
-	}
+	gui.DisplayBitmap(FreeImage_GetWidth(destination_bitmap)*2, 0, destination_bitmap);
 }
 
 
@@ -607,7 +560,19 @@ void RastaConverter::ShowDestinationBitmap()
 void RastaConverter::PrepareDestinationPicture()
 {
 	Message("Preparing Destination Picture");
-	clear_bitmap(destination_bitmap);
+
+	int width = FreeImage_GetWidth(input_bitmap);
+	int height = FreeImage_GetHeight(input_bitmap);
+	int bpp = FreeImage_GetBPP(input_bitmap); // Bits per pixel
+
+	// Allocate a new bitmap with the same dimensions and bpp
+	destination_bitmap = FreeImage_Allocate(width, height, bpp);
+
+	RGBQUAD black = { 0, 0, 0, 255 }; // Assuming 32-bit image with alpha channel
+
+	// Fill the new bitmap with black color
+	FreeImage_FillBackground(destination_bitmap, &black, 0);
+
 
 	// Draw new picture on the screen
 	if (cfg.dither!=E_DITHER_NONE)
@@ -626,31 +591,32 @@ void RastaConverter::PrepareDestinationPicture()
 		{
 			for (int x=0;x<m_width;++x)
 			{
-				if (user_closed_app)
-					break;
 				rgb out_pixel=m_picture[y][x];
 				unsigned char color_index=FindAtariColorIndex(out_pixel);
 				color_indexes_on_dst_picture.insert(color_index);	
 				out_pixel = atari_palette[color_index];
-				int color=RGB2PIXEL(out_pixel);
-				putpixel(destination_bitmap,x,y,color);
+				RGBQUAD color = RGB2PIXEL(out_pixel);
+				FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
 			}
 			ShowDestinationLine(y);
 		}
 	}
-	if (user_closed_app)
-		return;
 
 	if (!cfg.preprocess_only)
 	{
 		ShowDestinationBitmap();
 	}
 
-	for (int y=0;y<input_bitmap->h;++y)
+	int w = FreeImage_GetWidth(input_bitmap);
+	int h = FreeImage_GetHeight(input_bitmap);
+
+
+	for (int y=0;y<h;++y)
 	{
-		for (int x=0;x<input_bitmap->w;++x)
+		for (int x=0;x<w;++x)
 		{
-			uint32_t color = getpixel(destination_bitmap,x,y);
+			RGBQUAD color;
+			FreeImage_GetPixelColor(destination_bitmap, x, y, &color);
 			rgb out_pixel=PIXEL2RGB(color);
 			m_picture[y][x]=out_pixel; // copy it always - it is used by the color distance cache m_picture_all_errors
 		}
@@ -665,7 +631,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 	fstream f;
 	f.open( filename, ios::in);
 	if ( f.fail())
-		error("Error loading OnOff file");
+		Error("Error loading OnOff file");
 
 	string line;
 	unsigned int y=1;
@@ -688,7 +654,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 			err+=Value2String<unsigned int>(y);
 			err+="\n";
 			err+=line;
-			error(err.c_str());
+			Error(err.c_str());
 		}
 		if (!(value=="ON" || value=="OFF"))
 		{
@@ -696,7 +662,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 			err+=Value2String<unsigned int>(y);
 			err+="\n";
 			err+=line;
-			error(err.c_str());
+			Error(err.c_str());
 		}
 		if (from>239 || to>239) // on_off table size
 		{
@@ -704,7 +670,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 			err+=Value2String<unsigned int>(y);
 			err+="\n";
 			err+=line;
-			error(err.c_str());
+			Error(err.c_str());
 		}
 
 		if ((int)from > m_height-1 || (int)to > m_height-1)
@@ -716,7 +682,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 			err+="\n";
 			err+="Set range from 0 to ";
 			err+=Value2String<unsigned int>(y-1);
-			error(err.c_str());
+			Error(err.c_str());
 		}
 		for (size_t i=0;i<E_TARGET_MAX;++i)
 		{
@@ -733,7 +699,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 			err+=Value2String<unsigned int>(y);
 			err+="\n";
 			err+=line;
-			error(err.c_str());
+			Error(err.c_str());
 		}
 		// fill 
 		for (size_t l=from;l<=to;++l)
@@ -746,6 +712,12 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 
 bool RastaConverter::ProcessInit()
 {
+	gui.Init();
+
+	LoadAtariPalette();
+	if (!LoadInputBitmap())
+		Error("Error loading Input Bitmap!");
+
 	InitLocalStructure();
 	if (!cfg.preprocess_only)
 		SavePicture(cfg.output_file+"-src.png",input_bitmap);
@@ -755,9 +727,6 @@ bool RastaConverter::ProcessInit()
 
 	// Apply dithering and other picture transformation
 	PrepareDestinationPicture();
-
-	if (user_closed_app)
-		return false;
 
 	SavePicture(cfg.output_file+"-dst.png",destination_bitmap);
 
@@ -770,14 +739,7 @@ bool RastaConverter::ProcessInit()
 	// set postprocess distance function
 	SetDistanceFunction(cfg.dstf);
 
-	if (user_closed_app)
-		return false;
-
-	if (user_closed_app)
-		return false;
-
 	GeneratePictureErrorMap();
-
 
 	m_eval_gstate.m_max_evals = cfg.max_evals;
 	m_eval_gstate.m_save_period = cfg.save_period;
@@ -800,6 +762,7 @@ bool RastaConverter::ProcessInit()
 		randseed += 187927 * i;
 	}
 
+	Message("                                             ");
 	return true;
 }
 
@@ -830,7 +793,7 @@ bool RastaConverter::SaveScreenData(const char *filename)
 	int x,y,a=0,b=0,c=0,d=0;
 	FILE *fp=fopen(filename,"wb+");
 	if (!fp)
-		error("Error saving MIC screen data");
+		Error("Error saving MIC screen data");
 
 	Message("Saving screen data");
 	for(y=0;y<m_height;++y)
@@ -1001,9 +964,6 @@ void RastaConverter::KnollDitheringParallel(int from, int to)
 	{
 		for(unsigned x=0; x<(unsigned)m_width; ++x)
 		{
-			if (user_closed_app)
-				break;
-
 			rgb r_color = m_picture[y][x];
 			unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
 			MixingPlan plan = DeviseBestMixingPlan(r_color);
@@ -1011,8 +971,8 @@ void RastaConverter::KnollDitheringParallel(int from, int to)
 			color_indexes_on_dst_picture.insert(color_index);	
 			rgb out_pixel = atari_palette[color_index];
 
-			int color=RGB2PIXEL(out_pixel);
-			putpixel(destination_bitmap,x,y,color);
+			RGBQUAD color=RGB2PIXEL(out_pixel);
+			FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
 		}
 		ShowDestinationLine(y);
 	}
@@ -1068,7 +1028,7 @@ void RastaConverter::CreateEmptyRasterPicture(raster_picture *r)
 	i.loose.instruction=E_RASTER_NOP;
 	i.loose.target=E_COLBAK;
 	i.loose.value=0;
-	FreeImage_GetWidth(fbitmap);
+	FreeImage_GetWidth(input_bitmap);
 	// in line 0 we set init registers
 	for (size_t y=0;y<r->raster_lines.size();++y)
 	{
@@ -1095,11 +1055,11 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 	else
 		dest_colors=dest_regs+4;
 
-	FreeImage_FlipVertical(fbitmap);
+	FreeImage_FlipVertical(input_bitmap);
 
-	int size = FreeImage_GetWidth(fbitmap);
+	int width = FreeImage_GetWidth(input_bitmap);
 	// in line 0 we set init registers
-	FIBITMAP *f_copy = FreeImage_Copy(fbitmap,0,1,size,0);	
+	FIBITMAP *f_copy = FreeImage_Copy(input_bitmap,0,1,width,0);
 	for (y=0;y<(int)r->raster_lines.size();++y)
 	{
 		RGBQUAD fpixel;
@@ -1128,13 +1088,11 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 		multimap <int,int, greater <int> > sorted_colors;
 		multimap <int,int, greater <int> >::iterator m;
 		map <int,int> color_position;
-		for (x=0;x<size;++x)
+		for (x=0;x<width;++x)
 		{
 			RGBQUAD fpixel;
 			FreeImage_GetPixelColor(f_copy24bits2, x,0, &fpixel);
-
-			int c=makecol(fpixel.rgbRed,fpixel.rgbGreen,fpixel.rgbBlue);
-			//			putpixel( screen,x,y,c); 
+			int c = fpixel.rgbRed + fpixel.rgbGreen * 0x100 + fpixel.rgbBlue * 0x10000;
 			color_map[c]++;
 			if (color_position.find(c)==color_position.end())
 			{
@@ -1155,9 +1113,9 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 		for (int k=0;k<dest_regs && k<(int)sorted_colors.size();++k,++m)
 		{
 			int c=m->second;
-			color.r=getr(c);
-			color.g=getg(c);
-			color.b=getb(c);
+			color.r=c & 0xFF;
+			color.g=(c>>8) & 0xFF;
+			color.b=(c>>16) & 0xFF;
 
 			// lda
 			i.loose.instruction=(e_raster_instruction) (E_RASTER_LDA+k%3); // k%3 to cycle through A,X,Y regs
@@ -1352,15 +1310,8 @@ void RastaConverter::FindPossibleColors()
 
 	// For each screen line set the possible colors
 	vector < unsigned char > vector_of_colors;
-	for (int l=m_height-1;l>=0 && !user_closed_app;--l)
+	for (int l=m_height-1;l>=0;--l)
 	{
-		acquire_screen();
-		if (desktop_width>=320*3)
-			hline(screen,m_width*2,l,m_width*4,makecol(0xFF,0xFF,0xFF));
-		else
-			hline(screen,m_width,l,m_width*2,makecol(0xFF,0xFF,0xFF));
-		release_screen();
-
 		for (int x=0;x<m_width;++x)
 			set_of_colors.insert(FindAtariColorIndex(m_picture[l][x])*2);				
 
@@ -1390,8 +1341,7 @@ void RastaConverter::Init()
 		m_eval_gstate.m_best_pic = m;
 	}
 
-	if (!user_closed_app)
-		init_finished=true;
+	init_finished=true;
 }
 
 void RastaConverter::TestRasterProgram(raster_picture *pic)
@@ -1429,12 +1379,15 @@ void RastaConverter::TestRasterProgram(raster_picture *pic)
 
 void RastaConverter::ShowMutationStats()
 {
-	acquire_screen();
 	for (int i=0;i<E_MUTATION_MAX;++i)
 	{
-		textprintf_ex(screen, font, 0, 330+10*i, makecol(0xF0,0xF0,0xF0), 0, "%s  %d", mutation_names[i], m_eval_gstate.m_mutation_stats[i]);
+		gui.DisplayText(0, 250 + 20 * i, string(mutation_names[i]) + string("  ") + std::to_string(m_eval_gstate.m_mutation_stats[i]));
 	}
-	release_screen();
+
+	gui.DisplayText(320, 250, string("Evaluations: ") + std::to_string(m_eval_gstate.m_evaluations));
+	gui.DisplayText(320, 270, string("LastBest: ") + std::to_string(m_eval_gstate.m_last_best_evaluation) + string("                "));
+	gui.DisplayText(320, 290, string("Rate: ") + std::to_string((unsigned long long)m_rate) + string("                "));
+	gui.DisplayText(320, 310, string("Norm. Dist: ") + std::to_string(NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
 }
 
 void RastaConverter::SaveBestSolution()
@@ -1457,41 +1410,23 @@ void RastaConverter::SaveBestSolution()
 	SaveLAHC((cfg.output_file+".lahc").c_str());
 }
 
-void Wait(int t)
-{
-	unsigned b;
-	unsigned a=(unsigned)time( NULL );
-	while (a==(unsigned)time( NULL ));
-	if (t==2)
-	{
-		b=(unsigned)time( NULL );
-		while (b==(unsigned)time( NULL ));
-	}
-}
-
 RastaConverter::RastaConverter()
 	: init_finished(false)
 {
 }
 
-void RastaConverter::FindBestSolution()
+void RastaConverter::MainLoop()
 {
-	if (user_closed_app)
-		return;
+
+	input_bitmap = FreeImage_Allocate(cfg.width, cfg.height, 24);
+	output_bitmap = FreeImage_Allocate(cfg.width, cfg.height, 24);
+	destination_bitmap = FreeImage_Allocate(cfg.width, cfg.height, 24);
 
 	FindPossibleColors();
-
-	if (user_closed_app)
-		return;
 
 	Init();
 
 	const time_t time_start = time(NULL);
-
-	acquire_screen();
-	textprintf_ex(screen, font, 0, 280, makecol(0xF0,0xF0,0xF0), 0, "Press 'S' to save.");
-	textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %llu", m_eval_gstate.m_evaluations);
-	release_screen();
 
 	bool clean_first_evaluation = cfg.continue_processing;
 	clock_t last_rate_check_time = clock();
@@ -1503,19 +1438,12 @@ void RastaConverter::FindBestSolution()
 	pthread_mutex_lock(&m_eval_gstate.m_mutex);
 	m_evaluators[0].Start();
 
-	double rate = 0;
 	unsigned long long last_eval = 0;
 	bool eval_inited = false;
 
-	while(!key[KEY_ESC] && !user_closed_app)
+	bool running = true;
+	while (running)
 	{
-		if (key[KEY_S] || key[KEY_D])
-		{
-			SaveBestSolution();
-			// wait 2 seconds
-			Wait(2);
-			Message("Saved.               ");
-		}
 
 		if (eval_inited)
 		{
@@ -1524,11 +1452,7 @@ void RastaConverter::FindBestSolution()
 			if (next_rate_check_time > last_rate_check_time + CLOCKS_PER_SEC / 4)
 			{
 				double clock_delta = (double)(next_rate_check_time - last_rate_check_time);
-				rate = (double)(m_eval_gstate.m_evaluations - last_eval) * (double)CLOCKS_PER_SEC / clock_delta;
-
-				// clamp the rate if it is ridiculous... Allegro uses an unbounded sprintf(). :(
-				if (rate < 0 || rate > 10000000.0)
-					rate = 0;
+				m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) * (double)CLOCKS_PER_SEC / clock_delta;
 
 				last_rate_check_time = next_rate_check_time;
 				last_eval = m_eval_gstate.m_evaluations;
@@ -1539,11 +1463,8 @@ void RastaConverter::FindBestSolution()
 					ShowLastCreatedPicture();
 				}
 
-				acquire_screen();
-				textprintf_ex(screen, font, 0, 300, makecol(0xF0,0xF0,0xF0), 0, "Evaluations: %10llu  LastBest: %10llu  Rate: %6.1f  ", m_eval_gstate.m_evaluations, m_eval_gstate.m_last_best_evaluation, rate);
-				textprintf_ex(screen, font, 0, 310, makecol(0xF0,0xF0,0xF0), 0, "Norm. Dist: %f  ", NormalizeScore(m_eval_gstate.m_best_result));
-				release_screen();
 				ShowMutationStats();
+
 			}
 		}
 
@@ -1566,7 +1487,7 @@ void RastaConverter::FindBestSolution()
 		{
 			m_eval_gstate.m_update_initialized = false;
 
-			for(size_t i=1; i<m_evaluators.size(); ++i)
+			for (size_t i = 1; i < m_evaluators.size(); ++i)
 				m_evaluators[i].Start();
 
 			eval_inited = true;
@@ -1588,12 +1509,28 @@ void RastaConverter::FindBestSolution()
 
 		if (m_eval_gstate.m_finished)
 		{
-			if (m_eval_gstate.m_best_result==0)
+			if (m_eval_gstate.m_best_result == 0)
 			{
 				Message("FINISHED: distance=0");
-				Wait(1);
 			}
+			break;
+		}
 
+		switch (gui.NextFrame())
+		{
+		case GUI_command::SAVE:
+			SaveBestSolution();
+			Message("Saved.               ");
+			break;
+		case GUI_command::STOP:
+			running = false;
+			break;
+		case GUI_command::REDRAW:
+			ShowInputBitmap();
+			ShowDestinationBitmap();
+			ShowLastCreatedPicture();
+			ShowMutationStats();
+//			gui.NextFrame();
 			break;
 		}
 	}
@@ -1617,17 +1554,13 @@ void RastaConverter::ShowLastCreatedPicture()
 		for (x=0;x<m_width;++x)
 		{
 			rgb atari_color=atari_palette[m_eval_gstate.m_created_picture[y][x]];
-			int color=RGB2PIXEL(atari_color);
-			putpixel(output_bitmap,x,y,color);
+			RGBQUAD color=RGB2PIXEL(atari_color);
+			FreeImage_SetPixelColor(output_bitmap, x, y, &color);
 		}
 	}
 
-	acquire_screen();
-	if (desktop_width>=320*3)
-		stretch_blit(output_bitmap,screen,0,0,output_bitmap->w,output_bitmap->h,input_bitmap->w*2,0,output_bitmap->w*2,output_bitmap->h);
-	else
-		blit(output_bitmap,screen,0,0,m_width,0,m_width,m_height);
-	release_screen();
+	int w = FreeImage_GetWidth(output_bitmap);
+	gui.DisplayBitmap(w, 0, output_bitmap);
 }
 
 void RastaConverter::SavePMG(string name)
@@ -1638,7 +1571,7 @@ void RastaConverter::SavePMG(string name)
 
 	FILE *fp=fopen(name.c_str(),"wt+");
 	if (!fp)
-		error("Error saving PMG handler");
+		Error("Error saving PMG handler");
 
 	fprintf(fp,"; ---------------------------------- \n");
 	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
@@ -1672,7 +1605,7 @@ void RastaConverter::SavePMG(string name)
 	fclose(fp);
 }
 
-bool GetInstructionFromString(const string& line, SRasterInstruction &instr)
+bool RastaConverter::GetInstructionFromString(const string& line, SRasterInstruction &instr)
 {
 	static const char *load_names[3]=
 	{
@@ -1721,7 +1654,7 @@ bool GetInstructionFromString(const string& line, SRasterInstruction &instr)
 				instr.loose.instruction= (e_raster_instruction) (E_RASTER_LDA+i);
 				pos_value=line.find("$");
 				if (pos_value==string::npos)
-					error("Load instruction: No value for Load Register");
+					gui.Error("Load instruction: No value for Load Register");
 				++pos_value;
 				string val_string=line.substr(pos_value,2);
 				instr.loose.value=String2HexValue<int>(val_string);
@@ -1750,7 +1683,7 @@ bool GetInstructionFromString(const string& line, SRasterInstruction &instr)
 						return true;
 					}
 				}
-				error("Load instruction: Unknown target for store");
+				gui.Error("Load instruction: Unknown target for store");
 			}
 		}
 	}
@@ -1784,7 +1717,7 @@ void RastaConverter::LoadRegInits(string name)
 	fstream f;
 	f.open( name.c_str(), ios::in);
 	if ( f.fail())
-		error("Error loading reg inits");
+		Error("Error loading reg inits");
 
 	string line;
 	SRasterInstruction instr;
@@ -1834,7 +1767,7 @@ void RastaConverter::LoadRasterProgram(string name)
 	fstream f;
 	f.open( name.c_str(), ios::in);
 	if ( f.fail())
-		error("Error loading Raster Program");
+		Error("Error loading Raster Program");
 
 	string line;
 
@@ -1907,7 +1840,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 
 	FILE *fp=fopen(string(name+".ini").c_str(),"wt+");
 	if (!fp)
-		error("Error saving Raster Program");
+		Error("Error saving Raster Program");
 
 	fprintf(fp,"; ---------------------------------- \n");
 	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
@@ -1938,7 +1871,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 
 	fp=fopen(name.c_str(),"wt+");
 	if (!fp)
-		error("Error saving DLI handler");
+		Error("Error saving DLI handler");
 
 	fprintf(fp,"; ---------------------------------- \n");
 	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
@@ -1955,7 +1888,9 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	fprintf(fp,"\tnop\n");
 	fprintf(fp,"\tcmp byt2;\n");
 
-	for(int y=0;y<input_bitmap->h;++y)
+	int h = FreeImage_GetHeight(input_bitmap);
+
+	for(int y=0;y<h;++y)
 	{
 		fprintf(fp,"line%d\n",y);
 		size_t prog_len=pic->raster_lines[y].instructions.size();
@@ -1995,7 +1930,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 				save_target=true;
 				break;
 			default:
-				error("Unknown instruction!");
+				Error("Unknown instruction!");
 			}
 			if (save_value)
 			{
@@ -2004,7 +1939,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 			else if (save_target)
 			{
 				if (instr.loose.target>E_TARGET_MAX)
-					error("Unknown target in instruction!");
+					Error("Unknown target in instruction!");
 				fprintf(fp,"%s",mem_regs_names[instr.loose.target]);
 			}
 			fprintf(fp,"\n");			
@@ -2024,8 +1959,4 @@ double RastaConverter::NormalizeScore(double raw_score)
 	return raw_score / (((double)m_width*(double)m_height)*(MAX_COLOR_DISTANCE/10000));
 }
 
-void close_button_procedure()
-{
-	user_closed_app=true;
-}
 

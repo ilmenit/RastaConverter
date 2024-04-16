@@ -47,6 +47,12 @@
     <ClCompile Include="pch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="RastaSDL.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="RastaConsole.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CommandLineParser.h">
@@ -100,10 +106,20 @@
     <ClInclude Include="RasterInstruction.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="RastaSDL.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RastaConsole.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gui.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\ChangeLog.md">
       <Filter>Doc</Filter>
     </None>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>
