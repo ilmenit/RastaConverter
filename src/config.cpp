@@ -113,6 +113,9 @@ void Configuration::Process(int argc, char *argv[])
 	dither_val2 = parser.getValue("dither_rand","0");
 	dither_randomness=String2Value<double>(dither_val2);
 
+	string cache_string = parser.getValue("cache", "16");
+	cache_size = 1024*1024*String2Value<double>(cache_string);
+
 	string seed_val;
 	seed_val = parser.getValue("seed","random");
 

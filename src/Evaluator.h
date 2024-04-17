@@ -75,7 +75,7 @@ class Evaluator
 public:
 	Evaluator();
 
-	void Init(unsigned width, unsigned height, const distance_t *const *errmap, const screen_line *picture, const OnOffMap *onoff, EvalGlobalState *gstate, int solutions, unsigned long long randseed);
+	void Init(unsigned width, unsigned height, const distance_t *const *errmap, const screen_line *picture, const OnOffMap *onoff, EvalGlobalState *gstate, int solutions, unsigned long long randseed, size_t cache_size);
 
 	void Start();
 
@@ -114,6 +114,7 @@ private:
 	const screen_line *m_picture;
 	int m_currently_mutated_y;
 	int m_solutions;
+	size_t m_cache_size;
 
 	unsigned long long m_randseed;
 

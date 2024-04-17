@@ -760,7 +760,7 @@ bool RastaConverter::ProcessInit()
 		if (!randseed)
 			++randseed;
 
-		m_evaluators[i].Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, randseed);
+		m_evaluators[i].Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, randseed, cfg.cache_size);
 
 		randseed += 187927 * i;
 	}
@@ -1057,11 +1057,14 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 	else
 		dest_colors=dest_regs+4;
 
-	FreeImage_FlipVertical(input_bitmap);
 
 	int width = FreeImage_GetWidth(input_bitmap);
 	// in line 0 we set init registers
+
+//	FreeImage_FlipVertical(input_bitmap);
 	FIBITMAP *f_copy = FreeImage_Copy(input_bitmap,0,1,width,0);
+//	FreeImage_FlipVertical(input_bitmap);
+
 	for (y=0;y<(int)r->raster_lines.size();++y)
 	{
 		RGBQUAD fpixel;

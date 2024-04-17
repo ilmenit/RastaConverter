@@ -59,6 +59,7 @@ struct Configuration {
 	double gamma;
 	int save_period;
 	unsigned long initial_seed;
+	int cache_size;
 
 	bool preprocess_only;
 	int threads;

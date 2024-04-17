@@ -152,6 +152,10 @@ HPOSP1 OFF 0 239
   Saves best solution after every 'n' evaluations. When 'auto' is used then 'n' is dynamically calculated according to conversion ratio to save each 30 seconds.
   This is useful for a long-run optimizations, when the run can be stopped by power outage for example. If you run many instances of RastaConverter /o option may be useful.
    
+/cache=number
+  Default: 16
+  Sets number of megabytes per thread to use as memory buffer to speed up conversion.
+   
 /threads=number of threads
   Set number of processing threads running in parallel (1 to your number of cores).
 

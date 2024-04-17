@@ -10,8 +10,6 @@
 #include "mt19937int.h"
 #include <cfloat>
 
-const size_t CACHE_SIZE_LIMIT = 64*1024*1024;
-
 EvalGlobalState::EvalGlobalState()
 	: m_update_autosave(false)
 	, m_update_improvement(false)
@@ -45,7 +43,7 @@ Evaluator::Evaluator()
 {
 }
 
-void Evaluator::Init(unsigned width, unsigned height, const distance_t *const *errmap, const screen_line *picture, const OnOffMap *onoff, EvalGlobalState *gstate, int solutions, unsigned long long randseed)
+void Evaluator::Init(unsigned width, unsigned height, const distance_t *const *errmap, const screen_line *picture, const OnOffMap *onoff, EvalGlobalState *gstate, int solutions, unsigned long long randseed, size_t cache_size)
 {
 	m_randseed = randseed;
 	m_width = width;
@@ -55,6 +53,7 @@ void Evaluator::Init(unsigned width, unsigned height, const distance_t *const *e
 	m_onoff = onoff;
 	m_gstate = gstate;
 	m_solutions = solutions;
+	m_cache_size = cache_size;
 
 	m_currently_mutated_y=0;
 
@@ -105,7 +104,7 @@ void Evaluator::Run()
 	for(;;)
 	{
 		// check if we should flush the cache
-		if (m_linear_allocator.size() > CACHE_SIZE_LIMIT)
+		if (m_linear_allocator.size() > m_cache_size)
 		{
 			// flush instruction cache
 			m_insn_seq_cache.clear();
@@ -214,9 +213,6 @@ void Evaluator::Run()
 			}
 
 			pthread_cond_signal(&m_gstate->m_condvar_update);
-
-			m_best_pic = new_picture;
-			m_best_result = result;
 		}
 
 		++m_gstate->m_previous_results_index;
