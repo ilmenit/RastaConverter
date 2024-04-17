@@ -11,6 +11,7 @@ RastaConverterBeta9      2024-04-17
 * improved help file (snicklin99)
 * LLVM compiler used for extra speed (sheddy)
 * removed --help parameter that was pointing to help.txt file
+* Conditional compilation with NO_GUI directive that removes dependency on SDL2 (for developers who want to run RC on GUI-less devices)
 
 RastaConverterBeta7      2013-06-01 Ilmenit & Phaeron
 ----------------------------------------------
