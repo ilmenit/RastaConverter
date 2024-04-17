@@ -14,7 +14,6 @@ const char *program_version="Beta8";
 #include <algorithm>
 #include <functional>
 #include <string>
-#include <sys/timeb.h>
 #include "FreeImage.h"
 
 #undef int8_t
@@ -83,7 +82,11 @@ void RastaConverter::Message(std::string message)
 	if (quiet)
 		return;
 
-	gui.DisplayText(0, 440, message + string("                    "));
+	time_t t;
+	t = time(NULL);	
+	string current_time = ctime(&t);
+	current_time = current_time.substr(0, current_time.length() - 1);
+	gui.DisplayText(0, 440, current_time + string(": ") + message + string("                    "));
 }
 
 using namespace std;
@@ -712,7 +715,7 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 
 bool RastaConverter::ProcessInit()
 {
-	gui.Init();
+	gui.Init(cfg.command_line);
 
 	LoadAtariPalette();
 	if (!LoadInputBitmap())
@@ -1425,6 +1428,7 @@ void RastaConverter::MainLoop()
 	Init();
 
 	const time_t time_start = time(NULL);
+	_ftime(&m_previous_save_time);
 
 	bool clean_first_evaluation = cfg.continue_processing;
 	clock_t last_rate_check_time = clock();
@@ -1515,7 +1519,16 @@ void RastaConverter::MainLoop()
 			pending_update = true;
 		}
 
-		if (m_eval_gstate.m_update_autosave)
+		if (cfg.save_period == -1) // auto
+		{
+			double time_diff_sec = (double)(t.time - m_previous_save_time.time) + (t.millitm - m_previous_save_time.millitm) / 1000.0;
+			if (time_diff_sec > 30.0)
+			{
+				m_previous_save_time = t;
+				SaveBestSolution();
+			}
+		}
+		else if (m_eval_gstate.m_update_autosave)
 		{
 			m_eval_gstate.m_update_autosave = false;
 			SaveBestSolution();

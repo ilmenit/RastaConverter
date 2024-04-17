@@ -135,8 +135,11 @@ void Configuration::Process(int argc, char *argv[])
 	// no more threads limit
 
 	// auto-save is on by default
-	string save_val = parser.getValue("save","100000");
-	save_period=String2Value<int>(save_val);
+	string save_val = parser.getValue("save","auto");
+	if (save_val == "auto" || save_val == "'auto'" || save_val == "\"auto\"")
+		save_period = -1;
+	else
+		save_period=String2Value<int>(save_val);
 
 	string details_val2 = parser.getValue("details_val","0.5");
 	details_strength=String2Value<double>(details_val2);

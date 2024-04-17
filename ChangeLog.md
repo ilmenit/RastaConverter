@@ -1,6 +1,23 @@
 ChangeLog
 =========
 
+RastaConverterBeta10      
+* Added command line parameter to window title
+* Changed default auto-save to "auto" to save SSD disks life
+
+RastaConverterBeta9      2024-04-17 
+* fixed sprite repositioning bug (sheddy, phaeron)
+* removed dependency on Allegro 4 library, replaced by SDL2
+* 64bit version released
+* removed threads limit for /threads param
+* by default auto-save enabled (each 100K iterations)
+* improved build for Linux (dmsc, polluks)
+* improved help file (snicklin99)
+* LLVM compiler used for extra speed (sheddy)
+* removed --help parameter that was pointing to help.txt file
+* Conditional compilation with NO_GUI directive that removes dependency on SDL2 (for developers who want to run RC on GUI-less devices)
+
+
 RastaConverterBeta9      2024-04-17 
 * fixed sprite repositioning bug (sheddy, phaeron)
 * removed dependency on Allegro 4 library, replaced by SDL2

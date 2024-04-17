@@ -5,14 +5,15 @@
 
 using namespace std;
 
-bool RastaSDL::Init()
+bool RastaSDL::Init(std::string command_line)
 {
 	if (SDL_Init(SDL_INIT_VIDEO) != 0) {
 		std::cerr << "SDL_Init: " << SDL_GetError() << std::endl;
 		return false;
 	}
 
-	window = SDL_CreateWindow("Rasta Converter", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+	std::string title = "Rasta Converter " + command_line;
+	window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
 	renderer = SDL_CreateRenderer(window, -1, 0);
 
 	// load font

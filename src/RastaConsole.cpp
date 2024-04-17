@@ -2,7 +2,7 @@
 #include "RastaConsole.h"
 #include <iostream>
 
-bool RastaConsole::Init()
+bool Init(std::string command_line)
 {
 	return true;
 }

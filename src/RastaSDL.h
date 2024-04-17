@@ -19,7 +19,7 @@ private:
     SDL_Surface* FIBitmapToSDLSurface(FIBITMAP* fiBitmap);
     SDL_Surface* FIBitmapLineToSDLSurface(FIBITMAP* fiBitmap, int line_y);
 public:
-    bool Init();
+    bool Init(std::string command_line);
     void Error(std::string e);
     void DisplayBitmapLine(int x, int y, int line_y, FIBITMAP* fiBitmap);
     void DisplayText(int x, int y, const std::string& text);
