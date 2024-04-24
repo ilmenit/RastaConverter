@@ -3,7 +3,8 @@
 
 #include <vector>
 #include <map>
-#include <pthread.h>
+#include <mutex>
+#include <condition_variable>
 
 #include "Distance.h"
 #include "Program.h"
@@ -32,8 +33,8 @@ struct EvalGlobalState
 {
 	std::vector < std::vector < unsigned char > > m_possible_colors_for_each_line;
 
-	pthread_mutex_t m_mutex;
-	pthread_cond_t m_condvar_update;
+	std::mutex m_mutex;
+	std::condition_variable m_condvar_update;
 
 	bool m_update_tick;
 	bool m_update_autosave;
@@ -79,7 +80,6 @@ public:
 
 	void Start();
 
-	static void *RunStatic(void *p);
 	void Run();
 
 	e_target FindClosestColorRegister(sprites_row_memory_t& spriterow, int index, int x,int y, bool &restart_line, distance_t& error);

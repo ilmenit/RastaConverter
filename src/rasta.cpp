@@ -14,6 +14,9 @@ const char *program_version="Beta8";
 #include <algorithm>
 #include <functional>
 #include <string>
+#include <thread>
+#include <mutex>
+#include <chrono>
 #include "FreeImage.h"
 
 #undef int8_t
@@ -40,7 +43,6 @@ const char *program_version="Beta8";
 #include <iterator>
 
 #include "rasta.h"
-#include "main.h"
 #include "mt19937int.h"
 #include "LinearAllocator.h"
 #include "LineCache.h"
@@ -52,6 +54,9 @@ const char *program_version="Beta8";
 #define __timeb64 timeb
 #define _ftime ftime
 #endif
+
+unsigned char FindAtariColorIndex( const rgb& col );
+
 
 // Cycle where WSYNC starts - 105?
 #define WSYNC_START 104
@@ -922,14 +927,11 @@ MixingPlan RastaConverter::DeviseBestMixingPlan(rgb color)
 void RastaConverter::ParallelFor(int from, int to, void *(*start_routine)(void*))
 {
 	void *status;
-	pthread_attr_t attr;
-	vector <  pthread_t > threads;
-	vector <  parallel_for_arg_t > threads_arg;
+	vector<std::thread> threads;
+	vector<parallel_for_arg_t> threads_arg;
 	/* Initialize and set thread detached attribute */
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-	threads.resize(cfg.threads);
+	threads.reserve(cfg.threads);
 	threads_arg.resize(cfg.threads);
 
 	int step=abs(to-from)/cfg.threads;
@@ -941,14 +943,13 @@ void RastaConverter::ParallelFor(int from, int to, void *(*start_routine)(void*)
 			threads_arg[t].to=to;
 		else
 			threads_arg[t].to=from+step;
-		pthread_create(&threads[t], &attr, start_routine, &threads_arg[t]);
+		threads.emplace_back( std::bind( start_routine, ( void* )&threads_arg[t] ) );
 		from+=step;
 	}
-	pthread_attr_destroy(&attr);
 	for (int t=0;t<cfg.threads;++t)
 	{
-		pthread_join(threads[t], &status);
-	}	
+		threads[t].join();
+	}
 	return;
 }
 
@@ -1431,7 +1432,7 @@ void RastaConverter::MainLoop()
 	Init();
 
 	const time_t time_start = time(NULL);
-	_ftime(&m_previous_save_time);
+	m_previous_save_time = std::chrono::steady_clock::now();
 
 	bool clean_first_evaluation = cfg.continue_processing;
 	clock_t last_rate_check_time = clock();
@@ -1440,7 +1441,7 @@ void RastaConverter::MainLoop()
 
 	// spin up only one evaluator -- we need its result before the rest can go
 
-	pthread_mutex_lock(&m_eval_gstate.m_mutex);
+	std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 	m_evaluators[0].Start();
 
 	unsigned long long last_eval = 0;
@@ -1489,19 +1490,10 @@ void RastaConverter::MainLoop()
 			}
 		}
 
-		__timeb64 t;
-		_ftime(&t);
+		auto now = std::chrono::steady_clock::now();
+		auto deadline = now + std::chrono::nanoseconds( 250000000 );
 
-		timespec deadline;
-		deadline.tv_sec = t.time;
-		deadline.tv_nsec = t.millitm * 1000000 + 250000000;
-		if (deadline.tv_nsec >= 1000000000)
-		{
-			deadline.tv_nsec -= 1000000000;
-			++deadline.tv_sec;
-		}
-
-		if (ETIMEDOUT == pthread_cond_timedwait(&m_eval_gstate.m_condvar_update, &m_eval_gstate.m_mutex, &deadline))
+		if ( std::cv_status::timeout == m_eval_gstate.m_condvar_update.wait_until( lock, deadline ) )
 			continue;
 
 		if (m_eval_gstate.m_update_initialized)
@@ -1524,10 +1516,10 @@ void RastaConverter::MainLoop()
 
 		if (cfg.save_period == -1) // auto
 		{
-			double time_diff_sec = (double)(t.time - m_previous_save_time.time) + (t.millitm - m_previous_save_time.millitm) / 1000.0;
-			if (time_diff_sec > 30.0)
+			using namespace std::literals::chrono_literals;
+			if ( now - m_previous_save_time > 30s )
 			{
-				m_previous_save_time = t;
+				m_previous_save_time = now;
 				SaveBestSolution();
 			}
 		}
@@ -1551,10 +1543,8 @@ void RastaConverter::MainLoop()
 
 	while(m_eval_gstate.m_threads_active > 0)
 	{
-		pthread_cond_wait(&m_eval_gstate.m_condvar_update, &m_eval_gstate.m_mutex);
+		m_eval_gstate.m_condvar_update.wait( lock );
 	}
-
-	pthread_mutex_unlock(&m_eval_gstate.m_mutex);
 }
 
 void RastaConverter::ShowLastCreatedPicture()

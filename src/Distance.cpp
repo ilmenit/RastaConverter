@@ -1,7 +1,7 @@
 #include <math.h>
 #include <map>
 #include <unordered_map>
-#include <pthread.h>
+#include <shared_mutex>
 #include "Distance.h"
 #include "rgb.h"
 
@@ -51,20 +51,20 @@ rgb_lab_map_t rgb_lab_map;
 
 static void RGB2LAB(const rgb &c, Lab &result)
 {
-	static pthread_rwlock_t rwlock=PTHREAD_RWLOCK_INITIALIZER;
-	pthread_rwlock_rdlock(&rwlock);  
+	static std::shared_mutex rwlock{};
+	rwlock.lock_shared();
 	rgb_lab_map_t::iterator it=rgb_lab_map.find(c);
 	if (it!=rgb_lab_map.end())
 	{
 		result=it->second;
-		pthread_rwlock_unlock(&rwlock);  
+		rwlock.unlock_shared();
 		return;
 	}
-	pthread_rwlock_unlock(&rwlock);  
+	rwlock.unlock_shared();
 
-	pthread_rwlock_wrlock(&rwlock);  
+	rwlock.lock();
 	auto r = rgb_lab_map.insert(rgb_lab_map_t::value_type(c, Lab()));
-	pthread_rwlock_unlock(&rwlock);  
+	rwlock.unlock();
 
 	if (!r.second)
 	{
