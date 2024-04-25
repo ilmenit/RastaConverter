@@ -1,6 +1,6 @@
 #include <assert.h>
-#include <pthread.h>
 #include <functional>
+#include <thread>
 #include "Evaluator.h"
 #include "Program.h"
 #include "RegisterState.h"
@@ -24,17 +24,15 @@ EvalGlobalState::EvalGlobalState()
 	, m_best_result(DBL_MAX)
 	, m_previous_results_index(0)
 	, m_time_start(0)
+	, m_mutex()
+	, m_condvar_update()
 {
 	memset(m_mutation_stats, 0, sizeof(m_mutation_stats));
 
-	pthread_mutex_init(&m_mutex, NULL);
-	pthread_cond_init(&m_condvar_update, NULL);
 }
 
 EvalGlobalState::~EvalGlobalState()
 {
-	pthread_cond_destroy(&m_condvar_update);
-	pthread_mutex_destroy(&m_mutex);
 }
 
 Evaluator::Evaluator()
@@ -76,22 +74,14 @@ void Evaluator::Start()
 {
 	++m_gstate->m_threads_active;
 
-	pthread_t thread;
-	pthread_create(&thread, NULL, RunStatic, this);
-	pthread_detach(thread);
-}
-
-void *Evaluator::RunStatic(void *p)
-{
-	((Evaluator *)p)->Run();
-	return NULL;
+	std::thread thread{ std::bind( &Evaluator::Run, this ) };
+	thread.detach();
 }
 
 void Evaluator::Run()
 {
 	m_best_pic = m_gstate->m_best_pic;
 	m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
-	pthread_mutex_unlock(&m_gstate->m_mutex);
 
 	unsigned last_eval = 0;
 	bool clean_first_evaluation = true;
@@ -135,7 +125,7 @@ void Evaluator::Run()
 
 		double result = (double)ExecuteRasterProgram(&new_picture, line_results.data());
 		
-		pthread_mutex_lock(&m_gstate->m_mutex);
+		std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };
 
 		++m_gstate->m_evaluations;
 
@@ -155,19 +145,19 @@ void Evaluator::Run()
 
 			m_gstate->m_initialized = true;
 			m_gstate->m_update_initialized = true;
-			pthread_cond_signal(&m_gstate->m_condvar_update);
+			m_gstate->m_condvar_update.notify_one();
 		}
 
 		if (m_gstate->m_save_period && m_gstate->m_evaluations % m_gstate->m_save_period==0)
 		{
 			m_gstate->m_update_autosave = true;
-			pthread_cond_signal(&m_gstate->m_condvar_update);
+			m_gstate->m_condvar_update.notify_one();
 		}
 
 		if (m_gstate->m_evaluations >= m_gstate->m_max_evals)
 		{
 			m_gstate->m_finished = true;
-			pthread_cond_signal(&m_gstate->m_condvar_update);
+			m_gstate->m_condvar_update.notify_one();
 		}
 
 		// store this solution 
@@ -212,7 +202,7 @@ void Evaluator::Run()
 				}
 			}
 
-			pthread_cond_signal(&m_gstate->m_condvar_update);
+			m_gstate->m_condvar_update.notify_one();
 		}
 
 		++m_gstate->m_previous_results_index;
@@ -237,8 +227,6 @@ void Evaluator::Run()
 
 		bool finished = m_gstate->m_finished;
 
-		pthread_mutex_unlock(&m_gstate->m_mutex);
-
 		if (finished)
 			break;
 
@@ -246,10 +234,9 @@ void Evaluator::Run()
 		--m_currently_mutated_y;
 	}
 
-	pthread_mutex_lock(&m_gstate->m_mutex);
+	std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };
 	--m_gstate->m_threads_active;
-	pthread_cond_signal(&m_gstate->m_condvar_update);
-	pthread_mutex_unlock(&m_gstate->m_mutex);
+	m_gstate->m_condvar_update.notify_one();
 }
 
 e_target Evaluator::FindClosestColorRegister(sprites_row_memory_t& spriterow, int index, int x,int y, bool &restart_line, distance_t& best_error)

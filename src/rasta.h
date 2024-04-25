@@ -60,7 +60,7 @@ private:
 	const distance_t *m_picture_all_errors_array[128];
 	int m_width,m_height; // picture size
 	double m_rate = 0;
-	__timeb64 m_previous_save_time;
+	std::chrono::time_point<std::chrono::steady_clock> m_previous_save_time;
 
 	EvalGlobalState m_eval_gstate;
 
