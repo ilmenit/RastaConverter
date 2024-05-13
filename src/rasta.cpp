@@ -1,4 +1,4 @@
-const char *program_version="Beta8";
+const char *program_version="Beta10";
 
 #ifdef _MSC_VER
 #pragma warning (disable: 4312)
@@ -18,6 +18,7 @@ const char *program_version="Beta8";
 #include <mutex>
 #include <chrono>
 #include "FreeImage.h"
+#include <format>
 
 #undef int8_t
 #undef uint8_t
@@ -1385,15 +1386,16 @@ void RastaConverter::TestRasterProgram(raster_picture *pic)
 
 void RastaConverter::ShowMutationStats()
 {
+	// Not all implementations of "to_string" do a locale thousands separator so using "format" to enforce it
 	for (int i=0;i<E_MUTATION_MAX;++i)
 	{
-		gui.DisplayText(0, 250 + 20 * i, string(mutation_names[i]) + string("  ") + std::to_string(m_eval_gstate.m_mutation_stats[i]));
+		gui.DisplayText(0, 250 + 20 * i, string(mutation_names[i]) + string("  ") + format("{:L}", m_eval_gstate.m_mutation_stats[i]));
 	}
 
-	gui.DisplayText(320, 250, string("Evaluations: ") + std::to_string(m_eval_gstate.m_evaluations));
-	gui.DisplayText(320, 270, string("LastBest: ") + std::to_string(m_eval_gstate.m_last_best_evaluation) + string("                "));
-	gui.DisplayText(320, 290, string("Rate: ") + std::to_string((unsigned long long)m_rate) + string("                "));
-	gui.DisplayText(320, 310, string("Norm. Dist: ") + std::to_string(NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
+	gui.DisplayText(320, 250, string("Evaluations: ") + format("{:L}", m_eval_gstate.m_evaluations));
+	gui.DisplayText(320, 270, string("LastBest: ") + format("{:L}", m_eval_gstate.m_last_best_evaluation) + string("                "));
+	gui.DisplayText(320, 290, string("Rate: ") + format("{:L}", (unsigned long long)m_rate) + string("                "));
+	gui.DisplayText(320, 310, string("Norm. Dist: ") + format("{:f}", NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
 }
 
 void RastaConverter::SaveBestSolution()

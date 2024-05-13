@@ -124,6 +124,7 @@
       <ForcedIncludeFiles>pch.h</ForcedIncludeFiles>
       <OpenMPSupport>false</OpenMPSupport>
       <Optimization>Disabled</Optimization>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
@@ -149,6 +150,7 @@
       <ForcedIncludeFiles>pch.h</ForcedIncludeFiles>
       <OpenMPSupport>false</OpenMPSupport>
       <Optimization>Disabled</Optimization>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
@@ -174,6 +176,7 @@
       <ForcedIncludeFiles>pch.h</ForcedIncludeFiles>
       <OpenMPSupport>false</OpenMPSupport>
       <Optimization>Disabled</Optimization>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
@@ -198,6 +201,7 @@
       <ForcedIncludeFiles>pch.h</ForcedIncludeFiles>
       <OpenMPSupport>false</OpenMPSupport>
       <Optimization>Disabled</Optimization>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
@@ -226,6 +230,7 @@
       <OptimizeForWindowsApplication>true</OptimizeForWindowsApplication>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
@@ -256,6 +261,7 @@
       <OptimizeForWindowsApplication>true</OptimizeForWindowsApplication>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>

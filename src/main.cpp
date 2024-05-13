@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include "rasta.h"
 #include <iostream>
+#include <locale>
 
 extern bool quiet;
 
@@ -20,6 +21,9 @@ RastaConverter rasta;
 int main(int argc, char *argv[])
 {	
 	//////////////////////////////////////////////////////////////////////////
+
+	locale::global(locale("")); // users locale for their thousands separator
+
 	FreeImage_Initialise(TRUE);
 
 	create_cycles_table();
