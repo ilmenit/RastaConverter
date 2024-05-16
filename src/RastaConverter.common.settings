@@ -38,7 +38,7 @@
       <AppCollection>
         <AppDataViewModel>
           <Application>$(TargetPath)</Application>
-          <Arguments />
+          <Arguments>nyan_cat_by_vexcel.png /s=1000 /save=100000 /max_evals=500000 /threads=4</Arguments>
           <Directory>$(ProjectDir)</Directory>
           <Environment />
           <MergeEnvironment>true</MergeEnvironment>
