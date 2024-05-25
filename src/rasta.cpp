@@ -92,7 +92,7 @@ void RastaConverter::Message(std::string message)
 	t = time(NULL);	
 	string current_time = ctime(&t);
 	current_time = current_time.substr(0, current_time.length() - 1);
-	//gui.DisplayText(0, 440, (const Uint16*) current_time + wstring(L": ") + message + wstring(L"                    "));
+	gui.DisplayText(0, 440, current_time + string(": ") + message + string("                    "));
 }
 
 using namespace std;
@@ -167,17 +167,17 @@ void create_cycles_table()
 	screen_cycles[cpu_xpos-1].length=(antic_xpos-24)*2;
 }
 
-const wchar_t *mutation_names[E_MUTATION_MAX]=
+const char *mutation_names[E_MUTATION_MAX]=
 {
-	L"PushBack2Prev ",
-	L"Copy2NextLine ",
-	L"SwapWithPrevL ",
-	L"Add Instr     ",
-	L"Remove Instr  ",
-	L"Swap Instr    ",
-	L"Change Target ",
-	L"Change Value  ",
-	L"Chg Val to Col",
+	"PushBack2Prev ",
+	"Copy2NextLine ",
+	"SwapWithPrevL ",
+	"Add Instr     ",
+	"Remove Instr  ",
+	"Swap Instr    ",
+	"Change Target ",
+	"Change Value  ",
+	"Chg Val to Col",
 };
 
 void resize_rgb_picture(vector < screen_line > *picture, size_t width, size_t height)
@@ -543,9 +543,9 @@ void RastaConverter::ShowInputBitmap()
 	unsigned int width = FreeImage_GetWidth(input_bitmap);
 	unsigned int height = FreeImage_GetHeight(input_bitmap);
 	gui.DisplayBitmap(0, 0, input_bitmap);
-	gui.DisplayText(0, height + 10, L"Source");
-	gui.DisplayText(width * 2, height + 10, L"Current output");
-	gui.DisplayText(width * 4, height + 10, L"Destination");
+	gui.DisplayText(0, height + 10, "Source");
+	gui.DisplayText(width * 2, height + 10, "Current output");
+	gui.DisplayText(width * 4, height + 10, "Destination");
 }
 
 void RastaConverter::ShowDestinationLine(int y)
@@ -1386,21 +1386,16 @@ void RastaConverter::TestRasterProgram(raster_picture *pic)
 
 void RastaConverter::ShowMutationStats()
 {
-	// Not all implementations of "to_string" do a locale thousands separator so using "format" to enforce it
+	// only some implementations of "to_string" do a locale thousands separator so changed to "format" to enforce it
 	for (int i=0;i<E_MUTATION_MAX;++i)
 	{
-		//gui.DisplayText(0, 250 + 20 * i, string(mutation_names[i]) + string("  ") + format("{:L}", m_eval_gstate.m_mutation_stats[i]));
-		gui.DisplayText(0, 250 + 20 * i, wstring(mutation_names[i]) + wstring(L"  ") + to_wstring(m_eval_gstate.m_mutation_stats[i]));
+		gui.DisplayText(0, 250 + 20 * i, string(mutation_names[i]) + string("  ") + format("{:L}", m_eval_gstate.m_mutation_stats[i]));
 	}
 
-	//gui.DisplayText(320, 250, string("Evaluations: ") + format("{:L}", m_eval_gstate.m_evaluations));
-	gui.DisplayText(320, 250, wstring(L"Evaluations: ") + to_wstring(m_eval_gstate.m_evaluations));
-	//gui.DisplayText(320, 270, string("LastBest: ") + format("{:L}", m_eval_gstate.m_last_best_evaluation) + string("                "));
-	gui.DisplayText(320, 270, wstring(L"LastBest: ") + to_wstring(m_eval_gstate.m_last_best_evaluation) + wstring(L"                "));
-	//gui.DisplayText(320, 290, string("Rate: ") + format("{:L}", (unsigned long long)m_rate) + string("                "));
-	gui.DisplayText(320, 290, wstring(L"Rate: ") + to_wstring((unsigned long long)m_rate) + wstring(L"                "));
-	//gui.DisplayText(320, 310, string("Norm. Dist: ") + format("{:f}", NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
-	gui.DisplayText(320, 310, wstring(L"Norm. Dist: ") + to_wstring(NormalizeScore(m_eval_gstate.m_best_result)) + wstring(L"                "));
+	gui.DisplayText(320, 250, string("Evaluations: ") + format("{:L}", m_eval_gstate.m_evaluations));
+	gui.DisplayText(320, 270, string("LastBest: ") + format("{:L}", m_eval_gstate.m_last_best_evaluation) + string("                "));
+	gui.DisplayText(320, 290, string("Rate: ") + format("{:L}", (unsigned long long)m_rate) + string("                "));
+	gui.DisplayText(320, 310, string("Norm. Dist: ") + format("{:f}", NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
 }
 
 void RastaConverter::SaveBestSolution()

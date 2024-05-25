@@ -7,7 +7,7 @@ bool Init(std::string command_line)
 	return true;
 }
 
-void RastaConsole::DisplayText(int x, int y, const std::wstring& text)
+void RastaConsole::DisplayText(int x, int y, const std::string& text)
 {
 	std::cout << text << std::endl;
 }
