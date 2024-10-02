@@ -5,6 +5,7 @@ const char *program_version="Beta8";
 #pragma warning (disable: 4996)
 #endif
 
+#include <climits>
 #include <math.h>
 #include <cmath>
 #include <vector>
