@@ -1,8 +1,8 @@
 CXX			= g++
-CXXFLAGS 	= -O3 -Wall -flto -Wno-deprecated-declarations -Wno-unused-variable
+CXXFLAGS 	= -O3 -Wall -flto -Wno-deprecated-declarations -Wno-unused-variable `sdl2-config --cflags`
 LDFLAGS 	=
-LIBS	 	= -lalleg -lfreeimage -lX11 -lXcursor -lXpm -lXxf86vm -lpthread
-SOURCES 	= CommandLineParser.cpp  config.cpp  main.cpp  rasta.cpp  rgb.cpp mt19937int.cpp Evaluator.cpp TargetPicture.cpp Distance.cpp Program.cpp
+LIBS	 	= -lSDL2 -lSDL2_ttf -lfreeimage -lX11 -lXcursor -lXpm -lXxf86vm -lpthread
+SOURCES 	= CommandLineParser.cpp  config.cpp  main.cpp  rasta.cpp  rgb.cpp mt19937int.cpp Evaluator.cpp TargetPicture.cpp Distance.cpp Program.cpp RastaSDL.cpp
 OBJECTS 	= $(SOURCES:.cpp=.o)
 EXECUTABLE	= rastaconv
 
