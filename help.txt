@@ -9,11 +9,11 @@ Copy created output files to the Generator directory and run 'build.bat' to crea
 
 The application displays three images:
 - the left one is the original picture resized to Atari width.
-- the right one is the original picture mapped to choosen Atari palette. This is our goal to reach.
+- the right one is the original picture mapped to chosen Atari palette. This is our goal to reach.
 - the central one is a preview of the output picture.
 
 If the colors on the right image are wrong (e.g. too gray) then try a different palette file
-or remap original picture to choosen palette file using other another tool e.g. Timanthes.
+or remap original picture to chosen palette file using other another tool e.g. Timanthes.
 Below on the screen are some statistics from the optimization process.
 With the current algorithm the longer you wait, the better results you get. 
 For some pictures, more than 1 million evaluations are needed to get really good results.
@@ -37,7 +37,7 @@ Command line options:
   Default: Palettes\laoo.act
   The output quality depends a lot on similarity between chosen Atari palette and the image palette.
   The default palette covers a large color range and is close to real Atari palette.
-  You can also use shorcuts: /pal=laoo and the converter will try to load palette from 'Palettes\laoo.act'
+  You can also use shortcuts: /pal=laoo and the converter will try to load palette from 'Palettes\laoo.act'
   
 /dither=Dithering Type
   Possible dithering types are: chess, floyd, 2d, jarvis, simple, knoll
@@ -73,15 +73,15 @@ Command line options:
 
 /brightness=[-100,100]
   Default: 0
-  Brightness color corection.
+  Brightness color correction.
 
 /contrast=[-100,100]
   Default: 0
-  Contrast color corection.
+  Contrast color correction.
 
 /gamma=[0.0-8.0]
   Default: 1.0
-  Gamma color corection.
+  Gamma color correction.
 
 /init=Initial optimization state
    Default: random
