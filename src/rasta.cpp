@@ -254,21 +254,21 @@ void RastaConverter::SaveStatistics(const char *fn)
 	fclose(f);
 }
 
-void RastaConverter::SaveLAHC(const char *fn)
-{
-	FILE *f = fopen(fn, "wt+");
+void RastaConverter::SaveLAHC(const char* fn) {
+	FILE* f = fopen(fn, "wt+");
 	if (!f)
 		return;
 
-	fprintf(f, "%lu\n",(unsigned long) m_eval_gstate.m_previous_results.size());
-	fprintf(f, "%lu\n",(unsigned long) m_eval_gstate.m_previous_results_index);
-	for (size_t i=0;i<m_eval_gstate.m_previous_results.size();++i)
-	{
-		fprintf(f, "%Lf\n",(long double)m_eval_gstate.m_previous_results[i]);
+	fprintf(f, "%lu\n", (unsigned long)m_eval_gstate.m_previous_results.size());
+	fprintf(f, "%lu\n", (unsigned long)m_eval_gstate.m_previous_results_index);
+	fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_cost_max);
+	fprintf(f, "%d\n", m_eval_gstate.m_N);
+
+	for (size_t i = 0; i < m_eval_gstate.m_previous_results.size(); ++i) {
+		fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_previous_results[i]);
 	}
 	fclose(f);
 }
-
 bool RastaConverter::LoadInputBitmap()
 {
 	Message("Loading and initializing file");
@@ -1693,21 +1693,28 @@ bool RastaConverter::GetInstructionFromString(const string& line, SRasterInstruc
 	return false;
 }
 
-void RastaConverter::LoadLAHC(string name)
-{
-	FILE *f = fopen(name.c_str(), "rt");
+void RastaConverter::LoadLAHC(string name) {
+	FILE* f = fopen(name.c_str(), "rt");
 	if (!f)
 		return;
 
 	unsigned long no_elements;
 	unsigned long index;
-	fscanf(f, "%lu\n",&no_elements);
-	fscanf(f, "%lu\n",&index);
-	m_eval_gstate.m_previous_results_index=index;
-	for (size_t i=0;i<(size_t) no_elements;++i)
-	{
-		long double dst=0;
-		fscanf(f, "%Lf\n",&dst);
+	long double cost_max;
+	int N;
+
+	fscanf(f, "%lu\n", &no_elements);
+	fscanf(f, "%lu\n", &index);
+	fscanf(f, "%Lf\n", &cost_max);
+	fscanf(f, "%d\n", &N);
+
+	m_eval_gstate.m_previous_results_index = index;
+	m_eval_gstate.m_cost_max = cost_max;
+	m_eval_gstate.m_N = N;
+
+	for (size_t i = 0; i < (size_t)no_elements; ++i) {
+		long double dst = 0;
+		fscanf(f, "%Lf\n", &dst);
 		m_eval_gstate.m_previous_results.push_back(dst);
 	}
 	fclose(f);

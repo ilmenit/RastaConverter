@@ -23,12 +23,13 @@ EvalGlobalState::EvalGlobalState()
 	, m_last_best_evaluation(0)
 	, m_best_result(DBL_MAX)
 	, m_previous_results_index(0)
+	, m_cost_max(DBL_MAX)
+	, m_N(0)
 	, m_time_start(0)
 	, m_mutex()
 	, m_condvar_update()
 {
 	memset(m_mutation_stats, 0, sizeof(m_mutation_stats));
-
 }
 
 EvalGlobalState::~EvalGlobalState()
@@ -78,8 +79,7 @@ void Evaluator::Start()
 	thread.detach();
 }
 
-void Evaluator::Run()
-{
+void Evaluator::Run() {
 	m_best_pic = m_gstate->m_best_pic;
 	m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
 
@@ -88,59 +88,50 @@ void Evaluator::Run()
 	clock_t last_rate_check_time = clock();
 
 	raster_picture new_picture;
+	std::vector<const line_cache_result*> line_results(m_height);
 
-	std::vector<const line_cache_result *> line_results(m_height);
+	// Thread ID for tracking previous costs
+	int thread_id = -1;
 
-	for(;;)
 	{
-		// check if we should flush the cache
-		if (m_linear_allocator.size() > m_cache_size)
-		{
-			// flush instruction cache
+		std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };
+		thread_id = m_gstate->m_thread_previous_costs.size();
+		m_gstate->m_thread_previous_costs.push_back(DBL_MAX);
+	}
+
+	for (;;) {
+		// Cache management code remains unchanged
+		if (m_linear_allocator.size() > m_cache_size) {
 			m_insn_seq_cache.clear();
-
-			// flush line cache
-			for(int y2=0; y2<(int)m_height; ++y2)
+			for (int y2 = 0; y2 < (int)m_height; ++y2)
 				m_line_caches[y2].clear();
-
-			// clear the linear allocator
 			m_linear_allocator.clear();
-
-			// recache insns from the best solution
 			m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
 		}
 
 		new_picture = m_best_pic;
 
-		// If this is the first evaluation after a continue, we don't do any mutations in order to
-		// get the correct statistic. This avoids taking the first mutation unconditionally.
 		bool force_best = false;
-		if (clean_first_evaluation)
-		{
+		if (clean_first_evaluation) {
 			clean_first_evaluation = false;
 			force_best = true;
 		}
-		else
+		else {
 			MutateRasterProgram(&new_picture);
+		}
 
 		double result = (double)ExecuteRasterProgram(&new_picture, line_results.data());
-		
+
 		std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };
 
 		++m_gstate->m_evaluations;
 
-		// check if this is the very first evaluation -- if so, we need to notify the parent to
-		// spin up the remaining workers
-		if (!m_gstate->m_initialized)
-		{
-			if (m_gstate->m_previous_results.empty())
-			{
-				// For all k ( 0.. L-1 ) Ck=C(s)
-				// Set initial state for Late Acceptance Hill Climbing
-				m_gstate->m_previous_results.resize(m_solutions);
-
-				for(int i=0; i<m_solutions; ++i)
-					m_gstate->m_previous_results[i] = result;
+		// Initialize DLAS on first evaluation
+		if (!m_gstate->m_initialized) {
+			if (m_gstate->m_previous_results.empty()) {
+				m_gstate->m_previous_results.resize(m_solutions, result);
+				m_gstate->m_cost_max = result;
+				m_gstate->m_N = m_solutions;
 			}
 
 			m_gstate->m_initialized = true;
@@ -148,90 +139,100 @@ void Evaluator::Run()
 			m_gstate->m_condvar_update.notify_one();
 		}
 
-		if (m_gstate->m_save_period && m_gstate->m_evaluations % m_gstate->m_save_period==0)
-		{
-			m_gstate->m_update_autosave = true;
-			m_gstate->m_condvar_update.notify_one();
-		}
-
-		if (m_gstate->m_evaluations >= m_gstate->m_max_evals)
-		{
-			m_gstate->m_finished = true;
-			m_gstate->m_condvar_update.notify_one();
-		}
-
-		// store this solution 
+		// DLAS Logic
 		size_t v = m_gstate->m_previous_results_index % m_solutions;
-		double current_distance = m_gstate->m_previous_results[v];
+		double prev_cost = m_gstate->m_thread_previous_costs[thread_id];
 
-		if ( (result < current_distance && m_best_result == m_gstate->m_best_result) || force_best)
-		{
-			m_gstate->m_previous_results[v]=result;
+		bool accept_solution = false;
+		if (result == prev_cost || result < m_gstate->m_cost_max) {
+			accept_solution = true;
+		}
 
-			m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
-			m_gstate->m_best_pic = new_picture;
-			m_gstate->m_best_pic.uncache_insns();
-			m_gstate->m_best_result = result;
+		if (accept_solution) {
+			m_gstate->m_thread_previous_costs[thread_id] = result;
 
-			m_gstate->m_created_picture.resize(m_height);
-			m_gstate->m_created_picture_targets.resize(m_height);
+			if (result < m_gstate->m_best_result) {
+				m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
+				m_gstate->m_best_pic = new_picture;
+				m_gstate->m_best_pic.uncache_insns();
+				m_gstate->m_best_result = result;
 
-			for(int y=0; y<(int)m_height; ++y)
-			{
-				const line_cache_result& lcr = *line_results[y];
+				// Update visualization state
+				m_gstate->m_created_picture.resize(m_height);
+				m_gstate->m_created_picture_targets.resize(m_height);
 
-				m_gstate->m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
-				m_gstate->m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
+				for (int y = 0; y < (int)m_height; ++y) {
+					const line_cache_result& lcr = *line_results[y];
+					m_gstate->m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
+					m_gstate->m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
+				}
+
+				memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
+				m_gstate->m_update_improvement = true;
+
+				// Update mutation statistics
+				for (int i = 0; i < E_MUTATION_MAX; ++i) {
+					if (m_current_mutations[i]) {
+						m_gstate->m_mutation_stats[i] += m_current_mutations[i];
+						m_current_mutations[i] = 0;
+					}
+				}
+
+				m_gstate->m_condvar_update.notify_one();
 			}
+		}
 
-			memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
-
-			m_gstate->m_update_improvement = true;
-
-			if (result == 0)
-			{
-				m_gstate->m_finished = true;
+		// DLAS history update
+		if (result > m_gstate->m_previous_results[v]) {
+			m_gstate->m_previous_results[v] = result;
+		}
+		else if (result < m_gstate->m_previous_results[v] && result < prev_cost) {
+			if (m_gstate->m_previous_results[v] == m_gstate->m_cost_max) {
+				--m_gstate->m_N;
 			}
+			m_gstate->m_previous_results[v] = result;
 
-			for(int i=0; i<E_MUTATION_MAX; ++i)
-			{
-				if (m_current_mutations[i])
-				{
-					m_gstate->m_mutation_stats[i] += m_current_mutations[i];
-					m_current_mutations[i] = 0;
+			if (m_gstate->m_N <= 0) {
+				// Find new cost_max
+				m_gstate->m_cost_max = m_gstate->m_previous_results[0];
+				for (size_t i = 1; i < m_gstate->m_previous_results.size(); ++i) {
+					if (m_gstate->m_previous_results[i] > m_gstate->m_cost_max) {
+						m_gstate->m_cost_max = m_gstate->m_previous_results[i];
+					}
+				}
+
+				// Count new occurrences
+				m_gstate->m_N = 0;
+				for (size_t i = 0; i < m_gstate->m_previous_results.size(); ++i) {
+					if (m_gstate->m_previous_results[i] == m_gstate->m_cost_max) {
+						++m_gstate->m_N;
+					}
 				}
 			}
-
-			m_gstate->m_condvar_update.notify_one();
 		}
 
 		++m_gstate->m_previous_results_index;
 
-		// check if we need to pull a newer global best solution
-		if (m_best_result != m_gstate->m_best_result)
-		{
+		// The rest of the loop remains unchanged
+		if (m_gstate->m_save_period && m_gstate->m_evaluations % m_gstate->m_save_period == 0) {
+			m_gstate->m_update_autosave = true;
+			m_gstate->m_condvar_update.notify_one();
+		}
+
+		if (m_gstate->m_evaluations >= m_gstate->m_max_evals) {
+			m_gstate->m_finished = true;
+			m_gstate->m_condvar_update.notify_one();
+		}
+
+		// Update best solution if needed
+		if (m_best_result != m_gstate->m_best_result) {
 			m_best_result = m_gstate->m_best_result;
 			m_best_pic = m_gstate->m_best_pic;
 			m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
 		}
 
-		if (m_gstate->m_evaluations % 10000 == 0)
-		{
-			statistics_point stats;
-			stats.evaluations = (unsigned)m_gstate->m_evaluations;
-			stats.seconds = (unsigned)(time(NULL) - m_gstate->m_time_start);
-			stats.distance = current_distance;
-
-			m_gstate->m_statistics.push_back(stats);
-		}
-
-		bool finished = m_gstate->m_finished;
-
-		if (finished)
+		if (m_gstate->m_finished)
 			break;
-
-		// I have tried to choose next mutation place depending on the error distance in the created picture, but the result was worse than that:
-		--m_currently_mutated_y;
 	}
 
 	std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };

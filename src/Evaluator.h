@@ -53,9 +53,6 @@ struct EvalGlobalState
 	raster_picture m_best_pic;
 	double m_best_result;
 
-	std::vector < double > m_previous_results; // for Late Acceptance Hill Climbing
-	size_t m_previous_results_index; // for Late Acceptance Hill Climbing
-
 	sprites_memory_t m_sprites_memory;
 
 	std::vector < color_index_line > m_created_picture;
@@ -66,6 +63,15 @@ struct EvalGlobalState
 	time_t m_time_start;
 
 	statistics_list m_statistics;
+
+	// DLAS specific fields
+	double m_cost_max;                    // Maximum cost threshold
+	int m_N;                              // Count of cost_max entries
+	std::vector<double> m_previous_results; // History list for DLAS
+	size_t m_previous_results_index;      // Current index in history
+
+	// Add tracking of previous costs per thread for DLAS
+	std::vector<double> m_thread_previous_costs;
 
 	EvalGlobalState();
 	~EvalGlobalState();
