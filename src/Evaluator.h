@@ -69,6 +69,7 @@ struct EvalGlobalState
 	int m_N;                              // Count of cost_max entries
 	std::vector<double> m_previous_results; // History list for DLAS
 	size_t m_previous_results_index;      // Current index in history
+	double m_current_cost;                // Current accepted cost
 
 	// Add tracking of previous costs per thread for DLAS
 	std::vector<double> m_thread_previous_costs;

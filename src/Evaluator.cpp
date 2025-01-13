@@ -25,6 +25,7 @@ EvalGlobalState::EvalGlobalState()
 	, m_previous_results_index(0)
 	, m_cost_max(DBL_MAX)
 	, m_N(0)
+	, m_current_cost(DBL_MAX)
 	, m_time_start(0)
 	, m_mutex()
 	, m_condvar_update()
@@ -79,6 +80,7 @@ void Evaluator::Start()
 	thread.detach();
 }
 
+// In Evaluator.cpp - complete Run() implementation
 void Evaluator::Run() {
 	m_best_pic = m_gstate->m_best_pic;
 	m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
@@ -90,17 +92,7 @@ void Evaluator::Run() {
 	raster_picture new_picture;
 	std::vector<const line_cache_result*> line_results(m_height);
 
-	// Thread ID for tracking previous costs
-	int thread_id = -1;
-
-	{
-		std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };
-		thread_id = m_gstate->m_thread_previous_costs.size();
-		m_gstate->m_thread_previous_costs.push_back(DBL_MAX);
-	}
-
 	for (;;) {
-		// Cache management code remains unchanged
 		if (m_linear_allocator.size() > m_cache_size) {
 			m_insn_seq_cache.clear();
 			for (int y2 = 0; y2 < (int)m_height; ++y2)
@@ -129,27 +121,23 @@ void Evaluator::Run() {
 		// Initialize DLAS on first evaluation
 		if (!m_gstate->m_initialized) {
 			if (m_gstate->m_previous_results.empty()) {
-				m_gstate->m_previous_results.resize(m_solutions, result);
-				m_gstate->m_cost_max = result;
+				const double init_margin = result * 0.1; // 10% margin
+				m_gstate->m_cost_max = result + init_margin;
+				m_gstate->m_current_cost = result;
+				m_gstate->m_previous_results.resize(m_solutions, m_gstate->m_cost_max);
 				m_gstate->m_N = m_solutions;
 			}
-
 			m_gstate->m_initialized = true;
 			m_gstate->m_update_initialized = true;
 			m_gstate->m_condvar_update.notify_one();
 		}
 
-		// DLAS Logic
-		size_t v = m_gstate->m_previous_results_index % m_solutions;
-		double prev_cost = m_gstate->m_thread_previous_costs[thread_id];
+		// Store previous cost before potential update
+		double prev_cost = m_gstate->m_current_cost;
 
-		bool accept_solution = false;
-		if (result == prev_cost || result < m_gstate->m_cost_max) {
-			accept_solution = true;
-		}
-
-		if (accept_solution) {
-			m_gstate->m_thread_previous_costs[thread_id] = result;
+		// DLAS acceptance criteria
+		if (result == m_gstate->m_current_cost || result < m_gstate->m_cost_max) {
+			m_gstate->m_current_cost = result;
 
 			if (result < m_gstate->m_best_result) {
 				m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
@@ -170,7 +158,6 @@ void Evaluator::Run() {
 				memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
 				m_gstate->m_update_improvement = true;
 
-				// Update mutation statistics
 				for (int i = 0; i < E_MUTATION_MAX; ++i) {
 					if (m_current_mutations[i]) {
 						m_gstate->m_mutation_stats[i] += m_current_mutations[i];
@@ -183,37 +170,35 @@ void Evaluator::Run() {
 		}
 
 		// DLAS history update
-		if (result > m_gstate->m_previous_results[v]) {
-			m_gstate->m_previous_results[v] = result;
+		size_t v = m_gstate->m_previous_results_index % m_solutions;
+		if (m_gstate->m_current_cost > m_gstate->m_previous_results[v]) {
+			m_gstate->m_previous_results[v] = m_gstate->m_current_cost;
 		}
-		else if (result < m_gstate->m_previous_results[v] && result < prev_cost) {
+		else if (m_gstate->m_current_cost < m_gstate->m_previous_results[v] &&
+			m_gstate->m_current_cost < prev_cost) {
 			if (m_gstate->m_previous_results[v] == m_gstate->m_cost_max) {
 				--m_gstate->m_N;
 			}
-			m_gstate->m_previous_results[v] = result;
+			m_gstate->m_previous_results[v] = m_gstate->m_current_cost;
 
 			if (m_gstate->m_N <= 0) {
 				// Find new cost_max
-				m_gstate->m_cost_max = m_gstate->m_previous_results[0];
-				for (size_t i = 1; i < m_gstate->m_previous_results.size(); ++i) {
-					if (m_gstate->m_previous_results[i] > m_gstate->m_cost_max) {
-						m_gstate->m_cost_max = m_gstate->m_previous_results[i];
-					}
-				}
+				m_gstate->m_cost_max = *std::max_element(
+					m_gstate->m_previous_results.begin(),
+					m_gstate->m_previous_results.end()
+				);
 
-				// Count new occurrences
-				m_gstate->m_N = 0;
-				for (size_t i = 0; i < m_gstate->m_previous_results.size(); ++i) {
-					if (m_gstate->m_previous_results[i] == m_gstate->m_cost_max) {
-						++m_gstate->m_N;
-					}
-				}
+				// Recount N
+				m_gstate->m_N = std::count(
+					m_gstate->m_previous_results.begin(),
+					m_gstate->m_previous_results.end(),
+					m_gstate->m_cost_max
+				);
 			}
 		}
 
 		++m_gstate->m_previous_results_index;
 
-		// The rest of the loop remains unchanged
 		if (m_gstate->m_save_period && m_gstate->m_evaluations % m_gstate->m_save_period == 0) {
 			m_gstate->m_update_autosave = true;
 			m_gstate->m_condvar_update.notify_one();
@@ -224,11 +209,19 @@ void Evaluator::Run() {
 			m_gstate->m_condvar_update.notify_one();
 		}
 
-		// Update best solution if needed
 		if (m_best_result != m_gstate->m_best_result) {
 			m_best_result = m_gstate->m_best_result;
 			m_best_pic = m_gstate->m_best_pic;
 			m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
+		}
+
+		if (m_gstate->m_evaluations % 10000 == 0) {
+			statistics_point stats;
+			stats.evaluations = (unsigned)m_gstate->m_evaluations;
+			stats.seconds = (unsigned)(time(NULL) - m_gstate->m_time_start);
+			stats.distance = m_gstate->m_current_cost;
+
+			m_gstate->m_statistics.push_back(stats);
 		}
 
 		if (m_gstate->m_finished)

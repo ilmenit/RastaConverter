@@ -263,12 +263,14 @@ void RastaConverter::SaveLAHC(const char* fn) {
 	fprintf(f, "%lu\n", (unsigned long)m_eval_gstate.m_previous_results_index);
 	fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_cost_max);
 	fprintf(f, "%d\n", m_eval_gstate.m_N);
+	fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_current_cost);
 
 	for (size_t i = 0; i < m_eval_gstate.m_previous_results.size(); ++i) {
 		fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_previous_results[i]);
 	}
 	fclose(f);
 }
+
 bool RastaConverter::LoadInputBitmap()
 {
 	Message("Loading and initializing file");
@@ -1702,15 +1704,18 @@ void RastaConverter::LoadLAHC(string name) {
 	unsigned long index;
 	long double cost_max;
 	int N;
+	long double current_cost;
 
 	fscanf(f, "%lu\n", &no_elements);
 	fscanf(f, "%lu\n", &index);
 	fscanf(f, "%Lf\n", &cost_max);
 	fscanf(f, "%d\n", &N);
+	fscanf(f, "%Lf\n", &current_cost);
 
 	m_eval_gstate.m_previous_results_index = index;
 	m_eval_gstate.m_cost_max = cost_max;
 	m_eval_gstate.m_N = N;
+	m_eval_gstate.m_current_cost = current_cost;
 
 	for (size_t i = 0; i < (size_t)no_elements; ++i) {
 		long double dst = 0;
