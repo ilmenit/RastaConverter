@@ -1873,8 +1873,8 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 
 	// zero registers
 	fprintf(fp,"\tlda #$0\n");
-	fprintf(fp,"\tldx #$0\n");
-	fprintf(fp,"\tldy #$0\n");
+	fprintf(fp,"\ttax\n");
+	fprintf(fp,"\ttay\n");
 
 	fprintf(fp,"\n; Set proper count of wsyncs \n");
 	fprintf(fp,"\n\t:2 sta wsync\n");
