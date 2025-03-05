@@ -7,7 +7,7 @@ The tool uses [SDL2](https://www.libsdl.org/) and [FreeImage](http://freeimage.s
 The conversion process is optimization of the [Kernel Program](http://www.atariarchives.org/dere/chapt05.php#H5_7).
 It uses most of the Atari graphics capabilities including sprites, midline color changes and sprite multiplication. 
 
-The converter uses [Late Acceptance Hill Climbing](http://www.cs.nott.ac.uk/~yxb/LAHC/) algorithm.
+The converter uses [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29) algorithm.
 
 Screenshot
 ----------
