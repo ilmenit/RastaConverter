@@ -225,6 +225,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <OptimizeForWindowsApplication>true</OptimizeForWindowsApplication>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
     </ClCompile>
     <Link>
       <AdditionalDependencies>freeimage.lib;..\..\pthreads\Pre-built.2\lib\x86\pthread.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -243,7 +244,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <FloatingPointModel>Fast</FloatingPointModel>
       <DisableSpecificWarnings>4819</DisableSpecificWarnings>
@@ -254,6 +255,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <OptimizeForWindowsApplication>true</OptimizeForWindowsApplication>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
     </ClCompile>
     <Link>
       <AdditionalDependencies>..\..\FreeImage\Dist\x64\FreeImage.lib;..\..\pthreads\Pre-built.2\lib\x64\pthread.lib;%(AdditionalDependencies)</AdditionalDependencies>

@@ -99,11 +99,11 @@ Command line options:
 /s=Number of solutions
   You may set a different number of solutions used in the optimization process.
   With /s=1 (default) the optimization algorithm is heuristic Hill Climbing.
-  With more solutions the "Late Acceptance Hill Climbing" algorithm is used (www.cs.nott.ac.uk/~yxb/LAHC/)
-  It works slower at the beginning, but after many (100M+) evaluations, when basic Hill Climbing almost stops,
-  this algorithm still finds better solutions! The more solutions you use, the better final result can be. 
-  There is no memory impact so you can use even /s=10000 or more.
-
+  With more solutions the "Diversified Late Acceptance Search" algorithm is used
+  It works much faster at finding quality solutions than previous algorithms. Even small values like
+  /s=3 to /s=5 can produce excellent results. There is no memory impact so you can still use
+  larger values if needed (/s=10), but the returns diminish quickly with DLAS.
+  
 /distance=Color distance function
   Default: yuv, other options: euclid, ciede
  

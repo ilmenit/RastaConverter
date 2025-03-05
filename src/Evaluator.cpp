@@ -80,7 +80,6 @@ void Evaluator::Start()
 	thread.detach();
 }
 
-// In Evaluator.cpp - complete Run() implementation
 void Evaluator::Run() {
 	m_best_pic = m_gstate->m_best_pic;
 	m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
@@ -132,13 +131,18 @@ void Evaluator::Run() {
 			m_gstate->m_condvar_update.notify_one();
 		}
 
-		// Store previous cost before potential update
+		// Store previous cost before potential update 
 		double prev_cost = m_gstate->m_current_cost;
+
+		// Calculate index for circular array
+		size_t l = m_gstate->m_previous_results_index % m_solutions;
 
 		// DLAS acceptance criteria
 		if (result == m_gstate->m_current_cost || result < m_gstate->m_cost_max) {
+			// Accept the candidate solution
 			m_gstate->m_current_cost = result;
 
+			// Update best solution if better 
 			if (result < m_gstate->m_best_result) {
 				m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
 				m_gstate->m_best_pic = new_picture;
@@ -167,38 +171,44 @@ void Evaluator::Run() {
 
 				m_gstate->m_condvar_update.notify_one();
 			}
-		}
 
-		// DLAS history update
-		size_t v = m_gstate->m_previous_results_index % m_solutions;
-		if (m_gstate->m_current_cost > m_gstate->m_previous_results[v]) {
-			m_gstate->m_previous_results[v] = m_gstate->m_current_cost;
-		}
-		else if (m_gstate->m_current_cost < m_gstate->m_previous_results[v] &&
-			m_gstate->m_current_cost < prev_cost) {
-			if (m_gstate->m_previous_results[v] == m_gstate->m_cost_max) {
-				--m_gstate->m_N;
+			// DLAS replacement strategy 
+			if (m_gstate->m_current_cost > m_gstate->m_previous_results[l]) {
+				m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
 			}
-			m_gstate->m_previous_results[v] = m_gstate->m_current_cost;
+			else if (m_gstate->m_current_cost < m_gstate->m_previous_results[l] &&
+				m_gstate->m_current_cost < prev_cost) {
 
-			if (m_gstate->m_N <= 0) {
-				// Find new cost_max
-				m_gstate->m_cost_max = *std::max_element(
-					m_gstate->m_previous_results.begin(),
-					m_gstate->m_previous_results.end()
-				);
+				// Track if we're removing a max value 
+				if (m_gstate->m_previous_results[l] == m_gstate->m_cost_max) {
+					--m_gstate->m_N;
+				}
 
-				// Recount N
-				m_gstate->m_N = std::count(
-					m_gstate->m_previous_results.begin(),
-					m_gstate->m_previous_results.end(),
-					m_gstate->m_cost_max
-				);
+				// Replace the value 
+				m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
+
+				// Recompute max and N if needed 
+				if (m_gstate->m_N <= 0) {
+					// Find new cost_max
+					m_gstate->m_cost_max = *std::max_element(
+						m_gstate->m_previous_results.begin(),
+						m_gstate->m_previous_results.end()
+					);
+
+					// Recount occurrences of max
+					m_gstate->m_N = std::count(
+						m_gstate->m_previous_results.begin(),
+						m_gstate->m_previous_results.end(),
+						m_gstate->m_cost_max
+					);
+				}
 			}
 		}
 
+		// Always increment index
 		++m_gstate->m_previous_results_index;
 
+		// Handle saving and termination checks
 		if (m_gstate->m_save_period && m_gstate->m_evaluations % m_gstate->m_save_period == 0) {
 			m_gstate->m_update_autosave = true;
 			m_gstate->m_condvar_update.notify_one();

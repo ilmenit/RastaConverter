@@ -1,6 +1,11 @@
 ChangeLog
 =========
 
+RastaConverterBeta11      2025-03-05
+* Implemented Diversified Late Acceptance Search (DLAS) algorithm replacing LAHC
+* Much faster convergence to quality solutions
+* Better quality results with fewer solutions (5-10 solutions work well)
+
 RastaConverterBeta10      
 * Added command line parameter to window title
 * Changed default auto-save to "auto" to save SSD disks life
