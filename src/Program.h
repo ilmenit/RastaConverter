@@ -92,10 +92,15 @@ public:
 };
 
 struct raster_line {
-	std::vector < SRasterInstruction > instructions;
+	std::vector<SRasterInstruction> instructions;
+
 	raster_line()
 	{
-		cycles=0;
+		cycles = 0;
+		hash = 0;
+		cache_key = NULL;
+		// Pre-allocate memory to avoid frequent reallocations
+		instructions.reserve(16); // Typical instruction count
 	}
 
 	void rehash()

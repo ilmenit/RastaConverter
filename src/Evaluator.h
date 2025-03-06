@@ -106,6 +106,12 @@ public:
 	int Random(int range);
 
 private:
+	// Other existing members...
+	int m_mutation_success_count[E_MUTATION_MAX];
+	int m_mutation_attempt_count[E_MUTATION_MAX];
+	int SelectMutation(); 
+	void BatchMutateLine(raster_line& prog, raster_picture& pic, int count);
+
 	void CaptureRegisterState(register_state& rs) const;
 	void ApplyRegisterState(const register_state& rs);
 
