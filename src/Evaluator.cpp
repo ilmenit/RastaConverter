@@ -29,6 +29,7 @@ EvalGlobalState::EvalGlobalState()
 	, m_time_start(0)
 	, m_mutex()
 	, m_condvar_update()
+	, m_thread_count(1) 
 {
 	memset(m_mutation_stats, 0, sizeof(m_mutation_stats));
 }
@@ -43,6 +44,29 @@ Evaluator::Evaluator()
 {
 	memset(m_mutation_success_count, 0, sizeof(m_mutation_success_count));
 	memset(m_mutation_attempt_count, 0, sizeof(m_mutation_attempt_count));
+}
+
+void Evaluator::UpdateLRU(int line_index) {
+	// If already in the set, remove it from current position in the queue
+	if (m_lru_set.find(line_index) != m_lru_set.end()) {
+		auto it = std::find(m_lru_lines.begin(), m_lru_lines.end(), line_index);
+		if (it != m_lru_lines.end()) {
+			m_lru_lines.erase(it);
+		}
+	}
+	else {
+		// Add to the set
+		m_lru_set.insert(line_index);
+	}
+
+	// Add to back of queue (most recently used)
+	m_lru_lines.push_back(line_index);
+
+	// Keep the LRU queue at a reasonable size
+	while (m_lru_lines.size() > m_height * 2) {
+		m_lru_set.erase(m_lru_lines.front());
+		m_lru_lines.pop_front();
+	}
 }
 
 int Evaluator::SelectMutation()
@@ -74,7 +98,7 @@ int Evaluator::SelectMutation()
 	return Random(E_MUTATION_MAX);
 }
 
-void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* errmap, const screen_line* picture, const OnOffMap* onoff, EvalGlobalState* gstate, int solutions, unsigned long long randseed, size_t cache_size)
+void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* errmap, const screen_line* picture, const OnOffMap* onoff, EvalGlobalState* gstate, int solutions, unsigned long long randseed, size_t cache_size, int thread_id)
 {
 	m_randseed = randseed;
 	m_width = width;
@@ -85,12 +109,11 @@ void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* e
 	m_gstate = gstate;
 	m_solutions = solutions;
 	m_cache_size = cache_size;
+	m_thread_id = thread_id;
 
 	m_currently_mutated_y = 0;
 
 	memset(m_current_mutations, 0, sizeof(m_current_mutations));
-	memset(m_mutation_success_count, 0, sizeof(m_mutation_success_count));
-	memset(m_mutation_attempt_count, 0, sizeof(m_mutation_attempt_count));
 
 	m_line_caches.resize(m_height);
 
@@ -103,7 +126,12 @@ void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* e
 	{
 		m_created_picture_targets[y].resize(width);
 	}
+
+	// Clear LRU tracking (assuming this is already in your code)
+	m_lru_lines.clear();
+	m_lru_set.clear();
 }
+
 void Evaluator::Start()
 {
 	++m_gstate->m_threads_active;
@@ -125,11 +153,39 @@ void Evaluator::Run() {
 
 	for (;;) {
 		if (m_linear_allocator.size() > m_cache_size) {
-			m_insn_seq_cache.clear();
-			for (int y2 = 0; y2 < (int)m_height; ++y2)
-				m_line_caches[y2].clear();
-			m_linear_allocator.clear();
-			m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
+			// Acquire a mutex to coordinate cache clearing
+			std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);
+
+			// Check again after acquiring the lock (another thread might have cleared)
+			if (m_linear_allocator.size() > m_cache_size) {
+				// First, try clearing least recently used lines (25% of height)
+				size_t lines_to_clear = std::max((size_t)m_height / 4, (size_t)1);
+				size_t cleared = 0;
+
+				// Clear the least recently used lines
+				while (cleared < lines_to_clear && !m_lru_lines.empty()) {
+					int y = m_lru_lines.front();
+					m_lru_lines.pop_front();
+					m_lru_set.erase(y);
+
+					// Clear just this line's cache
+					m_line_caches[y].clear();
+					cleared++;
+				}
+
+				// If we're still using too much memory, do a full clear
+				if (m_linear_allocator.size() > m_cache_size * 0.9) {
+					m_insn_seq_cache.clear();
+					for (int y2 = 0; y2 < (int)m_height; ++y2)
+						m_line_caches[y2].clear();
+					m_linear_allocator.clear();
+					m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
+
+					// Reset LRU tracking
+					m_lru_lines.clear();
+					m_lru_set.clear();
+				}
+			}
 		}
 
 		new_picture = m_best_pic;
@@ -438,7 +494,7 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 		unsigned char * __restrict created_picture_row = &m_created_picture[y][0];
 		unsigned char * __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
 
-		const line_cache_result *cached_line_result = m_line_caches[y].find(lck, lck_hash);
+		const line_cache_result* cached_line_result = m_line_caches[y].find(lck, lck_hash);
 		if (cached_line_result)
 		{
 			// sweet! cache hit!!
@@ -446,6 +502,9 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 			ApplyRegisterState(cached_line_result->new_state);
 			memcpy(m_sprites_memory[y], cached_line_result->sprite_data, sizeof m_sprites_memory[y]);
 			shift_start_array_dirty = true;
+
+			// Update LRU status for this line
+			UpdateLRU(y);
 
 			total_error += cached_line_result->line_error;
 			continue;
@@ -536,6 +595,8 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 			// add this to line cache
 			line_cache_result& result_state = m_line_caches[y].insert(lck, lck_hash, m_linear_allocator);
+			// Update LRU status for this line
+			UpdateLRU(y);
 
 			result_state.line_error = total_line_error;
 			CaptureRegisterState(result_state.new_state);
@@ -880,71 +941,65 @@ void Evaluator::MutateRasterProgram(raster_picture* pic)
 {
 	memset(m_current_mutations, 0, sizeof m_current_mutations);
 
+	// Calculate this thread's assigned region
+	int thread_count = m_gstate->m_thread_count;
+	int lines_per_thread = m_height / thread_count;
+	int region_start = m_thread_id * lines_per_thread;
+	int region_end = (m_thread_id == thread_count - 1) ?
+		m_height : region_start + lines_per_thread;
+
+	// Prefer mutating lines in this thread's region (80% of the time)
+	if (Random(100) < 80 && region_end > region_start) {
+		m_currently_mutated_y = region_start + Random(region_end - region_start);
+	}
+	// Otherwise, allow some exploration outside the region (20% of time)
+	else if (m_currently_mutated_y >= (int)pic->raster_lines.size()) {
+		m_currently_mutated_y = 0;
+	}
+	else if (m_currently_mutated_y < 0) {
+		m_currently_mutated_y = pic->raster_lines.size() - 1;
+	}
+
 	// Batch memory register mutations
 	if (Random(10) == 0) // mutate random init mem reg
 	{
-		int mutations = 1 + Random(2); // Apply 1-2 register mutations at once
-		for (int m = 0; m < mutations; m++) {
-			int c = 1;
-			if (Random(2))
-				c *= -1;
-			if (Random(2))
-				c *= 16;
+		int c = 1;
+		if (Random(2))
+			c *= -1;
+		if (Random(2))
+			c *= 16;
 
-			int targ;
-			do {
-				targ = Random(E_TARGET_MAX);
-			} while (targ == E_COLBAK);
+		int targ;
+		do {
+			targ = Random(E_TARGET_MAX);
+		} while (targ == E_COLBAK);
 
-			pic->mem_regs_init[targ] += c;
-		}
+		pic->mem_regs_init[targ] += c;
 	}
 
-	if (m_currently_mutated_y >= (int)pic->raster_lines.size())
-		m_currently_mutated_y = 0;
-	if (m_currently_mutated_y < 0)
-		m_currently_mutated_y = pic->raster_lines.size() - 1;
+	raster_line& current_line = pic->raster_lines[m_currently_mutated_y];
+	MutateLine(current_line, *pic);
 
-	// Get a set of lines to mutate
-	std::vector<int> lines_to_mutate;
-	lines_to_mutate.push_back(m_currently_mutated_y);
-
-	// Sometimes mutate nearby lines in a batch (coherent changes)
-	if (Random(4) == 0) {
-		int batch_size = 2 + Random(3); // 2-4 lines in a batch
-
-		for (int i = 1; i < batch_size; i++) {
-			// Either pick adjacent lines or jump to a related area
-			if (Random(2) && m_currently_mutated_y > i - 1) {
-				lines_to_mutate.push_back(m_currently_mutated_y - i);
-			}
-			else if (m_currently_mutated_y + i < (int)pic->raster_lines.size()) {
-				lines_to_mutate.push_back(m_currently_mutated_y + i);
-			}
+	if (Random(20) == 0)
+	{
+		for (int t = 0; t < 10; ++t)
+		{
+			// When jumping, prefer to stay within this thread's region
+			if (Random(2) && m_currently_mutated_y > region_start)
+				--m_currently_mutated_y;
+			else if (m_currently_mutated_y < region_end - 1)
+				++m_currently_mutated_y;
 			else {
-				lines_to_mutate.push_back(Random(pic->raster_lines.size()));
+				// Fall back to anywhere in the thread's region
+				m_currently_mutated_y = region_start + Random(region_end - region_start);
 			}
+
+			raster_line& current_line = pic->raster_lines[m_currently_mutated_y];
+			MutateLine(current_line, *pic);
 		}
 	}
 
-	// Mutate all selected lines
-	for (size_t i = 0; i < lines_to_mutate.size(); i++) {
-		int y = lines_to_mutate[i];
-		raster_line& current_line = pic->raster_lines[y];
-		MutateLine(current_line, *pic);
-	}
-
-	// Maybe move to a new focus area for next mutation
-	if (Random(4) == 0) {
-		if (Random(2) && m_currently_mutated_y > 0)
-			m_currently_mutated_y--;
-		else if (m_currently_mutated_y < (int)pic->raster_lines.size() - 1)
-			m_currently_mutated_y++;
-		else
-			m_currently_mutated_y = Random(pic->raster_lines.size());
-	}
-
-	// recache all lines that have changed
+	// recache any lines that have changed
 	for (int y = 0; y < (int)m_height; ++y) {
 		raster_line& rline = pic->raster_lines[y];
 		if (rline.cache_key == NULL)

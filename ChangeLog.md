@@ -1,6 +1,16 @@
 ChangeLog
 =========
 
+RastaConverterBeta12      2025-03-06
+* Improved multi-threaded performance with region-based work distribution
+* Implemented LRU (Least Recently Used) cache eviction for significantly reduced cache overhead
+* Optimized mutation selection using adaptive success rate tracking
+* Added batch mutation processing for faster convergence
+* Replaced random number generator with faster XorShift algorithm
+* Reduced memory allocation overhead with optimized vector operations
+* Improved cache coordination between threads
+* Better work distribution to minimize thread contention
+
 RastaConverterBeta11      2025-03-05
 * Implemented Diversified Late Acceptance Search (DLAS) algorithm replacing LAHC
 * Much faster convergence to quality solutions

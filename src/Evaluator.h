@@ -10,6 +10,8 @@
 #include "Program.h"
 #include "LinearAllocator.h"
 #include "LineCache.h"
+#include <deque>
+#include <unordered_set>
 
 typedef std::vector<unsigned char> color_index_line;
 typedef std::vector<unsigned char> line_target;		// target of the pixel f.e. COLBAK
@@ -60,6 +62,11 @@ struct EvalGlobalState
 
 	int m_mutation_stats[E_MUTATION_MAX];
 
+	// Number of threads configured (add this)
+	int m_thread_count;
+	// Mutex for coordinating cache clearing
+	std::mutex m_cache_mutex;
+
 	time_t m_time_start;
 
 	statistics_list m_statistics;
@@ -83,7 +90,7 @@ class Evaluator
 public:
 	Evaluator();
 
-	void Init(unsigned width, unsigned height, const distance_t *const *errmap, const screen_line *picture, const OnOffMap *onoff, EvalGlobalState *gstate, int solutions, unsigned long long randseed, size_t cache_size);
+	void Init(unsigned width, unsigned height, const distance_t* const* errmap, const screen_line* picture, const OnOffMap* onoff, EvalGlobalState* gstate, int solutions, unsigned long long randseed, size_t cache_size, int thread_id=0);
 
 	void Start();
 
@@ -106,10 +113,16 @@ public:
 	int Random(int range);
 
 private:
-	// Other existing members...
+	int m_thread_id;
+	// LRU tracking
+	std::deque<int> m_lru_lines; // Queue of lines ordered by recent use
+	std::unordered_set<int> m_lru_set; // For fast lookups
+	void UpdateLRU(int line_index); // Move a line to "most recently used" position
+
 	int m_mutation_success_count[E_MUTATION_MAX];
 	int m_mutation_attempt_count[E_MUTATION_MAX];
 	int SelectMutation(); 
+
 	void BatchMutateLine(raster_line& prog, raster_picture& pic, int count);
 
 	void CaptureRegisterState(register_state& rs) const;

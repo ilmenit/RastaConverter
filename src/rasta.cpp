@@ -773,6 +773,22 @@ bool RastaConverter::ProcessInit()
 		randseed += 187927 * i;
 	}
 
+	m_eval_gstate.m_thread_count = cfg.threads;
+
+	// When initializing evaluators, pass thread ID:
+	for (size_t i = 0; i < m_evaluators.size(); ++i)
+	{
+		// seed=0 would lock up the LFSR
+		if (!randseed)
+			++randseed;
+
+		m_evaluators[i].Init(m_width, m_height, m_picture_all_errors_array,
+			m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off,
+			&m_eval_gstate, solutions, randseed, cfg.cache_size, i);
+
+		randseed += 187927 * i;
+	}
+
 	return true;
 }
 
