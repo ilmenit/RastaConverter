@@ -1,137 +1,188 @@
 # Building RastaConverter
 
-This document explains how to build RastaConverter from source.
+RastaConverter supports multiple build configurations:
+- GUI and No-GUI versions
+- x64 and x86 architectures
+- Debug and Release builds
 
 ## Prerequisites
 
-- CMake 3.14 or higher
-- C++17 compatible compiler
-- FreeImage library
-- SDL2 and SDL2_ttf libraries (unless building with `-DNO_GUI=ON`)
-
-## Getting the Dependencies
-
 ### Windows
-
-#### FreeImage
-
-1. Download the FreeImage library from [https://freeimage.sourceforge.io/](https://freeimage.sourceforge.io/)
-2. Extract it to a location of your choice
-3. Set `FREEIMAGE_DIR` environment variable to point to the FreeImage directory
-
-#### SDL2 and SDL2_ttf
-
-1. Download SDL2 from [https://www.libsdl.org/download-2.0.php](https://www.libsdl.org/download-2.0.php)
-2. Download SDL2_ttf from [https://www.libsdl.org/projects/SDL_ttf/](https://www.libsdl.org/projects/SDL_ttf/)
-3. Extract both to locations of your choice
-4. Set `SDL2_DIR` and `SDL2_TTF_DIR` environment variables
+1. Visual Studio 2022 with C++ workload
+2. CMake 3.14 or higher
+3. FreeImage library
+4. SDL2 and SDL2_ttf libraries (for GUI version)
 
 ### Linux
+1. GCC or Clang compiler
+2. CMake 3.14 or higher
+3. FreeImage development packages
+4. SDL2 and SDL2_ttf development packages (for GUI version)
 
-Install the required dependencies using your package manager:
+## Environment Setup
 
-#### Ubuntu/Debian:
+Before building, you need to set up your environment variables for library paths.
+
+### Windows
+1. Run `setup-env.bat` script:
+   ```
+   setup-env.bat
+   ```
+2. The script will prompt you for paths to FreeImage, SDL2, and SDL2_ttf libraries.
+3. It will save these paths to environment variables and a `config.env` file.
+
+### Linux
+1. Run `setup-env.sh` script:
+   ```
+   chmod +x setup-env.sh
+   ./setup-env.sh
+   ```
+2. The script will try to detect libraries using pkg-config and prompt for paths.
+3. It can add the variables to your `.bashrc` file for persistence.
+
+## Building on Windows
+
+### Using Visual Studio
+1. First run the environment setup as described above.
+2. Open the project folder in Visual Studio.
+3. Visual Studio should automatically detect the CMake project.
+4. Select your desired configuration from the dropdown in the toolbar:
+   - x64-Debug-GUI: 64-bit debug build with GUI
+   - x64-Debug-NoGUI: 64-bit debug build without GUI
+   - x64-Release-GUI: 64-bit optimized release build with GUI
+   - x64-Release-NoGUI: 64-bit optimized release build without GUI
+   - x86-Debug-GUI: 32-bit debug build with GUI
+   - x86-Debug-NoGUI: 32-bit debug build without GUI
+   - x86-Release-GUI: 32-bit optimized release build with GUI
+   - x86-Release-NoGUI: 32-bit optimized release build without GUI
+   - x64-Clang-Debug-GUI: 64-bit debug build with GUI using Clang
+   - x64-Clang-Release-GUI: 64-bit release build with GUI using Clang
+   - x64-Clang-Debug-NoGUI: 64-bit debug build without GUI using Clang
+   - x64-Clang-Release-NoGUI: 64-bit release build without GUI using Clang
+5. Click on Build → Build All to compile the project.
+
+### Using Command Prompt
+Use the provided build.bat script:
+
+```
+build.bat [DEBUG|RELEASE] [GUI|NOGUI] [x64|x86]
+```
+
+Examples:
+```
+build.bat RELEASE GUI x64     # Build 64-bit Release with GUI
+build.bat DEBUG NOGUI x86     # Build 32-bit Debug without GUI
+```
+
+## Building on Linux
+
+Use the provided build.sh script:
+
+```
+./build.sh [DEBUG|RELEASE] [GUI|NOGUI] [x64|x86]
+```
+
+Examples:
+```
+./build.sh RELEASE GUI x64    # Build 64-bit Release with GUI
+./build.sh DEBUG NOGUI x86    # Build 32-bit Debug without GUI
+```
+
+### Installing Dependencies on Ubuntu/Debian
+
 ```bash
-sudo apt-get install libfreeimage-dev libsdl2-dev libsdl2-ttf-dev
+sudo apt update
+sudo apt install build-essential cmake libfreeimage-dev
+# For GUI version
+sudo apt install libsdl2-dev libsdl2-ttf-dev
 ```
 
-#### Fedora:
-```bash
-sudo dnf install freeimage-devel SDL2-devel SDL2_ttf-devel
-```
-
-## Building the Project
-
-### Command Line Build
-
-1. Create a build directory:
-```bash
-mkdir build
-cd build
-```
-
-2. Run CMake to configure the project:
-```bash
-cmake ..
-```
-
-3. Build the project:
-```bash
-cmake --build . --config Release
-```
-
-### Visual Studio (Windows)
-
-1. Open a command prompt and create a build directory:
-```batch
-mkdir build
-cd build
-```
-
-2. Generate Visual Studio solution:
-```batch
-cmake .. -G "Visual Studio 16 2019" -A x64
-```
-
-3. Open the generated solution file `RastaConverter.sln` in Visual Studio
-
-4. Build the solution (F7 or Build → Build Solution)
-
-### Building without GUI
-
-If you want to build without the SDL2 GUI (console mode only):
+### Installing Dependencies on Fedora/RHEL
 
 ```bash
-cmake .. -DNO_GUI=ON
-cmake --build . --config Release
+sudo dnf install gcc-c++ cmake freeimage-devel
+# For GUI version
+sudo dnf install SDL2-devel SDL2_ttf-devel
 ```
 
-## Installation
+## Customizing Library Paths
 
-To install the built executable and required files:
+There are several ways to set the paths to your libraries:
 
-```bash
-cmake --install . --prefix /path/to/install
-```
+1. **Environment Variables**: The simplest approach is to set these environment variables:
+   ```
+   FREEIMAGE_DIR=/path/to/freeimage
+   SDL2_DIR=/path/to/sdl2
+   SDL2_TTF_DIR=/path/to/sdl2_ttf
+   ```
 
-On Windows, you might need to copy the required DLLs (FreeImage.dll, SDL2.dll, SDL2_ttf.dll) to the same directory as the executable if they aren't found automatically.
+2. **Setup Scripts**: Use the provided setup scripts:
+   - Windows: `setup-env.bat`
+   - Linux: `setup-env.sh`
+
+3. **config.env File**: The build scripts will read from a `config.env` file in the project root:
+   ```
+   FREEIMAGE_DIR=/path/to/freeimage
+   SDL2_DIR=/path/to/sdl2
+   SDL2_TTF_DIR=/path/to/sdl2_ttf
+   ```
+
+4. **Interactive Mode**: If no environment variables or config file exists, the build scripts will prompt you for the paths.
+
+5. **CMake Cache**: For permanent settings, you can set these as CMake cache variables:
+   ```bash
+   cmake -DFREEIMAGE_DIR=/path/to/freeimage -DSDL2_DIR=/path/to/sdl2 -DSDL2_TTF_DIR=/path/to/sdl2_ttf ..
+   ```
+
+## Release Build Optimizations
+
+The Release build configurations include the following optimizations based on compiler:
+
+### Windows (MSVC)
+- /O2: Maximize speed
+- /Ob2: Inline function expansion
+- /Oi: Generate intrinsic functions
+- /Ot: Favor fast code
+- /GL: Whole program optimization
+- /LTCG: Link-time code generation
+
+### Windows (Clang-cl)
+- /O2: Maximize speed
+- /Ob2: Inline function expansion
+- /Oi: Generate intrinsic functions
+
+### Linux (GCC)
+- -O3: Maximum optimization
+- -march=native: Optimize for the local machine
+- -ffast-math: Enable fast floating point optimizations
+- -flto: Link-time optimization
+
+### Linux (Clang)
+- -O3: Maximum optimization
+- -march=native: Optimize for the local machine
+- -ffast-math: Enable fast floating point optimizations
+
+These optimizations ensure the best performance for the release builds while being compatible with each compiler's supported flags.
 
 ## Troubleshooting
 
-### FreeImage Not Found
+### CMake can't find the libraries
+- Make sure the environment variables are set correctly
+- Try using absolute paths instead of relative paths
+- Check if the library files exist in the specified directories
+- Use the interactive mode of the build scripts to verify paths
 
-If CMake cannot find FreeImage, you can specify its location explicitly:
+### Missing DLL errors on Windows
+- The build system tries to copy DLLs automatically
+- Make sure the DLLs are in the expected locations within the library directories
+- Try manually copying the DLLs to the output directory
 
-```bash
-cmake .. -DFREEIMAGE_DIR=/path/to/freeimage
-```
+### Build errors on Linux
+- Make sure you have the required development packages installed
+- Use the system package manager to install missing dependencies
+- Check if you need to specify additional include/library paths
 
-### SDL2 Not Found
-
-Similarly for SDL2:
-
-```bash
-cmake .. -DSDL2_DIR=/path/to/sdl2 -DSDL2_TTF_DIR=/path/to/sdl2_ttf
-```
-
-## Project Structure
-
-The project is organized into several directories:
-
-- `assets/` - Runtime assets like fonts
-- `cache/` - Caching mechanisms for performance
-- `cmake/` - CMake modules for finding dependencies
-- `color/` - Color handling and distance calculations
-- `execution/` - Program execution simulation
-- `io/` - Input/output operations
-- `mutation/` - Program mutation logic
-- `optimization/` - Optimization algorithms
-- `raster/` - Raster program representation
-- `ui/` - GUI and console interfaces
-- `utils/` - Utility functions
-
-## Required Font
-
-If you're building with GUI support, you'll need the `clacon2.ttf` font in the `assets` directory. This font is used by the SDL interface for text rendering. 
-
-The build system will automatically copy this file to the executable directory.
+### Compiler-specific issues
+- Different compilers may need different flags
+- The build system tries to handle common compilers automatically
+- If using a specialized compiler setup, you may need to customize the CMake flags

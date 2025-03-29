@@ -200,11 +200,8 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
             {
                 prog.cycles -= c;
 
-                // More efficient erase - swap with last and pop_back
-                if (i1 < prog.instructions.size() - 1) {
-                    prog.instructions[i1] = prog.instructions.back();
-                }
-                prog.instructions.pop_back();
+                // FIXED: Use erase to maintain instruction order
+                prog.instructions.erase(prog.instructions.begin() + i1);
 
                 prog.cache_key = NULL;
                 assert(prog.cycles > 0);
@@ -294,6 +291,8 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         break;
     }
 }
+
+
 
 void RasterMutator::BatchMutateLine(raster_line& prog, raster_picture& pic, int count)
 {

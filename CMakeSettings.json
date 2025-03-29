@@ -1,13 +1,134 @@
-﻿{
+{
   "configurations": [
     {
-      "name": "x64-Debug",
+      "name": "x64-Debug-GUI",
       "generator": "Ninja",
       "configurationType": "Debug",
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "buildRoot": "${projectDir}\\out\\build\\${name}",
       "installRoot": "${projectDir}\\out\\install\\${name}",
-      "cmakeCommandArgs": "-DFREEIMAGE_DIR=d:/Projekty/FreeImage -DSDL2_DIR=D:/Projekty/SDL2 -DSDL2_TTF_DIR=D:/Projekty/SDL2_ttf",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR}",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x64-Debug-NoGUI",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR} -DNO_GUI=ON",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x64-Release-GUI",
+      "generator": "Ninja",
+      "configurationType": "RelWithDebInfo",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR}",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x64-Release-NoGUI",
+      "generator": "Ninja",
+      "configurationType": "RelWithDebInfo",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR} -DNO_GUI=ON",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x86-Debug-GUI",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "msvc_x86" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR}",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x86-Debug-NoGUI",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "msvc_x86" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR} -DNO_GUI=ON",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x86-Release-GUI",
+      "generator": "Ninja",
+      "configurationType": "RelWithDebInfo",
+      "inheritEnvironments": [ "msvc_x86" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR}",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x86-Release-NoGUI",
+      "generator": "Ninja",
+      "configurationType": "RelWithDebInfo",
+      "inheritEnvironments": [ "msvc_x86" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR} -DNO_GUI=ON",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x64-Clang-Debug-GUI",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "clang_cl_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR}",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x64-Clang-Release-GUI",
+      "generator": "Ninja",
+      "configurationType": "RelWithDebInfo",
+      "inheritEnvironments": [ "clang_cl_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR}",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x64-Clang-Debug-NoGUI",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "clang_cl_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR} -DNO_GUI=ON",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x64-Clang-Release-NoGUI",
+      "generator": "Ninja",
+      "configurationType": "RelWithDebInfo",
+      "inheritEnvironments": [ "clang_cl_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR} -DNO_GUI=ON",
       "buildCommandArgs": "",
       "ctestCommandArgs": ""
     }

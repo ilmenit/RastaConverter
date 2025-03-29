@@ -29,6 +29,7 @@ out/
 [Dd]ebug-NO_GUI/
 x64/
 build/
+build-*/
 [Bb]in/
 [Oo]bj/
 release-package/

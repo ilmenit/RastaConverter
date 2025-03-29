@@ -9,8 +9,41 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(NO_GUI "Build without GUI" OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 
+# Add optimization flags for Release builds
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    if(MSVC)
+        # MSVC optimization flags
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /Oi /Ot /GL")
+        set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        if(WIN32)
+            # Clang-cl on Windows
+            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /Oi")
+        else()
+            # Clang on Unix-like systems
+            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffast-math")
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        # GCC optimization flags
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffast-math")
+    endif()
+endif()
+
 # Add custom module path
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
+
+# Define cache variables for dependency paths if not already set
+if(NOT DEFINED FREEIMAGE_DIR AND DEFINED ENV{FREEIMAGE_DIR})
+    set(FREEIMAGE_DIR $ENV{FREEIMAGE_DIR} CACHE PATH "Path to FreeImage library")
+endif()
+
+if(NOT DEFINED SDL2_DIR AND DEFINED ENV{SDL2_DIR})
+    set(SDL2_DIR $ENV{SDL2_DIR} CACHE PATH "Path to SDL2 library")
+endif()
+
+if(NOT DEFINED SDL2_TTF_DIR AND DEFINED ENV{SDL2_TTF_DIR})
+    set(SDL2_TTF_DIR $ENV{SDL2_TTF_DIR} CACHE PATH "Path to SDL2_ttf library")
+endif()
 
 # Find dependencies
 find_package(FreeImage REQUIRED)
@@ -185,6 +218,15 @@ if(WIN32)
                 $<TARGET_FILE_DIR:rasta>
             )
         endif()
+    endif()
+else()
+    # Linux-specific settings
+    find_package(Threads REQUIRED)
+    target_link_libraries(rasta PRIVATE Threads::Threads)
+    
+    # Add optimization flags
+    if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+        target_link_options(rasta PRIVATE -flto)
     endif()
 endif()
 

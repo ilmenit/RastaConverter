@@ -1,8 +1,30 @@
 {
   "OutputFoldersPerTargetSystem": {
     "Local Machine": [
-      "out\\build\\x64-Debug",
-      "out\\install\\x64-Debug"
+      "out\\build\\x64-Debug-GUI",
+      "out\\install\\x64-Debug-GUI",
+      "out\\build\\x64-Debug-NoGUI",
+      "out\\install\\x64-Debug-NoGUI",
+      "out\\build\\x64-Release-GUI",
+      "out\\install\\x64-Release-GUI",
+      "out\\build\\x64-Release-NoGUI",
+      "out\\install\\x64-Release-NoGUI",
+      "out\\build\\x86-Debug-GUI",
+      "out\\install\\x86-Debug-GUI",
+      "out\\build\\x86-Debug-NoGUI",
+      "out\\install\\x86-Debug-NoGUI",
+      "out\\build\\x86-Release-GUI",
+      "out\\install\\x86-Release-GUI",
+      "out\\build\\x86-Release-NoGUI",
+      "out\\install\\x86-Release-NoGUI",
+      "out\\build\\x64-Clang-Debug-GUI",
+      "out\\install\\x64-Clang-Debug-GUI",
+      "out\\build\\x64-Clang-Release-GUI",
+      "out\\install\\x64-Clang-Release-GUI",
+      "out\\build\\x64-Clang-Debug-NoGUI",
+      "out\\install\\x64-Clang-Debug-NoGUI",
+      "out\\build\\x64-Clang-Release-NoGUI",
+      "out\\install\\x64-Clang-Release-NoGUI"
     ]
   },
   "ExpandedNodes": [
@@ -14,6 +36,6 @@
     "\\src\\optimization",
     "\\src\\raster"
   ],
-  "SelectedNode": "\\src\\raster\\Program.cpp",
+  "SelectedNode": "\\CMakeLists.txt",
   "PreviewInSolutionExplorer": false
 }

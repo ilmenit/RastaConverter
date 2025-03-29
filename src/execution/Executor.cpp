@@ -131,7 +131,7 @@ void Executor::Start()
 
 void Executor::Run() {
     if (!m_gstate) return;
-    
+
     m_best_pic = m_gstate->m_best_pic;
     m_best_pic.recache_insns(*m_insn_seq_cache_ptr, *m_linear_allocator_ptr);
 
@@ -250,37 +250,37 @@ void Executor::Run() {
 
                 m_gstate->m_condvar_update.notify_one();
             }
+        }
 
-            // DLAS replacement strategy 
-            if (m_gstate->m_current_cost > m_gstate->m_previous_results[l]) {
-                m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
+        // DLAS replacement strategy - MOVED OUTSIDE acceptance condition
+        if (m_gstate->m_current_cost > m_gstate->m_previous_results[l]) {
+            m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
+        }
+        else if (m_gstate->m_current_cost < m_gstate->m_previous_results[l] &&
+            m_gstate->m_current_cost < prev_cost) {
+
+            // Track if we're removing a max value 
+            if (m_gstate->m_previous_results[l] == m_gstate->m_cost_max) {
+                --m_gstate->m_N;
             }
-            else if (m_gstate->m_current_cost < m_gstate->m_previous_results[l] &&
-                m_gstate->m_current_cost < prev_cost) {
 
-                // Track if we're removing a max value 
-                if (m_gstate->m_previous_results[l] == m_gstate->m_cost_max) {
-                    --m_gstate->m_N;
-                }
+            // Replace the value 
+            m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
 
-                // Replace the value 
-                m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
+            // Recompute max and N if needed 
+            if (m_gstate->m_N <= 0) {
+                // Find new cost_max
+                m_gstate->m_cost_max = *std::max_element(
+                    m_gstate->m_previous_results.begin(),
+                    m_gstate->m_previous_results.end()
+                );
 
-                // Recompute max and N if needed 
-                if (m_gstate->m_N <= 0) {
-                    // Find new cost_max
-                    m_gstate->m_cost_max = *std::max_element(
-                        m_gstate->m_previous_results.begin(),
-                        m_gstate->m_previous_results.end()
-                    );
-
-                    // Recount occurrences of max
-                    m_gstate->m_N = std::count(
-                        m_gstate->m_previous_results.begin(),
-                        m_gstate->m_previous_results.end(),
-                        m_gstate->m_cost_max
-                    );
-                }
+                // Recount occurrences of max
+                m_gstate->m_N = std::count(
+                    m_gstate->m_previous_results.begin(),
+                    m_gstate->m_previous_results.end(),
+                    m_gstate->m_cost_max
+                );
             }
         }
 
@@ -731,7 +731,7 @@ void Executor::MutateLine(raster_line& prog, raster_picture& pic)
 void Executor::MutateOnce(raster_line& prog, raster_picture& pic)
 {
     int i1, i2, c, x;
-    
+
     if (prog.instructions.empty())
         return;
 
@@ -846,11 +846,8 @@ void Executor::MutateOnce(raster_line& prog, raster_picture& pic)
             {
                 prog.cycles -= c;
 
-                // More efficient erase - swap with last and pop_back
-                if (i1 < (int)prog.instructions.size() - 1) {
-                    prog.instructions[i1] = prog.instructions.back();
-                }
-                prog.instructions.pop_back();
+                // FIXED: Use erase to maintain instruction order
+                prog.instructions.erase(prog.instructions.begin() + i1);
 
                 prog.cache_key = NULL;
                 assert(prog.cycles > 0);
