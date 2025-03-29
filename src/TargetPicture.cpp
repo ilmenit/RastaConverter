@@ -1,7 +1,7 @@
 #include <float.h>
 #include "TargetPicture.h"
-#include "rgb.h"
-#include "Distance.h"
+#include "color/rgb.h"
+#include "color/Distance.h"
 
 rgb atari_palette[128]; // 128 colors in mode 15!
 f_rgb_distance distance_function;

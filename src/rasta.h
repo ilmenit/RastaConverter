@@ -19,14 +19,15 @@
 #include "FreeImage.h"
 #include "CommandLineParser.h"
 #include "config.h"
-#include "Distance.h"
-#include "Program.h"
-#include "Evaluator.h"
+#include "color/Distance.h"
+#include "raster/Program.h"
+#include "optimization/EvaluationContext.h"
+#include "execution/Executor.h"
 
 #ifdef NO_GUI
-#include "RastaConsole.h"
+#include "ui/RastaConsole.h"
 #else
-#include "RastaSDL.h"
+#include "ui/RastaSDL.h"
 #endif
 
 using namespace std;
@@ -42,7 +43,7 @@ private:
 
 #ifdef NO_GUI
 	RastaConsole gui;
-#else;
+#else
 	RastaSDL gui;
 #endif
 
@@ -62,9 +63,11 @@ private:
 	double m_rate = 0;
 	std::chrono::time_point<std::chrono::steady_clock> m_previous_save_time;
 
-	EvalGlobalState m_eval_gstate;
-
-	vector<Evaluator> m_evaluators;
+	// Replace Evaluator with EvaluationContext
+	EvaluationContext m_eval_gstate;
+	
+	// Replace the vector of Evaluators with a vector of Executors
+	std::vector<Executor*> m_executors;
 
 	// private functions
 	void InitLocalStructure();
@@ -129,6 +132,7 @@ public:
 	Configuration cfg;
 
 	RastaConverter();
+	~RastaConverter();
 
 	void MainLoop();
 	void SaveBestSolution();

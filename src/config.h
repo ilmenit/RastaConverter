@@ -6,7 +6,7 @@
 #include "FreeImage.h"
 #include "CommandLineParser.h"
 #include <assert.h>
-#include "rgb.h"
+#include "color/rgb.h"
 
 using namespace Epoch::Foundation;
 
