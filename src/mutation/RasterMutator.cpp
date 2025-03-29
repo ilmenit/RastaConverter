@@ -4,6 +4,19 @@
 #include <algorithm>
 #include <assert.h>
 
+// Define mutation names array for display
+const char* mutation_names[E_MUTATION_MAX] = {
+    "Push back to prev",
+    "Copy line to next one",
+    "Swap line with prev one",
+    "Add instruction",
+    "Remove instruction",
+    "Swap instruction",
+    "Change target",
+    "Change value",
+    "Change value to color"
+};         
+
 RasterMutator::RasterMutator(EvaluationContext* context, int thread_id)
     : m_width(context->m_width)
     , m_height(context->m_height)

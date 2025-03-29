@@ -7,49 +7,58 @@
 #undef int64_t
 #undef uint64_t
 #include <stdint.h>
-#include "rasta.h"
+#include "RastaConverter.h"
 #include <iostream>
 
-extern bool quiet;
+bool quiet = false;
 
 bool LoadAtariPalette(string filename);
 void create_cycles_table();
 
-RastaConverter rasta;
-
 int main(int argc, char *argv[])
 {	
-	//////////////////////////////////////////////////////////////////////////
-	FreeImage_Initialise(TRUE);
+    // Initialize FreeImage
+    FreeImage_Initialise(TRUE);
 
-	create_cycles_table();
+    // Initialize cycle tables
+    create_cycles_table();
 
-	Configuration cfg;
-	cfg.Process(argc, argv);
+    // Create configuration
+    Configuration cfg;
+    cfg.Process(argc, argv);
 
-	if (cfg.continue_processing)
-	{
-		quiet=true;
-		rasta.Resume();
-		rasta.cfg.continue_processing=true;
-		quiet=false;
-	}
-	else
-		rasta.SetConfig(cfg);
+    // Create RastaConverter
+    RastaConverter rasta;
 
-	if (!rasta.cfg.preprocess_only)
-	{
-	}
-	else
-		quiet=true;
+    // Resume if requested
+    if (cfg.continue_processing)
+    {
+        quiet = true;
+        rasta.Resume();
+        rasta.cfg.continue_processing = true;
+        quiet = false;
+    }
+    else
+    {
+        // Set new configuration
+        rasta.SetConfig(cfg);
+    }
 
-	if (rasta.ProcessInit())
-	{
-		rasta.MainLoop();
-		rasta.SaveBestSolution();
-	}
+    // Set quiet mode for preprocess only
+    if (rasta.cfg.preprocess_only)
+        quiet = true;
+
+    // Initialize and run
+    if (rasta.ProcessInit())
+    {
+        rasta.MainLoop();
+        rasta.SaveBestSolution();
+    }
+
+    // Clean up SDL
 #ifndef NO_GUI
-	SDL_Quit();
+    SDL_Quit();
 #endif
-	return 0; // Exit with no errors
+
+    return 0; // Exit with no errors
 }

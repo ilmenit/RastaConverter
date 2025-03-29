@@ -6,7 +6,7 @@
 
 using namespace std;
 
-extern int solutions;
+int solutions = 1;
 
 void Configuration::ProcessCmdLine()
 {
