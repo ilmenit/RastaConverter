@@ -9,9 +9,11 @@
     "",
     "\\cmake",
     "\\src",
+    "\\src\\io",
     "\\src\\mutation",
-    "\\src\\optimization"
+    "\\src\\optimization",
+    "\\src\\raster"
   ],
-  "SelectedNode": "\\cmake\\FindFreeImage.cmake",
+  "SelectedNode": "\\src\\raster\\Program.cpp",
   "PreviewInSolutionExplorer": false
 }
