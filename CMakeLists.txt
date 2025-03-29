@@ -13,6 +13,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 option(USE_GUI "Build with GUI support (requires SDL2)" ON)
 
 # Find dependencies
+# Use custom find modules in the cmake directory
 find_package(FreeImage REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -81,6 +82,31 @@ endif()
 
 # Precompiled headers
 target_precompile_headers(rasta PRIVATE src/pch.h)
+
+# Copy DLLs to build directory for Windows
+if(WIN32)
+    # Copy the FreeImage DLL to the build directory
+    add_custom_command(TARGET rasta POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${FREEIMAGE_DLL}
+        $<TARGET_FILE_DIR:rasta>
+    )
+    
+    # Copy SDL2 DLLs if needed
+    if(USE_GUI)
+        add_custom_command(TARGET rasta POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${SDL2_DLL}
+            $<TARGET_FILE_DIR:rasta>
+        )
+        
+        add_custom_command(TARGET rasta POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${SDL2_TTF_DLL}
+            $<TARGET_FILE_DIR:rasta>
+        )
+    endif()
+endif()
 
 # Install rules
 install(TARGETS rasta DESTINATION bin)

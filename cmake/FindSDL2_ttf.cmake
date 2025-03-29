@@ -4,32 +4,72 @@
 #  SDL2_TTF_FOUND - system has SDL2_ttf
 #  SDL2_TTF_INCLUDE_DIRS - the SDL2_ttf include directory
 #  SDL2_TTF_LIBRARIES - Link these to use SDL2_ttf
+#  SDL2_TTF_DLL - Path to SDL2_ttf.dll (Windows only)
+
+# Determine architecture
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(ARCH_SUFFIX "x64")
+else()
+    set(ARCH_SUFFIX "x86")
+endif()
 
 # Look for the header file
+if(SDL2_TTF_DIR)
+    set(SDL2_TTF_INCLUDE_PATHS
+        "${SDL2_TTF_DIR}/include"
+        "${SDL2_TTF_DIR}/include/SDL2"
+        "${SDL2_TTF_DIR}"
+    )
+else()
+    set(SDL2_TTF_INCLUDE_PATHS
+        "/usr/local/include/SDL2"
+        "/usr/include/SDL2"
+    )
+endif()
+
 find_path(SDL2_TTF_INCLUDE_DIRS NAMES SDL_ttf.h
-    PATHS
-    $ENV{SDL2_TTF_DIR}/include
-    $ENV{SDL2_TTF_DIR}/include/SDL2
-    ${SDL2_TTF_DIR}/include
-    ${SDL2_TTF_DIR}/include/SDL2
-    /usr/local/include/SDL2
-    /usr/include/SDL2
-    DOC "Path in which the file SDL_ttf.h is located."
+    PATHS ${SDL2_TTF_INCLUDE_PATHS}
+    PATH_SUFFIXES SDL2
+    DOC "Path to SDL_ttf.h"
 )
 
 # Look for the library
-find_library(SDL2_TTF_LIBRARIES NAMES SDL2_ttf
-    PATHS
-    $ENV{SDL2_TTF_DIR}/lib
-    $ENV{SDL2_TTF_DIR}/lib/x64
-    ${SDL2_TTF_DIR}/lib
-    ${SDL2_TTF_DIR}/lib/x64
-    /usr/local/lib64
-    /usr/local/lib
-    /usr/lib64
-    /usr/lib
-    DOC "Path to SDL2_ttf library."
-)
+if(SDL2_TTF_DIR)
+    if(WIN32)
+        find_library(SDL2_TTF_LIBRARIES NAMES SDL2_ttf
+            PATHS
+            "${SDL2_TTF_DIR}/lib/${ARCH_SUFFIX}"
+            "${SDL2_TTF_DIR}/lib"
+            "${SDL2_TTF_DIR}"
+            DOC "Path to SDL2_ttf library"
+        )
+        
+        # Find DLL
+        find_file(SDL2_TTF_DLL NAMES SDL2_ttf.dll
+            PATHS
+            "${SDL2_TTF_DIR}/lib/${ARCH_SUFFIX}"
+            "${SDL2_TTF_DIR}/lib"
+            "${SDL2_TTF_DIR}"
+            DOC "Path to SDL2_ttf.dll"
+        )
+    else()
+        find_library(SDL2_TTF_LIBRARIES NAMES SDL2_ttf
+            PATHS
+            "${SDL2_TTF_DIR}/lib"
+            "${SDL2_TTF_DIR}"
+            DOC "Path to SDL2_ttf library"
+        )
+    endif()
+else()
+    find_library(SDL2_TTF_LIBRARIES NAMES SDL2_ttf
+        PATHS
+        "/usr/local/lib64"
+        "/usr/local/lib"
+        "/usr/lib64"
+        "/usr/lib"
+        DOC "Path to SDL2_ttf library"
+    )
+endif()
 
 # Handle the QUIETLY and REQUIRED arguments and set SDL2_TTF_FOUND to TRUE if
 # all listed variables are TRUE
@@ -38,4 +78,4 @@ find_package_handle_standard_args(SDL2_ttf
                                   REQUIRED_VARS SDL2_TTF_LIBRARIES SDL2_TTF_INCLUDE_DIRS)
 
 # Hide these variables in cmake GUIs
-mark_as_advanced(SDL2_TTF_INCLUDE_DIRS SDL2_TTF_LIBRARIES)
+mark_as_advanced(SDL2_TTF_INCLUDE_DIRS SDL2_TTF_LIBRARIES SDL2_TTF_DLL)

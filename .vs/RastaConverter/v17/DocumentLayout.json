@@ -3,6 +3,26 @@
   "WorkspaceRootPath": "D:\\Projekty\\RastaConverter\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\cmake\\FindFreeImage.cmake||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:cmake\\FindFreeImage.cmake||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\cmake\\FindSDL2_ttf.cmake||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:cmake\\FindSDL2_ttf.cmake||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\cmake\\FindSDL2.cmake||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:cmake\\FindSDL2.cmake||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\CMakeLists.txt||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CMakeLists.txt||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\CMakeSettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CMakeSettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\src\\rasta.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
       "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\rasta.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     },
@@ -25,10 +45,6 @@
     {
       "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\src\\optimization\\DLAS.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
       "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\optimization\\DLAS.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\CMakeLists.txt||{8B382828-6202-11D1-8870-0000F87579D2}",
-      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CMakeLists.txt||{8B382828-6202-11D1-8870-0000F87579D2}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\src\\optimization\\EvaluationContext.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
@@ -79,22 +95,6 @@
       "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\CommandLineParser.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\CMakeSettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}",
-      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CMakeSettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\cmake\\FindFreeImage.cmake||{8B382828-6202-11D1-8870-0000F87579D2}",
-      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:cmake\\FindFreeImage.cmake||{8B382828-6202-11D1-8870-0000F87579D2}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\cmake\\FindSDL2_ttf.cmake||{8B382828-6202-11D1-8870-0000F87579D2}",
-      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:cmake\\FindSDL2_ttf.cmake||{8B382828-6202-11D1-8870-0000F87579D2}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\cmake\\FindSDL2.cmake||{8B382828-6202-11D1-8870-0000F87579D2}",
-      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:cmake\\FindSDL2.cmake||{8B382828-6202-11D1-8870-0000F87579D2}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|CMake Overview Pages||{B1CAA5B0-FEB1-4350-8AB9-F895876842F2}"
     },
     {
@@ -112,11 +112,11 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 6,
+          "SelectedChildIndex": 23,
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 7,
               "Title": "Executor.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\execution\\Executor.cpp",
               "RelativeDocumentMoniker": "src\\execution\\Executor.cpp",
@@ -124,12 +124,11 @@
               "RelativeToolTip": "src\\execution\\Executor.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAIAAAAaAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T14:39:30.721Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-29T14:39:30.721Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 6,
               "Title": "DLAS.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\optimization\\DLAS.h",
               "RelativeDocumentMoniker": "src\\optimization\\DLAS.h",
@@ -137,12 +136,11 @@
               "RelativeToolTip": "src\\optimization\\DLAS.h",
               "ViewState": "AgIAAFMAAAAAAAAAAAAWwF4AAAAYAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-29T14:37:27.696Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-29T14:37:27.696Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 7,
+              "DocumentIndex": 11,
               "Title": "EvaluationContext.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\optimization\\EvaluationContext.cpp",
               "RelativeDocumentMoniker": "src\\optimization\\EvaluationContext.cpp",
@@ -150,12 +148,11 @@
               "RelativeToolTip": "src\\optimization\\EvaluationContext.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAA8AAAAyAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T14:35:11.85Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-29T14:35:11.85Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
+              "DocumentIndex": 10,
               "Title": "DLAS.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\optimization\\DLAS.cpp",
               "RelativeDocumentMoniker": "src\\optimization\\DLAS.cpp",
@@ -163,12 +160,11 @@
               "RelativeToolTip": "src\\optimization\\DLAS.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABAAAAABAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T13:36:48.116Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-29T13:36:48.116Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 9,
+              "DocumentIndex": 13,
               "Title": "RasterMutator.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\mutation\\RasterMutator.cpp",
               "RelativeDocumentMoniker": "src\\mutation\\RasterMutator.cpp",
@@ -176,12 +172,11 @@
               "RelativeToolTip": "src\\mutation\\RasterMutator.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAQAAAATAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T13:36:35.714Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-29T13:36:35.714Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 8,
+              "DocumentIndex": 12,
               "Title": "EvaluationContext.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\optimization\\EvaluationContext.h",
               "RelativeDocumentMoniker": "src\\optimization\\EvaluationContext.h",
@@ -189,12 +184,11 @@
               "RelativeToolTip": "src\\optimization\\EvaluationContext.h",
               "ViewState": "AgIAAGUAAAAAAAAAAAAowHsAAAAeAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-29T13:04:08.796Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-29T13:04:08.796Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 5,
               "Title": "rasta.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\rasta.cpp",
               "RelativeDocumentMoniker": "src\\rasta.cpp",
@@ -207,7 +201,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 8,
               "Title": "TargetPicture.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\TargetPicture.cpp",
               "RelativeDocumentMoniker": "src\\TargetPicture.cpp",
@@ -215,12 +209,11 @@
               "RelativeToolTip": "src\\TargetPicture.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAEEAAAABAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-16T14:28:59.744Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-16T14:28:59.744Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 11,
+              "DocumentIndex": 15,
               "Title": "TargetPicture.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\TargetPicture.h",
               "RelativeDocumentMoniker": "src\\TargetPicture.h",
@@ -228,12 +221,11 @@
               "RelativeToolTip": "src\\TargetPicture.h",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-16T14:28:38.232Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-16T14:28:38.232Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 13,
+              "DocumentIndex": 17,
               "Title": "config.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\config.h",
               "RelativeDocumentMoniker": "src\\config.h",
@@ -241,12 +233,11 @@
               "RelativeToolTip": "src\\config.h",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAgAAAAKAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-16T14:28:10.034Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-16T14:28:10.034Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 4,
+              "DocumentIndex": 9,
               "Title": "Program.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\raster\\Program.h",
               "RelativeDocumentMoniker": "src\\raster\\Program.h",
@@ -254,12 +245,11 @@
               "RelativeToolTip": "src\\raster\\Program.h",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAQAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-16T14:26:36.729Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-16T14:26:36.729Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 15,
+              "DocumentIndex": 19,
               "Title": "InsnSequenceCache.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\cache\\InsnSequenceCache.h",
               "RelativeDocumentMoniker": "src\\cache\\InsnSequenceCache.h",
@@ -271,7 +261,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 16,
+              "DocumentIndex": 20,
               "Title": "RegisterState.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\raster\\RegisterState.h",
               "RelativeDocumentMoniker": "src\\raster\\RegisterState.h",
@@ -283,7 +273,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 17,
+              "DocumentIndex": 21,
               "Title": "config.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\config.cpp",
               "RelativeDocumentMoniker": "src\\config.cpp",
@@ -295,7 +285,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 18,
+              "DocumentIndex": 22,
               "Title": "CommandLineParser.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\CommandLineParser.cpp",
               "RelativeDocumentMoniker": "src\\CommandLineParser.cpp",
@@ -307,7 +297,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 12,
+              "DocumentIndex": 16,
               "Title": "rasta.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\rasta.h",
               "RelativeDocumentMoniker": "src\\rasta.h",
@@ -315,12 +305,11 @@
               "RelativeToolTip": "src\\rasta.h",
               "ViewState": "AgIAAAkAAAAAAAAAAAApwBoAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-16T14:23:56.779Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-16T14:23:56.779Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 10,
+              "DocumentIndex": 14,
               "Title": "Executor.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\execution\\Executor.h",
               "RelativeDocumentMoniker": "src\\execution\\Executor.h",
@@ -328,12 +317,11 @@
               "RelativeToolTip": "src\\execution\\Executor.h",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAA0AAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-16T14:23:56.649Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-03-16T14:23:56.649Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 14,
+              "DocumentIndex": 18,
               "Title": "LineCache.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\cache\\LineCache.h",
               "RelativeDocumentMoniker": "src\\cache\\LineCache.h",
@@ -345,52 +333,55 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 21,
+              "DocumentIndex": 1,
               "Title": "FindSDL2_ttf.cmake",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\cmake\\FindSDL2_ttf.cmake",
               "RelativeDocumentMoniker": "cmake\\FindSDL2_ttf.cmake",
               "ToolTip": "D:\\Projekty\\RastaConverter\\cmake\\FindSDL2_ttf.cmake",
               "RelativeToolTip": "cmake\\FindSDL2_ttf.cmake",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAoAAAAVAAAAAAAAAA==",
+              "ViewState": "AgIAABgAAAAAAAAAAAAAwEsAAAAmAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
-              "WhenOpened": "2025-03-15T12:54:23.004Z"
+              "WhenOpened": "2025-03-15T12:54:23.004Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 22,
+              "DocumentIndex": 2,
               "Title": "FindSDL2.cmake",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\cmake\\FindSDL2.cmake",
               "RelativeDocumentMoniker": "cmake\\FindSDL2.cmake",
               "ToolTip": "D:\\Projekty\\RastaConverter\\cmake\\FindSDL2.cmake",
               "RelativeToolTip": "cmake\\FindSDL2.cmake",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAoAAAARAAAAAAAAAA==",
+              "ViewState": "AgIAAFgAAAAAAAAAAAAAwGwAAABKAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
-              "WhenOpened": "2025-03-15T12:54:10.171Z"
+              "WhenOpened": "2025-03-15T12:54:10.171Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
+              "DocumentIndex": 3,
               "Title": "CMakeLists.txt",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\CMakeLists.txt",
               "RelativeDocumentMoniker": "CMakeLists.txt",
               "ToolTip": "D:\\Projekty\\RastaConverter\\CMakeLists.txt",
               "RelativeToolTip": "CMakeLists.txt",
-              "ViewState": "AgIAAEUAAAAAAAAAAAAAwFkAAAAzAAAAAAAAAA==",
+              "ViewState": "AgIAAHMAAAAAAAAAAAAAAHMAAAAzAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003109|",
               "WhenOpened": "2025-03-13T20:33:34.028Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 19,
+              "DocumentIndex": 4,
               "Title": "CMakeSettings.json",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\CMakeSettings.json",
               "RelativeDocumentMoniker": "CMakeSettings.json",
               "ToolTip": "D:\\Projekty\\RastaConverter\\CMakeSettings.json",
               "RelativeToolTip": "CMakeSettings.json",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAAFAAAAAAAAAA==",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2025-03-13T20:25:33.549Z"
+              "WhenOpened": "2025-03-13T20:25:33.549Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -406,15 +397,16 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 20,
+              "DocumentIndex": 0,
               "Title": "FindFreeImage.cmake",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\cmake\\FindFreeImage.cmake",
               "RelativeDocumentMoniker": "cmake\\FindFreeImage.cmake",
               "ToolTip": "D:\\Projekty\\RastaConverter\\cmake\\FindFreeImage.cmake",
               "RelativeToolTip": "cmake\\FindFreeImage.cmake",
-              "ViewState": "AgIAABUAAAAAAAAAAAAtwBsAAAAPAAAAAAAAAA==",
+              "ViewState": "AgIAADcAAAAAAAAAAAAAwEsAAABKAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
-              "WhenOpened": "2025-03-13T19:59:13.779Z"
+              "WhenOpened": "2025-03-13T19:59:13.779Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
