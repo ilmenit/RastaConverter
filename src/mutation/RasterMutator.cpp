@@ -1,6 +1,6 @@
-#include "mutation/RasterMutator.h"
-#include "optimization/EvaluationContext.h"
-#include "TargetPicture.h"
+#include "RasterMutator.h"
+#include "../optimization/EvaluationContext.h"
+#include "../TargetPicture.h"
 #include <algorithm>
 #include <assert.h>
 
@@ -89,11 +89,14 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
 {
     int i1, i2, c, x;
 
-    i1 = Random(prog.instructions.size());
+    if (prog.instructions.empty())
+        return;
+
+    i1 = Random((int)prog.instructions.size());
     i2 = i1;
     if (prog.instructions.size() > 2) {
         do {
-            i2 = Random(prog.instructions.size());
+            i2 = Random((int)prog.instructions.size());
         } while (i1 == i2);
     }
 
@@ -156,7 +159,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
 
                 // More efficient insert - add at end then swap to position
                 prog.instructions.push_back(temp);
-                for (int i = prog.instructions.size() - 1; i > i1; --i) {
+                for (int i = (int)prog.instructions.size() - 1; i > i1; --i) {
                     std::swap(prog.instructions[i], prog.instructions[i - 1]);
                 }
 
@@ -171,16 +174,16 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
                 else
                 {
                     const std::vector<unsigned char>& possible_colors = m_gstate->m_possible_colors_for_each_line[m_currently_mutated_y];
-                    temp.loose.value = possible_colors[Random(possible_colors.size())];
+                    temp.loose.value = possible_colors[Random((int)possible_colors.size())];
                 }
 
                 temp.loose.target = (e_target)(Random(E_TARGET_MAX));
-                c = Random(m_picture[m_currently_mutated_y].size());
+                c = Random((int)m_picture[m_currently_mutated_y].size());
                 temp.loose.value = FindAtariColorIndex(m_picture[m_currently_mutated_y][c]) * 2;
 
                 // More efficient insert
                 prog.instructions.push_back(temp);
-                for (int i = prog.instructions.size() - 1; i > i1; --i) {
+                for (int i = (int)prog.instructions.size() - 1; i > i1; --i) {
                     std::swap(prog.instructions[i], prog.instructions[i - 1]);
                 }
 
@@ -273,7 +276,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
             else
             {
                 const std::vector<unsigned char>& possible_colors = m_gstate->m_possible_colors_for_each_line[m_currently_mutated_y];
-                prog.instructions[i1].loose.value = possible_colors[Random(possible_colors.size())];
+                prog.instructions[i1].loose.value = possible_colors[Random((int)possible_colors.size())];
             }
         }
         else
@@ -289,10 +292,11 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         m_current_mutations[E_MUTATION_CHANGE_VALUE]++;
         m_stats.success_count[mutation]++;
         break;
+    default:
+        // Should not happen
+        break;
     }
 }
-
-
 
 void RasterMutator::BatchMutateLine(raster_line& prog, raster_picture& pic, int count)
 {

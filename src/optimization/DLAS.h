@@ -81,8 +81,7 @@ private:
     Executor* m_executor;
     Mutator* m_mutator;
     
-    // Thread-local resources
-    bool m_threadLocal = false;
+    // Thread-local resources for each worker
     linear_allocator m_thread_local_allocator;
     insn_sequence_cache m_thread_local_cache;
     

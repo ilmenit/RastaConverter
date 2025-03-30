@@ -46,6 +46,7 @@ public:
     // Synchronization primitives
     std::mutex m_mutex;
     std::condition_variable m_condvar_update;
+    std::mutex m_cache_mutex;
 
     // Update flags
     bool m_update_tick = false;
@@ -80,9 +81,6 @@ public:
     // Thread configuration
     int m_thread_count = 1;
 
-    // Mutex for coordinating cache clearing
-    std::mutex m_cache_mutex;
-
     // Start time for statistics
     time_t m_time_start;
 
@@ -107,7 +105,8 @@ public:
     linear_allocator m_linear_allocator;          // For memory allocation
 
     // Error map and target picture reference
-    const distance_t* const* m_picture_all_errors = nullptr;
+    // Change this type to match what RastaConverter is passing
+    const std::vector<distance_t>* m_picture_all_errors[128];
     const screen_line* m_picture = nullptr;
 
     // Width and height of the target picture

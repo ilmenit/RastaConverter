@@ -72,10 +72,8 @@ void DLAS::RunWorker(int threadId)
         m_solutions,
         time(NULL) + threadId * 123456789ULL,
         m_context->m_cache_size,
+        m_thread_mutators[threadId].get(),
         threadId);
-
-    // Use thread-specific mutator
-    Mutator* mutator = m_thread_mutators[threadId].get();
 
     std::vector<const line_cache_result*> line_results(m_context->m_height);
 
@@ -100,7 +98,7 @@ void DLAS::RunWorker(int threadId)
 
         // Create a new candidate by mutation
         raster_picture new_pic = pic;
-        mutator->MutateProgram(&new_pic);
+        m_thread_mutators[threadId]->MutateProgram(&new_pic);
 
         // Evaluate the new candidate
         double result = local_executor.ExecuteRasterProgram(&new_pic, line_results.data());
@@ -146,7 +144,7 @@ void DLAS::RunWorker(int threadId)
                 memcpy(&m_context->m_sprites_memory, &local_executor.GetSpritesMemory(), sizeof(m_context->m_sprites_memory));
 
                 // Update mutation statistics
-                const int* current_mutations = mutator->GetCurrentMutations();
+                const int* current_mutations = m_thread_mutators[threadId]->GetCurrentMutations();
                 for (int i = 0; i < E_MUTATION_MAX; ++i)
                 {
                     if (current_mutations[i])

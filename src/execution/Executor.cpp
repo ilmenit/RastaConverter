@@ -1,6 +1,7 @@
 #include "Executor.h"
 #include "../optimization/EvaluationContext.h"
 #include "TargetPicture.h"
+#include "../mutation/Mutator.h"
 #include <algorithm>
 #include <thread>
 #include <functional>
@@ -13,36 +14,42 @@ Executor::Executor()
     , m_reg_y(0)
     , m_linear_allocator_ptr(nullptr)
     , m_insn_seq_cache_ptr(nullptr)
-    , m_currently_mutated_y(0)
     , m_best_result(DBL_MAX)
     , m_randseed(0)
+    , m_mutator(nullptr)
 {
-    memset(m_mutation_success_count, 0, sizeof(m_mutation_success_count));
-    memset(m_mutation_attempt_count, 0, sizeof(m_mutation_attempt_count));
-    memset(m_current_mutations, 0, sizeof(m_current_mutations));
     memset(m_mem_regs, 0, sizeof(m_mem_regs));
     memset(m_sprites_memory, 0, sizeof(m_sprites_memory));
     memset(m_sprite_shift_regs, 0, sizeof(m_sprite_shift_regs));
     memset(m_sprite_shift_emitted, 0, sizeof(m_sprite_shift_emitted));
     memset(m_sprite_shift_start_array, 0, sizeof(m_sprite_shift_start_array));
+    memset(m_picture_all_errors, 0, sizeof(m_picture_all_errors));
 }
 
-void Executor::Init(unsigned width, unsigned height, const distance_t* const* errmap, 
-                    const screen_line* picture, const OnOffMap* onoff, 
-                    EvaluationContext* gstate, int solutions, 
-                    unsigned long long randseed, size_t cache_size, 
-                    int thread_id)
+void Executor::Init(unsigned width, unsigned height, 
+                   const std::vector<distance_t>* pictureAllErrors[128],  // Changed to match RastaConverter
+                   const screen_line* picture, const OnOffMap* onoff, 
+                   EvaluationContext* gstate, int solutions, 
+                   unsigned long long randseed, size_t cache_size, 
+                   Mutator* mutator,
+                   int thread_id)
 {
     m_randseed = randseed;
     m_width = width;
     m_height = height;
-    m_picture_all_errors = errmap;
+    
+    // Copy the array of pointers to vectors
+    for (int i = 0; i < 128; i++) {
+        m_picture_all_errors[i] = pictureAllErrors[i];
+    }
+    
     m_picture = picture;
     m_onoff = onoff;
     m_gstate = gstate;
     m_solutions = solutions;
     m_cache_size = cache_size;
     m_thread_id = thread_id;
+    m_mutator = mutator;
 
     // Set up caching
     m_linear_allocator_ptr = &m_thread_local_allocator;
@@ -88,35 +95,6 @@ void Executor::UpdateLRU(int line_index) {
         m_lru_set.erase(m_lru_lines.front());
         m_lru_lines.pop_front();
     }
-}
-
-int Executor::SelectMutation()
-{
-    // Calculate weights based on success history
-    double weights[E_MUTATION_MAX];
-    double total_weight = 0.0;
-
-    for (int i = 0; i < E_MUTATION_MAX; i++) {
-        // Use success rate if we have enough samples, otherwise use default weight
-        double success_rate = (m_mutation_attempt_count[i] > 10) ?
-            (double)m_mutation_success_count[i] / m_mutation_attempt_count[i] : 0.1;
-
-        // Balance exploration vs exploitation - never let probability go to zero
-        weights[i] = 0.1 + 0.9 * success_rate;
-        total_weight += weights[i];
-    }
-
-    // Select based on weights using a fair distribution
-    double r = (double)Random(10000) / 10000.0 * total_weight;
-    double sum = 0;
-
-    for (int i = 0; i < E_MUTATION_MAX; i++) {
-        sum += weights[i];
-        if (r <= sum) return i;
-    }
-
-    // Fallback (should rarely happen)
-    return Random(E_MUTATION_MAX);
 }
 
 void Executor::Start()
@@ -187,7 +165,8 @@ void Executor::Run() {
             force_best = true;
         }
         else {
-            MutateRasterProgram(&new_picture);
+            // Use the mutator to perform mutations
+            m_mutator->MutateProgram(&new_picture);
         }
 
         double result = (double)ExecuteRasterProgram(&new_picture, line_results.data());
@@ -241,10 +220,11 @@ void Executor::Run() {
                 memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
                 m_gstate->m_update_improvement = true;
 
+                // Get mutation statistics from the mutator
+                const int* current_mutations = m_mutator->GetCurrentMutations();
                 for (int i = 0; i < E_MUTATION_MAX; ++i) {
-                    if (m_current_mutations[i]) {
-                        m_gstate->m_mutation_stats[i] += m_current_mutations[i];
-                        m_current_mutations[i] = 0;
+                    if (current_mutations[i]) {
+                        m_gstate->m_mutation_stats[i] += current_mutations[i];
                     }
                 }
 
@@ -258,16 +238,15 @@ void Executor::Run() {
         }
         else if (m_gstate->m_current_cost < m_gstate->m_previous_results[l] &&
             m_gstate->m_current_cost < prev_cost) {
-
-            // Track if we're removing a max value 
+            // Track if we're removing a max value
             if (m_gstate->m_previous_results[l] == m_gstate->m_cost_max) {
                 --m_gstate->m_N;
             }
 
-            // Replace the value 
+            // Replace the value
             m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
 
-            // Recompute max and N if needed 
+            // Recompute max and N if needed
             if (m_gstate->m_N <= 0) {
                 // Find new cost_max
                 m_gstate->m_cost_max = *std::max_element(
@@ -322,111 +301,6 @@ void Executor::Run() {
     m_gstate->m_condvar_update.notify_one();
 }
 
-e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int index, int x, int y, bool& restart_line, distance_t& best_error)
-{
-    distance_t distance;
-    int sprite_bit;
-    int best_sprite_bit;
-    e_target result = E_COLBAK;
-    distance_t min_distance = DISTANCE_MAX;
-    bool sprite_covers_colbak = false;
-
-    // check sprites
-    // Sprites priority is 0,1,2,3
-    for (int temp = E_COLPM0; temp <= E_COLPM3; ++temp)
-    {
-        int sprite_pos = m_sprite_shift_regs[temp - E_COLPM0];
-        int sprite_x = sprite_pos - sprite_screen_color_cycle_start;
-
-        unsigned x_offset = (unsigned)(x - sprite_x);
-        if (x_offset < sprite_size)        // (x>=sprite_x && x<sprite_x+sprite_size)
-        {
-            sprite_bit = x_offset >> 2; // bit of this sprite memory
-            assert(sprite_bit < 8);
-
-            sprite_covers_colbak = true;
-
-            // never shifted out remaining sprite pixels combine with sprite memory
-            int sprite_leftover_pixel = 0;
-            int sprite_leftover = x_offset + m_sprite_shift_emitted[temp - E_COLPM0];
-            if (sprite_leftover < sprite_size)
-            {
-                int sprite_leftover_bit = sprite_leftover >> 2;
-                sprite_leftover_pixel = spriterow[temp - E_COLPM0][sprite_leftover_bit];
-            }
-
-            distance = m_picture_all_errors[m_mem_regs[temp] / 2][index];
-            if (spriterow[temp - E_COLPM0][sprite_bit] || sprite_leftover_pixel)
-            {
-                // priority of sprites - next sprites are hidden below that one, so they are not processed
-                best_sprite_bit = sprite_bit;
-                result = (e_target)temp;
-                min_distance = distance;
-                break;
-            }
-            if (distance < min_distance)
-            {
-                best_sprite_bit = sprite_bit;
-                result = (e_target)temp;
-                min_distance = distance;
-            }
-        }
-    }
-
-    // check standard colors
-    int last_color_register;
-
-    if (sprite_covers_colbak)
-        last_color_register = E_COLOR2; // COLBAK is not used
-    else
-        last_color_register = E_COLBAK;
-
-    for (int temp = E_COLOR0; temp <= last_color_register; ++temp)
-    {
-        distance = m_picture_all_errors[m_mem_regs[temp] / 2][index];
-        if (distance < min_distance)
-        {
-            min_distance = distance;
-            result = (e_target)temp;
-        }
-    }
-
-    // the best color is in sprite, then set the proper bit of the sprite memory and then restart this line
-    if (result >= E_COLPM0 && result <= E_COLPM3)
-    {
-        // if PMG bit has been modified, then restart this line, because previous pixels of COLBAK may be covered
-        if (spriterow[result - E_COLPM0][best_sprite_bit] == false)
-        {
-            restart_line = true;
-            spriterow[result - E_COLPM0][best_sprite_bit] = true;
-        }
-    }
-
-    best_error = min_distance;
-    return result;
-}
-
-void Executor::TurnOffRegisters(raster_picture* pic)
-{
-    for (size_t i = 0; i < E_TARGET_MAX; ++i)
-    {
-        if (m_onoff->on_off[0][i] == false)
-            pic->mem_regs_init[i] = 0;
-    }
-
-    for (int y = 0; y < (int)m_height; ++y)
-    {
-        size_t size = pic->raster_lines[y].instructions.size();
-        SRasterInstruction* __restrict rastinsns = &pic->raster_lines[y].instructions[0];
-        for (size_t i = 0; i < size; ++i)
-        {
-            unsigned char target = rastinsns[i].loose.target;
-            if (target < E_TARGET_MAX && m_onoff->on_off[y][target] == false)
-                rastinsns[i].loose.target = E_TARGET_MAX;
-        }
-    }
-}
-
 distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_cache_result** results_array)
 {
     int x, y; // currently processed pixel
@@ -448,7 +322,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
     memset(m_sprite_shift_emitted, 0, sizeof(m_sprite_shift_emitted));
     memcpy(m_mem_regs, pic->mem_regs_init, sizeof(pic->mem_regs_init));
     memset(m_sprites_memory, 0, sizeof(m_sprites_memory));
-
+    
     bool restart_line = false;
     bool shift_start_array_dirty = true;
     distance_accum_t total_error = 0;
@@ -588,7 +462,116 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
     return total_error;
 }
 
-void Executor::ExecuteInstruction(const SRasterInstruction& instr, int sprite_check_x, sprites_row_memory_t& spriterow, distance_accum_t& total_line_error)
+e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int index, int x, int y, bool &restart_line, distance_t& best_error)
+{
+    distance_t distance;
+    int sprite_bit;
+    int best_sprite_bit;
+    e_target result = E_COLBAK;
+    distance_t min_distance = DISTANCE_MAX;
+    bool sprite_covers_colbak = false;
+
+    // check sprites
+    // Sprites priority is 0,1,2,3
+    for (int temp = E_COLPM0; temp <= E_COLPM3; ++temp)
+    {
+        int sprite_pos = m_sprite_shift_regs[temp - E_COLPM0];
+        int sprite_x = sprite_pos - sprite_screen_color_cycle_start;
+
+        unsigned x_offset = (unsigned)(x - sprite_x);
+        if (x_offset < sprite_size)        // (x>=sprite_x && x<sprite_x+sprite_size)
+        {
+            sprite_bit = x_offset >> 2; // bit of this sprite memory
+            assert(sprite_bit < 8);
+
+            sprite_covers_colbak = true;
+
+            // never shifted out remaining sprite pixels combine with sprite memory
+            int sprite_leftover_pixel = 0;
+            int sprite_leftover = x_offset + m_sprite_shift_emitted[temp - E_COLPM0];
+            if (sprite_leftover < sprite_size)
+            {
+                int sprite_leftover_bit = sprite_leftover >> 2;
+                sprite_leftover_pixel = spriterow[temp - E_COLPM0][sprite_leftover_bit];
+            }
+
+            // MODIFIED: Use the vector of distance values properly
+            distance = (m_picture_all_errors[m_mem_regs[temp] / 2])->at(index);
+            
+            if (spriterow[temp - E_COLPM0][sprite_bit] || sprite_leftover_pixel)
+            {
+                // priority of sprites - next sprites are hidden below that one, so they are not processed
+                best_sprite_bit = sprite_bit;
+                result = (e_target)temp;
+                min_distance = distance;
+                break;
+            }
+            if (distance < min_distance)
+            {
+                best_sprite_bit = sprite_bit;
+                result = (e_target)temp;
+                min_distance = distance;
+            }
+        }
+    }
+
+    // check standard colors
+    int last_color_register;
+
+    if (sprite_covers_colbak)
+        last_color_register = E_COLOR2; // COLBAK is not used
+    else
+        last_color_register = E_COLBAK;
+
+    for (int temp = E_COLOR0; temp <= last_color_register; ++temp)
+    {
+        // MODIFIED: Use the vector of distance values properly
+        distance = (m_picture_all_errors[m_mem_regs[temp] / 2])->at(index);
+        
+        if (distance < min_distance)
+        {
+            min_distance = distance;
+            result = (e_target)temp;
+        }
+    }
+
+    // the best color is in sprite, then set the proper bit of the sprite memory and then restart this line
+    if (result >= E_COLPM0 && result <= E_COLPM3)
+    {
+        // if PMG bit has been modified, then restart this line, because previous pixels of COLBAK may be covered
+        if (spriterow[result - E_COLPM0][best_sprite_bit] == false)
+        {
+            restart_line = true;
+            spriterow[result - E_COLPM0][best_sprite_bit] = true;
+        }
+    }
+
+    best_error = min_distance;
+    return result;
+}
+
+void Executor::TurnOffRegisters(raster_picture *pic)
+{
+    for (size_t i = 0; i < E_TARGET_MAX; ++i)
+    {
+        if (m_onoff->on_off[0][i] == false)
+            pic->mem_regs_init[i] = 0;
+    }
+
+    for (int y = 0; y < (int)m_height; ++y)
+    {
+        size_t size = pic->raster_lines[y].instructions.size();
+        SRasterInstruction *__restrict rastinsns = &pic->raster_lines[y].instructions[0];
+        for (size_t i = 0; i < size; ++i)
+        {
+            unsigned char target = rastinsns[i].loose.target;
+            if (target < E_TARGET_MAX && m_onoff->on_off[y][target] == false)
+                rastinsns[i].loose.target = E_TARGET_MAX;
+        }
+    }
+}
+
+void Executor::ExecuteInstruction(const SRasterInstruction &instr, int sprite_check_x, sprites_row_memory_t &spriterow, distance_accum_t &total_line_error)
 {
     int reg_value = -1;
     switch (instr.loose.instruction)
@@ -610,9 +593,6 @@ void Executor::ExecuteInstruction(const SRasterInstruction& instr, int sprite_ch
         break;
     case E_RASTER_STY:
         reg_value = m_reg_y;
-        break;
-    default:
-        // NOP or unhandled instruction
         break;
     }
 
@@ -717,307 +697,6 @@ void Executor::ClearLineCaches()
     // Reset LRU tracking
     m_lru_lines.clear();
     m_lru_set.clear();
-}
-
-void Executor::MutateLine(raster_line& prog, raster_picture& pic)
-{
-    // Apply a batch of mutations based on line complexity
-    int mutation_count = std::min(3 + (int)(prog.instructions.size() / 5), 8);
-
-    // Call the batch mutation method instead of doing individual mutations
-    BatchMutateLine(prog, pic, mutation_count);
-}
-
-void Executor::MutateOnce(raster_line& prog, raster_picture& pic)
-{
-    int i1, i2, c, x;
-
-    if (prog.instructions.empty())
-        return;
-
-    i1 = Random((int)prog.instructions.size());
-    i2 = i1;
-    if (prog.instructions.size() > 2) {
-        do {
-            i2 = Random((int)prog.instructions.size());
-        } while (i1 == i2);
-    }
-
-    SRasterInstruction temp;
-
-    // Use smart selection instead of random
-    int mutation = SelectMutation();
-    m_mutation_attempt_count[mutation]++;
-
-    switch (mutation)
-    {
-    case E_MUTATION_COPY_LINE_TO_NEXT_ONE:
-        if (m_currently_mutated_y < (int)m_height - 1)
-        {
-            int next_y = m_currently_mutated_y + 1;
-            raster_line& next_line = pic.raster_lines[next_y];
-            prog = next_line;
-            m_current_mutations[E_MUTATION_COPY_LINE_TO_NEXT_ONE]++;
-            m_mutation_success_count[mutation]++;
-            break;
-        }
-        // fallthrough if not possible
-    case E_MUTATION_PUSH_BACK_TO_PREV:
-        if (m_currently_mutated_y > 0)
-        {
-            int prev_y = m_currently_mutated_y - 1;
-            raster_line& prev_line = pic.raster_lines[prev_y];
-            c = GetInstructionCycles(prog.instructions[i1]);
-            if (prev_line.cycles + c < free_cycles)
-            {
-                // add it to prev line but do not remove it from the current
-                prev_line.cycles += c;
-                prev_line.instructions.push_back(prog.instructions[i1]);
-                prev_line.cache_key = NULL;
-                m_current_mutations[E_MUTATION_PUSH_BACK_TO_PREV]++;
-                m_mutation_success_count[mutation]++;
-                break;
-            }
-        }
-        // fallthrough if not possible
-    case E_MUTATION_SWAP_LINE_WITH_PREV_ONE:
-        if (m_currently_mutated_y > 0)
-        {
-            int prev_y = m_currently_mutated_y - 1;
-            raster_line& prev_line = pic.raster_lines[prev_y];
-            prog.swap(prev_line);
-            m_current_mutations[E_MUTATION_SWAP_LINE_WITH_PREV_ONE]++;
-            m_mutation_success_count[mutation]++;
-            break;
-        }
-        // fallthrough if not possible
-    case E_MUTATION_ADD_INSTRUCTION:
-        if (prog.cycles + 2 < free_cycles)
-        {
-            if (prog.cycles + 4 < free_cycles && Random(2)) // 4 cycles instructions
-            {
-                temp.loose.instruction = (e_raster_instruction)(E_RASTER_STA + Random(3));
-                temp.loose.value = (Random(128) * 2);
-                temp.loose.target = (e_target)(Random(E_TARGET_MAX));
-
-                // More efficient insert - add at end then swap to position
-                prog.instructions.push_back(temp);
-                for (int i = (int)prog.instructions.size() - 1; i > i1; --i) {
-                    std::swap(prog.instructions[i], prog.instructions[i - 1]);
-                }
-
-                prog.cache_key = NULL;
-                prog.cycles += 4;
-            }
-            else
-            {
-                temp.loose.instruction = (e_raster_instruction)(E_RASTER_LDA + Random(4));
-                if (Random(2))
-                    temp.loose.value = (Random(128) * 2);
-                else
-                {
-                    const std::vector<unsigned char>& possible_colors = m_gstate->m_possible_colors_for_each_line[m_currently_mutated_y];
-                    temp.loose.value = possible_colors[Random((int)possible_colors.size())];
-                }
-
-                temp.loose.target = (e_target)(Random(E_TARGET_MAX));
-                c = Random((int)m_picture[m_currently_mutated_y].size());
-                temp.loose.value = FindAtariColorIndex(m_picture[m_currently_mutated_y][c]) * 2;
-
-                // More efficient insert
-                prog.instructions.push_back(temp);
-                for (int i = (int)prog.instructions.size() - 1; i > i1; --i) {
-                    std::swap(prog.instructions[i], prog.instructions[i - 1]);
-                }
-
-                prog.cache_key = NULL;
-                prog.cycles += 2;
-            }
-            m_current_mutations[E_MUTATION_ADD_INSTRUCTION]++;
-            m_mutation_success_count[mutation]++;
-            break;
-        }
-        // fallthrough if not possible
-    case E_MUTATION_REMOVE_INSTRUCTION:
-        if (prog.cycles > 4)
-        {
-            c = GetInstructionCycles(prog.instructions[i1]);
-            if (prog.cycles - c > 0)
-            {
-                prog.cycles -= c;
-
-                // FIXED: Use erase to maintain instruction order
-                prog.instructions.erase(prog.instructions.begin() + i1);
-
-                prog.cache_key = NULL;
-                assert(prog.cycles > 0);
-                m_current_mutations[E_MUTATION_REMOVE_INSTRUCTION]++;
-                m_mutation_success_count[mutation]++;
-                break;
-            }
-        }
-        // fallthrough if not possible
-    case E_MUTATION_SWAP_INSTRUCTION:
-        if (prog.instructions.size() > 2)
-        {
-            temp = prog.instructions[i1];
-            prog.instructions[i1] = prog.instructions[i2];
-            prog.instructions[i2] = temp;
-            prog.cache_key = NULL;
-            m_current_mutations[E_MUTATION_SWAP_INSTRUCTION]++;
-            m_mutation_success_count[mutation]++;
-            break;
-        }
-        // fallthrough if not possible
-    case E_MUTATION_CHANGE_TARGET:
-        prog.instructions[i1].loose.target = (e_target)(Random(E_TARGET_MAX));
-        prog.cache_key = NULL;
-        m_current_mutations[E_MUTATION_CHANGE_TARGET]++;
-        m_mutation_success_count[mutation]++;
-        break;
-    case E_MUTATION_CHANGE_VALUE_TO_COLOR:
-        if ((prog.instructions[i1].loose.target >= E_HPOSP0 && prog.instructions[i1].loose.target <= E_HPOSP3))
-        {
-            x = m_mem_regs[prog.instructions[i1].loose.target] - sprite_screen_color_cycle_start;
-            x += Random(sprite_size);
-        }
-        else
-        {
-            c = 0;
-            // find color in the next raster column
-            for (x = 0; x < i1 - 1; ++x)
-            {
-                if (prog.instructions[x].loose.instruction <= E_RASTER_NOP)
-                    c += 2;
-                else
-                    c += 4; // cycles
-            }
-            while (Random(5) == 0)
-                ++c;
-
-            if (c >= free_cycles)
-                c = free_cycles - 1;
-            x = screen_cycles[c].offset;
-            x += Random(screen_cycles[c].length);
-        }
-        if (x < 0 || x >= (int)m_width)
-            x = Random((int)m_width);
-        i2 = m_currently_mutated_y;
-        // check color in next lines
-        while (Random(5) == 0 && i2 + 1 < (int)m_height)
-            ++i2;
-        prog.instructions[i1].loose.value = FindAtariColorIndex(m_picture[i2][x]) * 2;
-        prog.cache_key = NULL;
-        m_current_mutations[E_MUTATION_CHANGE_VALUE_TO_COLOR]++;
-        m_mutation_success_count[mutation]++;
-        break;
-    case E_MUTATION_CHANGE_VALUE:
-        if (Random(10) == 0)
-        {
-            if (Random(2))
-                prog.instructions[i1].loose.value = (Random(128) * 2);
-            else
-            {
-                const std::vector<unsigned char>& possible_colors = m_gstate->m_possible_colors_for_each_line[m_currently_mutated_y];
-                prog.instructions[i1].loose.value = possible_colors[Random((int)possible_colors.size())];
-            }
-        }
-        else
-        {
-            c = 1;
-            if (Random(2))
-                c *= -1;
-            if (Random(2))
-                c *= 16;
-            prog.instructions[i1].loose.value += c;
-        }
-        prog.cache_key = NULL;
-        m_current_mutations[E_MUTATION_CHANGE_VALUE]++;
-        m_mutation_success_count[mutation]++;
-        break;
-    default:
-        // Should not happen
-        break;
-    }
-}
-
-void Executor::BatchMutateLine(raster_line& prog, raster_picture& pic, int count)
-{
-    for (int i = 0; i < count; i++) {
-        MutateOnce(prog, pic);
-    }
-    prog.rehash();
-    prog.cache_key = NULL; // Explicitly mark for recaching
-}
-
-void Executor::MutateRasterProgram(raster_picture* pic)
-{
-    memset(m_current_mutations, 0, sizeof m_current_mutations);
-
-    // Calculate this thread's assigned region
-    int thread_count = m_gstate->m_thread_count;
-    int lines_per_thread = (int)m_height / thread_count;
-    int region_start = m_thread_id * lines_per_thread;
-    int region_end = (m_thread_id == thread_count - 1) ?
-        (int)m_height : region_start + lines_per_thread;
-
-    // Prefer mutating lines in this thread's region (80% of the time)
-    if (Random(100) < 80 && region_end > region_start) {
-        m_currently_mutated_y = region_start + Random(region_end - region_start);
-    }
-    // Otherwise, allow some exploration outside the region (20% of time)
-    else if (m_currently_mutated_y >= (int)pic->raster_lines.size()) {
-        m_currently_mutated_y = 0;
-    }
-    else if (m_currently_mutated_y < 0) {
-        m_currently_mutated_y = (int)pic->raster_lines.size() - 1;
-    }
-
-    // Batch memory register mutations
-    if (Random(10) == 0) // mutate random init mem reg
-    {
-        int c = 1;
-        if (Random(2))
-            c *= -1;
-        if (Random(2))
-            c *= 16;
-
-        int targ;
-        do {
-            targ = Random(E_TARGET_MAX);
-        } while (targ == E_COLBAK);
-
-        pic->mem_regs_init[targ] += c;
-    }
-
-    raster_line& current_line = pic->raster_lines[m_currently_mutated_y];
-    MutateLine(current_line, *pic);
-
-    if (Random(20) == 0)
-    {
-        for (int t = 0; t < 10; ++t)
-        {
-            // When jumping, prefer to stay within this thread's region
-            if (Random(2) && m_currently_mutated_y > region_start)
-                --m_currently_mutated_y;
-            else if (m_currently_mutated_y < region_end - 1)
-                ++m_currently_mutated_y;
-            else {
-                // Fall back to anywhere in the thread's region
-                m_currently_mutated_y = region_start + Random(region_end - region_start);
-            }
-
-            raster_line& current_line = pic->raster_lines[m_currently_mutated_y];
-            MutateLine(current_line, *pic);
-        }
-    }
-
-    // recache any lines that have changed
-    for (int y = 0; y < (int)m_height; ++y) {
-        raster_line& rline = pic->raster_lines[y];
-        if (rline.cache_key == NULL)
-            rline.recache_insns(*m_insn_seq_cache_ptr, *m_linear_allocator_ptr);
-    }
 }
 
 int Executor::Random(int range)

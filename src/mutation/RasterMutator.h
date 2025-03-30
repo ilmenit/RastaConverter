@@ -26,7 +26,7 @@ public:
      * 
      * @param seed Random seed
      */
-    void Init(unsigned long long seed);
+    void Init(unsigned long long seed) override;
     
     /**
      * Mutate a program

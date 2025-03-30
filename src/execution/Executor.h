@@ -12,12 +12,13 @@
 #include "SpriteManager.h"
 #include "../OnOffMap.h"
 
+// Forward declarations
+class EvaluationContext;
+class Mutator;
+
 // Type definitions
 typedef std::vector<unsigned char> color_index_line;
 typedef std::vector<unsigned char> line_target;    // target of the pixel f.e. COLBAK
-
-// Forward declarations
-class EvaluationContext;
 
 /**
  * Handles execution of raster programs
@@ -30,10 +31,15 @@ public:
     /**
      * Initialize the executor
      */
-    void Init(unsigned width, unsigned height, const distance_t* const* errmap, 
-              const screen_line* picture, const OnOffMap* onoff, 
-              EvaluationContext* gstate, int solutions, 
-              unsigned long long randseed, size_t cache_size, 
+    void Init(unsigned width, unsigned height, 
+              const std::vector<distance_t>* pictureAllErrors[128],  // Changed to match RastaConverter
+              const screen_line* picture, 
+              const OnOffMap* onoff, 
+              EvaluationContext* gstate, 
+              int solutions, 
+              unsigned long long randseed, 
+              size_t cache_size,
+              Mutator* mutator,
               int thread_id = 0);
     
     /**
@@ -156,13 +162,6 @@ public:
     void UpdateLRU(int line_index);
     
     /**
-     * Select a mutation type based on success statistics
-     * 
-     * @return Selected mutation type
-     */
-    int SelectMutation();
-    
-    /**
      * Generate a random number
      * 
      * @param range Upper limit of the random number (exclusive)
@@ -177,16 +176,6 @@ private:
     // LRU tracking
     std::deque<int> m_lru_lines;
     std::unordered_set<int> m_lru_set;
-    
-    // Mutation statistics
-    int m_mutation_success_count[E_MUTATION_MAX];
-    int m_mutation_attempt_count[E_MUTATION_MAX];
-    
-    // Batch mutation methods
-    void BatchMutateLine(raster_line& prog, raster_picture& pic, int count);
-    void MutateLine(raster_line& prog, raster_picture& pic);
-    void MutateOnce(raster_line& prog, raster_picture& pic);
-    void MutateRasterProgram(raster_picture* pic);
     
     // Register state
     unsigned char m_reg_a, m_reg_x, m_reg_y;
@@ -213,9 +202,8 @@ private:
     // Parameters
     unsigned m_width;
     unsigned m_height;
-    const distance_t *const *m_picture_all_errors;
+    const std::vector<distance_t>* m_picture_all_errors[128];  // Changed to match RastaConverter
     const screen_line *m_picture;
-    int m_currently_mutated_y;
     int m_solutions;
     size_t m_cache_size;
     
@@ -226,11 +214,11 @@ private:
     raster_picture m_best_pic;
     double m_best_result;
     
-    // Current mutation counts
-    int m_current_mutations[E_MUTATION_MAX];
-    
     // OnOff map
     const OnOffMap *m_onoff;
+    
+    // Mutator instance
+    Mutator* m_mutator;
 };
 
 #endif // EXECUTOR_H

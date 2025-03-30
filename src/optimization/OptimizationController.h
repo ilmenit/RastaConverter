@@ -4,9 +4,12 @@
 #include <vector>
 #include <string>
 #include <chrono>
+#include <memory>
 #include "../raster/Program.h"
 #include "EvaluationContext.h"
 #include "../execution/Executor.h"
+#include "../mutation/Mutator.h"
+#include "Optimizer.h"
 
 /**
  * Controls and manages the optimization process
@@ -40,7 +43,7 @@ public:
      */
     bool Initialize(int threads, int width, int height, 
                   const std::vector<screen_line>* picture,
-                  const std::vector<distance_t>* pictureAllErrors[128],
+                  const std::vector<distance_t>* pictureAllErrors[128],  // Changed back to match RastaConverter
                   unsigned long long maxEvals, 
                   int savePeriod,
                   size_t cacheSize,
@@ -140,8 +143,12 @@ private:
     // Thread control
     bool m_running;
     
-    // Executors for each thread
-    std::vector<Executor*> m_executors;
+    // Optimizer instance
+    std::unique_ptr<Optimizer> m_optimizer;
+    
+    // Executors and mutators for each thread
+    std::vector<std::unique_ptr<Executor>> m_executors;
+    std::vector<std::unique_ptr<Mutator>> m_mutators;
     
     // Rate tracking
     double m_rate;

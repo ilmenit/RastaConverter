@@ -3,6 +3,10 @@
   "WorkspaceRootPath": "D:\\Projekty\\RastaConverter\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\CMakeSettings.json||{10608CD5-279C-4A28-BD5F-BA2CFCE06219}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:CMakeSettings.json||{10608CD5-279C-4A28-BD5F-BA2CFCE06219}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Projekty\\RastaConverter\\src\\mutation\\RasterMutator.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
       "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\mutation\\RasterMutator.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
     },
@@ -63,6 +67,18 @@
             {
               "$type": "Document",
               "DocumentIndex": 0,
+              "Title": "CMakeSettings.json",
+              "DocumentMoniker": "D:\\Projekty\\RastaConverter\\CMakeSettings.json",
+              "RelativeDocumentMoniker": "CMakeSettings.json",
+              "ToolTip": "D:\\Projekty\\RastaConverter\\CMakeSettings.json",
+              "RelativeToolTip": "CMakeSettings.json",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
+              "WhenOpened": "2025-03-30T07:54:19.478Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
               "Title": "RasterMutator.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\mutation\\RasterMutator.cpp",
               "RelativeDocumentMoniker": "src\\mutation\\RasterMutator.cpp",
@@ -75,7 +91,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 2,
               "Title": "Executor.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\execution\\Executor.cpp",
               "RelativeDocumentMoniker": "src\\execution\\Executor.cpp",
@@ -83,11 +99,12 @@
               "RelativeToolTip": "src\\execution\\Executor.cpp",
               "ViewState": "AgIAAM4CAAAAAAAAAAApwOICAAAMAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T23:19:44.145Z"
+              "WhenOpened": "2025-03-29T23:19:44.145Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 3,
               "Title": "DLAS.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\optimization\\DLAS.cpp",
               "RelativeDocumentMoniker": "src\\optimization\\DLAS.cpp",
@@ -95,11 +112,12 @@
               "RelativeToolTip": "src\\optimization\\DLAS.cpp",
               "ViewState": "AgIAADMAAAAAAAAAAAAgwDgAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T23:18:44.006Z"
+              "WhenOpened": "2025-03-29T23:18:44.006Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 4,
               "Title": "Program.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\raster\\Program.cpp",
               "RelativeDocumentMoniker": "src\\raster\\Program.cpp",
@@ -107,11 +125,12 @@
               "RelativeToolTip": "src\\raster\\Program.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABQAAAAEAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T22:25:31.351Z"
+              "WhenOpened": "2025-03-29T22:25:31.351Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 4,
+              "DocumentIndex": 5,
               "Title": "config.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\config.cpp",
               "RelativeDocumentMoniker": "src\\config.cpp",
@@ -119,11 +138,12 @@
               "RelativeToolTip": "src\\config.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAgAAAASAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T22:25:16.376Z"
+              "WhenOpened": "2025-03-29T22:25:16.376Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
+              "DocumentIndex": 6,
               "Title": "main.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\main.cpp",
               "RelativeDocumentMoniker": "src\\main.cpp",
@@ -131,11 +151,12 @@
               "RelativeToolTip": "src\\main.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAA0AAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T22:25:01.128Z"
+              "WhenOpened": "2025-03-29T22:25:01.128Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 8,
+              "DocumentIndex": 9,
               "Title": "OptimizationController.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\optimization\\OptimizationController.cpp",
               "RelativeDocumentMoniker": "src\\optimization\\OptimizationController.cpp",
@@ -143,11 +164,12 @@
               "RelativeToolTip": "src\\optimization\\OptimizationController.cpp",
               "ViewState": "AgIAANYAAAAAAAAAAAAowN4AAAABAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T22:16:47.69Z"
+              "WhenOpened": "2025-03-29T22:16:47.69Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 9,
+              "DocumentIndex": 10,
               "Title": "ImageProcessor.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\io\\ImageProcessor.h",
               "RelativeDocumentMoniker": "src\\io\\ImageProcessor.h",
@@ -155,11 +177,12 @@
               "RelativeToolTip": "src\\io\\ImageProcessor.h",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAgAAAAYAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-29T21:35:21.157Z"
+              "WhenOpened": "2025-03-29T21:35:21.157Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 10,
+              "DocumentIndex": 11,
               "Title": "RegisterState.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\raster\\RegisterState.h",
               "RelativeDocumentMoniker": "src\\raster\\RegisterState.h",
@@ -167,11 +190,12 @@
               "RelativeToolTip": "src\\raster\\RegisterState.h",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAUAAAAVAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-29T21:32:08.597Z"
+              "WhenOpened": "2025-03-29T21:32:08.597Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
+              "DocumentIndex": 7,
               "Title": "RasterProgramGenerator.h",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\raster\\RasterProgramGenerator.h",
               "RelativeDocumentMoniker": "src\\raster\\RasterProgramGenerator.h",
@@ -179,11 +203,12 @@
               "RelativeToolTip": "src\\raster\\RasterProgramGenerator.h",
               "ViewState": "AgIAADAAAAAAAAAAAAAAAAcAAAATAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000680|",
-              "WhenOpened": "2025-03-29T21:32:03.667Z"
+              "WhenOpened": "2025-03-29T21:32:03.667Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 7,
+              "DocumentIndex": 8,
               "Title": "RasterProgramGenerator.cpp",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\src\\raster\\RasterProgramGenerator.cpp",
               "RelativeDocumentMoniker": "src\\raster\\RasterProgramGenerator.cpp",
@@ -191,11 +216,12 @@
               "RelativeToolTip": "src\\raster\\RasterProgramGenerator.cpp",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2025-03-29T21:31:47.007Z"
+              "WhenOpened": "2025-03-29T21:31:47.007Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 11,
+              "DocumentIndex": 12,
               "Title": ".gitignore",
               "DocumentMoniker": "D:\\Projekty\\RastaConverter\\.gitignore",
               "RelativeDocumentMoniker": ".gitignore",
@@ -203,7 +229,8 @@
               "RelativeToolTip": ".gitignore",
               "ViewState": "AgIAAAkAAAAAAAAAAAAAABAAAAAVAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
-              "WhenOpened": "2025-03-29T20:33:01.331Z"
+              "WhenOpened": "2025-03-29T20:33:01.331Z",
+              "EditorCaption": ""
             }
           ]
         }
