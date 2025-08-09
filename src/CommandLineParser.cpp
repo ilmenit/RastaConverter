@@ -72,8 +72,10 @@ namespace Epoch
 					name  = token.substr(0,breakAt);
 					value = token.substr(breakAt+1);
 
-					remove(value.begin(),value.begin(),'"'); // remove double quotes if used
-					remove(value.rbegin(),value.rbegin(),'"');
+                    // Remove surrounding quotes if present
+                    if (!value.empty() && value.front() == '"' && value.back() == '"' && value.size() >= 2) {
+                        value = value.substr(1, value.size() - 2);
+                    }
 
 					mn_PairCount++;
 					mMap_nvPairs[name] = value;

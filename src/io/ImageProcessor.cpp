@@ -108,8 +108,20 @@ bool ImageProcessor::LoadInputBitmap()
             m_config.height = 240;
     }
 
-    m_input_bitmap = FreeImage_Rescale(m_input_bitmap, m_config.width, m_config.height, m_config.rescale_filter);
-    m_input_bitmap = FreeImage_ConvertTo24Bits(m_input_bitmap);
+    {
+        FIBITMAP* tmp = FreeImage_Rescale(m_input_bitmap, m_config.width, m_config.height, m_config.rescale_filter);
+        if (tmp) {
+            FreeImage_Unload(m_input_bitmap);
+            m_input_bitmap = tmp;
+        }
+    }
+    {
+        FIBITMAP* tmp = FreeImage_ConvertTo24Bits(m_input_bitmap);
+        if (tmp) {
+            FreeImage_Unload(m_input_bitmap);
+            m_input_bitmap = tmp;
+        }
+    }
 
     // Apply image adjustments
     FreeImage_AdjustBrightness(m_input_bitmap, m_config.brightness);
@@ -163,8 +175,20 @@ void ImageProcessor::LoadDetailsMap()
     if (!fbitmap)
         return;
         
-    fbitmap = FreeImage_Rescale(fbitmap, m_config.width, m_config.height, FILTER_BOX);
-    fbitmap = FreeImage_ConvertTo24Bits(fbitmap);
+    {
+        FIBITMAP* tmp = FreeImage_Rescale(fbitmap, m_config.width, m_config.height, FILTER_BOX);
+        if (tmp) {
+            FreeImage_Unload(fbitmap);
+            fbitmap = tmp;
+        }
+    }
+    {
+        FIBITMAP* tmp = FreeImage_ConvertTo24Bits(fbitmap);
+        if (tmp) {
+            FreeImage_Unload(fbitmap);
+            fbitmap = tmp;
+        }
+    }
 
     FreeImage_FlipVertical(fbitmap);
 

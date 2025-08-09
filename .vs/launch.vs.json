@@ -1,0 +1,15 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "rasta.exe",
+      "name": "rasta.exe",
+      "args": [
+        "test.png","/threads=8"
+      ]
+    }
+  ]
+}

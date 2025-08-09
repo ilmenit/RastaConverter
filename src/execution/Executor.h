@@ -32,7 +32,7 @@ public:
      * Initialize the executor
      */
     void Init(unsigned width, unsigned height, 
-              const std::vector<distance_t>* pictureAllErrors[128],  // Changed to match RastaConverter
+              const std::vector<distance_t>* pictureAllErrors[128],
               const screen_line* picture, 
               const OnOffMap* onoff, 
               EvaluationContext* gstate, 
@@ -43,7 +43,7 @@ public:
               int thread_id = 0);
     
     /**
-     * Start execution in a separate thread
+     * Register this executor with the evaluation context
      */
     void Start();
     
@@ -138,6 +138,11 @@ public:
      * Clear the line caches
      */
     void ClearLineCaches();
+
+    /**
+     * Get current memory usage of the executor's cache allocator
+     */
+    size_t GetCacheMemoryUsage() const;
     
     /**
      * Get the created picture
@@ -168,6 +173,11 @@ public:
      * @return Random number between 0 and range-1
      */
     int Random(int range);
+
+    /**
+     * Get the thread ID of this executor
+     */
+    int GetThreadId() const { return m_thread_id; }
 
 private:
     EvaluationContext* m_gstate;
@@ -202,7 +212,7 @@ private:
     // Parameters
     unsigned m_width;
     unsigned m_height;
-    const std::vector<distance_t>* m_picture_all_errors[128];  // Changed to match RastaConverter
+    const std::vector<distance_t>* m_picture_all_errors[128];
     const screen_line *m_picture;
     int m_solutions;
     size_t m_cache_size;

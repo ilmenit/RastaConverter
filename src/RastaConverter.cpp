@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <vector>
+#include <climits>
+#include "optimization/EvaluationContext.h"
 
 // External const array for mutation names
 extern const char* mutation_names[E_MUTATION_MAX];
@@ -57,7 +60,9 @@ void RastaConverter::LoadAtariPalette()
 bool RastaConverter::ProcessInit()
 {
     // Initialize GUI
-    gui.Init(cfg.command_line);
+    if (!cfg.quiet) {
+        gui.Init(cfg.command_line);
+    }
 
     // Load Atari palette
     LoadAtariPalette();
@@ -86,10 +91,15 @@ bool RastaConverter::ProcessInit()
     m_outputManager.Initialize(cfg.output_file, m_imageProcessor.GetWidth(), m_imageProcessor.GetHeight());
     m_outputManager.SavePicture(cfg.output_file + "-src.png", m_imageProcessor.GetInputBitmap());
     m_outputManager.SavePicture(cfg.output_file + "-dst.png", m_imageProcessor.GetDestinationBitmap());
+
+    // Ensure Destination preview is drawn early (before entering MainLoop)
+    if (!cfg.preprocess_only) {
+        ShowDestinationBitmap();
+    }
     
     // Exit if only preprocessing was requested
     if (cfg.preprocess_only)
-        exit(1);
+        return false; // signal to caller to skip MainLoop after saving preprocessed images
     
     // Load OnOff map if specified
     if (!cfg.on_off_file.empty())
@@ -107,7 +117,9 @@ bool RastaConverter::ProcessInit()
     // Initialize program generator
     m_programGenerator.Initialize(m_imageProcessor.GetWidth(), m_imageProcessor.GetHeight());
     
-    // Initialize optimizer
+    // Initialize optimizer with region-based mutation from config
+    bool useRegionalMutation = (cfg.mutation_strategy == E_MUTATION_REGIONAL);
+    
     const std::vector<distance_t>* pictureAllErrors[128];
     for (int i = 0; i < 128; ++i)
         pictureAllErrors[i] = &m_imageProcessor.GetPictureAllErrors()[i];
@@ -121,8 +133,9 @@ bool RastaConverter::ProcessInit()
         cfg.max_evals,
         cfg.save_period,
         cfg.cache_size,
-        cfg.initial_seed,
-        &m_onOffMap
+        (cfg.continue_processing && cfg.have_resume_seed) ? cfg.resume_seed : cfg.initial_seed,
+        &m_onOffMap,
+        useRegionalMutation
     );
     
     // Allocate output bitmap
@@ -177,15 +190,30 @@ void RastaConverter::MainLoop()
     m_optimizer.Run();
     
     // Track timing and performance
-    auto previous_save_time = std::chrono::steady_clock::now();
     bool pending_update = false;
     
     // Run until finished
     bool running = true;
     while (running && !m_optimizer.IsFinished())
     {
+        static auto last_heartbeat = std::chrono::steady_clock::now();
+        auto now_hb = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now_hb - last_heartbeat).count() >= 5) {
+            auto& evalContext = m_optimizer.GetEvaluationContext();
+            std::unique_lock<std::mutex> lock{ evalContext.m_mutex };
+            std::cout << "[HB] UI loop heartbeat: finished=" << (evalContext.m_finished.load() ? 1 : 0)
+                      << ", threads_active=" << evalContext.m_threads_active.load()
+                      << ", evals=" << evalContext.m_evaluations << std::endl;
+            last_heartbeat = now_hb;
+        }
         // Update statistics
         m_optimizer.UpdateRate();
+        
+        // Check for auto-save
+        if (m_optimizer.CheckAutoSave()) {
+            SaveBestSolution();
+            Message("Auto-saved.");
+        }
         
         // Update display periodically
         if (pending_update)
@@ -198,13 +226,18 @@ void RastaConverter::MainLoop()
         ShowMutationStats();
         
         // Process UI commands
-        switch (gui.NextFrame())
+        auto ui_cmd = gui.NextFrame();
+        #ifdef UI_DEBUG
+        std::cout << "[UI] NextFrame returned " << (int)ui_cmd << std::endl;
+        #endif
+        switch (ui_cmd)
         {
         case GUI_command::SAVE:
             SaveBestSolution();
             Message("Saved.");
             break;
         case GUI_command::STOP:
+            std::cout << "[RC] STOP command received from GUI" << std::endl;
             running = false;
             break;
         case GUI_command::REDRAW:
@@ -217,41 +250,83 @@ void RastaConverter::MainLoop()
             break;
         }
         
-        // Check for auto-save based on time
-        auto now = std::chrono::steady_clock::now();
-        using namespace std::literals::chrono_literals;
-        if (cfg.save_period == -1 && now - previous_save_time > 30s)
-        {
-            previous_save_time = now;
-            SaveBestSolution();
-        }
-        
         // Check if optimization state has changed
         auto& evalContext = m_optimizer.GetEvaluationContext();
-        std::unique_lock<std::mutex> lock{ evalContext.m_mutex };
-        
-        // Handle improvement updates
-        if (evalContext.m_update_improvement)
+        bool do_init_redraw = false;
+        bool do_autosave = false;
         {
-            evalContext.m_update_improvement = false;
-            pending_update = true;
+            std::unique_lock<std::mutex> lock{ evalContext.m_mutex };
+            
+            // Handle initialization completion (first frame data available)
+            if (evalContext.m_update_initialized)
+            {
+                evalContext.m_update_initialized = false;
+                do_init_redraw = true;
+            }
+            
+            // Handle improvement updates
+            if (evalContext.m_update_improvement)
+            {
+                evalContext.m_update_improvement = false;
+                pending_update = true;
+            }
+            
+            // Handle autosave updates
+            if (evalContext.m_update_autosave)
+            {
+                evalContext.m_update_autosave = false;
+                do_autosave = true;
+            }
+            
+            // Wait for updates or timeout
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+            evalContext.m_condvar_update.wait_until(lock, deadline);
+
+            // Heartbeat: detect stagnation where no threads are active but not finished
+            if (!evalContext.m_finished.load() && evalContext.m_threads_active.load() <= 0) {
+                std::cout << "[RC] No active workers but not finished. Requesting DLAS re-spawn." << std::endl;
+            }
         }
-        
-        // Handle autosave updates
-        if (evalContext.m_update_autosave)
+
+        // Perform UI updates and autosave outside of the lock to avoid deadlocks
+        if (do_init_redraw)
         {
-            evalContext.m_update_autosave = false;
+            ShowInputBitmap();
+            ShowDestinationBitmap();
+            ShowLastCreatedPicture();
+            ShowMutationStats();
+        }
+        if (do_autosave)
+        {
             SaveBestSolution();
+            Message("Auto-saved.");
         }
-        
-        // Wait for updates or timeout
-        auto deadline = now + std::chrono::milliseconds(250);
-        evalContext.m_condvar_update.wait_until(lock, deadline);
     }
     
-    // Stop optimization
+    // Stop optimization (controller will forward Stop to optimizer and log)
     m_optimizer.Stop();
     
+    // Log exit state
+    {
+        auto& evalContext = m_optimizer.GetEvaluationContext();
+        std::unique_lock<std::mutex> lock{ evalContext.m_mutex };
+        std::cout << "[RC] MainLoop exiting: running=false, ctx.finished=" << (evalContext.m_finished.load() ? 1 : 0)
+                  << ", threads_active=" << evalContext.m_threads_active.load()
+                  << ", evals=" << evalContext.m_evaluations << std::endl;
+        if (evalContext.m_finished.load()) {
+            std::cout << "[RC] Finish reason='" << evalContext.m_finish_reason
+                      << "' at " << evalContext.m_finish_file << ":" << evalContext.m_finish_line
+                      << ", evals_at=" << evalContext.m_finish_evals_at
+                      << ", threads_active_at=" << evalContext.m_threads_active.load()
+                      << ", best_result=" << evalContext.m_best_result
+                      << ", cost_max=" << evalContext.m_cost_max
+                      << ", N=" << evalContext.m_N
+                      << ", current_cost=" << evalContext.m_current_cost
+                      << ", previous_idx=" << evalContext.m_previous_results_index
+                      << std::endl;
+        }
+    }
+
     // Save final solution
     SaveBestSolution();
 }
@@ -377,54 +452,81 @@ void RastaConverter::ShowDestinationBitmap()
 
 void RastaConverter::ShowLastCreatedPicture()
 {
-    // Get the context data
-    const auto& evalContext = m_optimizer.GetEvaluationContext();
-    int x, y;
-    
-    // Draw the created picture
-    for (y = 0; y < evalContext.m_height; ++y)
+    // Snapshot evaluation data under lock to avoid data races
+    std::vector<std::vector<unsigned char>> created_picture_copy;
+    unsigned snap_width = 0;
+    unsigned snap_height = 0;
     {
-        for (x = 0; x < evalContext.m_width; ++x)
-        {
-            rgb atari_color = atari_palette[evalContext.m_created_picture[y][x]];
-            RGBQUAD color;
-            color.rgbRed = atari_color.r;
-            color.rgbGreen = atari_color.g;
-            color.rgbBlue = atari_color.b;
-            FreeImage_SetPixelColor(output_bitmap, x, y, &color);
+        auto& ctx = m_optimizer.GetEvaluationContext();
+        std::unique_lock<std::mutex> lock{ ctx.m_mutex };
+        snap_width = ctx.m_width;
+        snap_height = ctx.m_height;
+        created_picture_copy = ctx.m_created_picture; // copy
+    }
+    int x, y;
+
+    // Check if the created picture exists and has the right dimensions
+    if (created_picture_copy.empty() ||
+        created_picture_copy.size() < snap_height) {
+        // Just fill with black if not initialized yet
+        RGBQUAD black = { 0, 0, 0, 0 };
+        for (y = 0; y < (int)snap_height; ++y) {
+            for (x = 0; x < (int)snap_width; ++x) {
+                FreeImage_SetPixelColor(output_bitmap, x, y, &black);
+            }
+        }
+    }
+    else {
+        // Draw the created picture
+        for (y = 0; y < (int)snap_height; ++y) {
+            // Skip any rows that aren't sized correctly
+            if (created_picture_copy[y].size() < snap_width) {
+                continue;
+            }
+
+            for (x = 0; x < (int)snap_width; ++x) {
+                rgb atari_color = atari_palette[created_picture_copy[y][x]];
+                RGBQUAD color;
+                color.rgbRed = atari_color.r;
+                color.rgbGreen = atari_color.g;
+                color.rgbBlue = atari_color.b;
+                FreeImage_SetPixelColor(output_bitmap, x, y, &color);
+            }
         }
     }
 
     // Display the picture
     int w = FreeImage_GetWidth(output_bitmap);
-    gui.DisplayBitmap(w, 0, output_bitmap);
+    gui.DisplayBitmap(FreeImage_GetWidth(m_imageProcessor.GetInputBitmap()), 0, output_bitmap);
 }
 
 void RastaConverter::ShowMutationStats()
 {
-    const auto& evalContext = m_optimizer.GetEvaluationContext();
-    
-    for (int i = 0; i < E_MUTATION_MAX; ++i)
+    // Snapshot under lock
+    unsigned long long evaluations = 0;
+    unsigned long long last_best_eval = 0;
+    double best_result = 0.0;
+    int stats[E_MUTATION_MAX] = {0};
     {
-        gui.DisplayText(0, 250 + 20 * i, std::string(mutation_names[i]) + 
-                                        std::string("  ") + 
-                                        std::to_string(evalContext.m_mutation_stats[i]));
+        auto& ctx = m_optimizer.GetEvaluationContext();
+        std::unique_lock<std::mutex> lock{ ctx.m_mutex };
+        evaluations = ctx.m_evaluations;
+        last_best_eval = ctx.m_last_best_evaluation;
+        best_result = ctx.m_best_result;
+        for (int i = 0; i < E_MUTATION_MAX; ++i) stats[i] = ctx.m_mutation_stats[i];
     }
 
-    gui.DisplayText(320, 250, std::string("Evaluations: ") + 
-                           std::to_string(evalContext.m_evaluations));
-    
-    gui.DisplayText(320, 270, std::string("LastBest: ") + 
-                           std::to_string(evalContext.m_last_best_evaluation) + 
-                           std::string("                "));
-    
-    gui.DisplayText(320, 290, std::string("Rate: ") + 
-                           std::to_string((unsigned long long)m_optimizer.GetRate()) + 
-                           std::string("                "));
-    
-    gui.DisplayText(320, 310, std::string("Norm. Dist: ") + 
-                           std::to_string(m_outputManager.NormalizeScore(evalContext.m_best_result)) + 
-                           std::string("                "));
+    for (int i = 0; i < E_MUTATION_MAX; ++i)
+    {
+        gui.DisplayText(0, 250 + 20 * i, std::string(mutation_names[i]) +
+                                        std::string("  ") +
+                                        std::to_string(stats[i]));
+    }
+
+    gui.DisplayText(320, 250, std::string("Evaluations: ") + std::to_string(evaluations));
+    gui.DisplayText(320, 270, std::string("LastBest: ") + std::to_string(last_best_eval) + std::string("                "));
+    gui.DisplayText(320, 290, std::string("Rate: ") + std::to_string((unsigned long long)m_optimizer.GetRate()) + std::string("                "));
+    gui.DisplayText(320, 310, std::string("Norm. Dist: ") + std::to_string(m_outputManager.NormalizeScore(best_result)) + std::string("                "));
 }
 
 void RastaConverter::SaveBestSolution()
@@ -447,13 +549,15 @@ void RastaConverter::SaveBestSolution()
 bool RastaConverter::Resume()
 {
     // Load register initialization state
-    LoadRegInits("output.png.rp.ini");
+    // Use configured output base if available; otherwise default
+    const std::string base = cfg.output_file.empty() ? std::string("output.png") : cfg.output_file;
+    LoadRegInits(base + ".rp.ini");
     
     // Load raster program
-    LoadRasterProgram("output.png.rp");
+    LoadRasterProgram(base + ".rp");
     
     // Load LAHC state
-    m_optimizer.LoadState("output.png.lahc");
+    m_optimizer.LoadState(base + ".lahc");
     
     // Process command line for config
     cfg.ProcessCmdLine();
@@ -551,6 +655,17 @@ void RastaConverter::LoadRasterProgram(const std::string& filename)
         pos = line.find("; CmdLine:");
         if (pos != std::string::npos)
             cfg.command_line = (line.substr(pos + 11));
+
+        // Optional Seed: stored if present to keep RNG continuity on /continue
+        pos = line.find("; Seed:");
+        if (pos != std::string::npos) {
+            try {
+                cfg.resume_seed = std::stoul(line.substr(pos + 7));
+                cfg.have_resume_seed = true;
+            } catch (...) {
+                cfg.have_resume_seed = false;
+            }
+        }
 
         if (line.compare(0, 4, "line", 4) == 0)
         {
@@ -650,7 +765,7 @@ bool RastaConverter::GetInstructionFromString(const std::string& line, SRasterIn
             {
                 instr.loose.instruction = (e_raster_instruction)(E_RASTER_STA + i);
                 // find target
-                for (j = 0; j <= E_TARGET_MAX; ++j)
+                for (j = 0; j < E_TARGET_MAX; ++j)
                 {
                     pos_target = line.find(OutputManager::mem_regs_names[j]);
                     if (pos_target != std::string::npos)

@@ -33,7 +33,7 @@ bool RastaSDL::Init(std::string command_line)
 
 
 
-	return true;
+    return true;
 }
 
 void RastaSDL::DisplayText(int x, int y, const std::string& text)
@@ -72,7 +72,11 @@ void RastaSDL::DisplayText(int x, int y, const std::string& text)
 void RastaSDL::Error(std::string e)
 {
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", e.c_str(), NULL);
-	SDL_Quit();
+    if (font) { TTF_CloseFont(font); font = nullptr; }
+    if (renderer) { SDL_DestroyRenderer(renderer); renderer = nullptr; }
+    if (window) { SDL_DestroyWindow(window); window = nullptr; }
+    TTF_Quit();
+    SDL_Quit();
 }
 
 // Function to convert a single line of FIBITMAP to SDL_Surface
@@ -166,10 +170,26 @@ GUI_command RastaSDL::NextFrame()
 
 	while (SDL_PollEvent(&e) > 0)
 	{
+#ifdef UI_DEBUG
+        std::cout << "[UI] Event type=" << e.type << std::endl;
+#endif
 		switch (e.type)
 		{
 		case SDL_QUIT:
+#ifdef UI_DEBUG
+            std::cout << "[UI] SDL_QUIT received" << std::endl;
+#endif
+#ifdef IGNORE_SDL_QUIT
+#ifdef UI_DEBUG
+            std::cout << "[UI] Ignoring SDL_QUIT due to IGNORE_SDL_QUIT" << std::endl;
+#endif
+            return GUI_command::CONTINUE;
+#else
+#ifdef UI_DEBUG
+            std::cout << "[UI] Returning STOP due to SDL_QUIT" << std::endl;
+#endif
 			return GUI_command::STOP;
+#endif
 		case SDL_KEYDOWN:
 			if (e.key.repeat == 0)
 			{
@@ -177,8 +197,21 @@ GUI_command RastaSDL::NextFrame()
 				{
 				case SDLK_s:
 				case SDLK_d:
+#ifdef UI_DEBUG
+                    std::cout << "[UI] Key S/D -> SAVE" << std::endl;
+#endif
 					return GUI_command::SAVE;
 				case SDLK_ESCAPE:
+#ifdef UI_DEBUG
+                    std::cout << "[UI] ESC pressed" << std::endl;
+#endif
+#ifdef IGNORE_SDL_QUIT
+                    // Ignore ESC if diagnostic flag is set
+#ifdef UI_DEBUG
+                    std::cout << "[UI] Ignoring ESC due to IGNORE_SDL_QUIT" << std::endl;
+#endif
+                    return GUI_command::CONTINUE;
+#else
 					const SDL_MessageBoxButtonData buttons[] = {
 						{ /* .flags, .buttonid, .text */        0, 0, "No" },
 						{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Yes" },
@@ -212,13 +245,23 @@ GUI_command RastaSDL::NextFrame()
 						return GUI_command::STOP;
 					}
 					if (buttonid == 1) {
+#ifdef UI_DEBUG
+                        std::cout << "[UI] ESC -> STOP confirmed by message box" << std::endl;
+#endif
 						return GUI_command::STOP;
 					}
+#ifdef UI_DEBUG
+                    std::cout << "[UI] ESC -> CONTINUE (No selected)" << std::endl;
+#endif
 					return GUI_command::CONTINUE;
+#endif
 				}
 			}
 			break;
 		case SDL_WINDOWEVENT:
+#ifdef UI_DEBUG
+            std::cout << "[UI] Window event=" << (int)e.window.event << std::endl;
+#endif
 			if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
 				int newWidth = e.window.data1;
 				int newHeight = e.window.data2;
@@ -233,11 +276,17 @@ GUI_command RastaSDL::NextFrame()
 				float scaleY = (float)newHeight / (float)window_height; // originalHeight is the height of your content
 				SDL_RenderSetScale(renderer, scaleX, scaleY);
 
-				return GUI_command::REDRAW;
+                #ifdef UI_DEBUG
+                std::cout << "[UI] Returning REDRAW due to resize" << std::endl;
+                #endif
+                return GUI_command::REDRAW;
 			}
 		}
 	}
 	SDL_RenderPresent(renderer);
+#ifdef UI_DEBUG
+    std::cout << "[UI] Returning CONTINUE (no events)" << std::endl;
+#endif
 	return GUI_command::CONTINUE;
 }
 

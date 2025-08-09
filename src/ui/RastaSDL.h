@@ -20,6 +20,7 @@ private:
     SDL_Surface* FIBitmapLineToSDLSurface(FIBITMAP* fiBitmap, int line_y);
 public:
     bool Init(std::string command_line);
+    ~RastaSDL() { /* ensure resources released if Error not called */ }
     void Error(std::string e);
     void DisplayBitmapLine(int x, int y, int line_y, FIBITMAP* fiBitmap);
     void DisplayText(int x, int y, const std::string& text);

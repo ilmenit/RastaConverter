@@ -5,8 +5,14 @@
 #include <map>
 #include <mutex>
 #include <condition_variable>
+#include <atomic>
+#include <string>
 #include <chrono>
 #include <ctime>
+#include <functional>
+#include <thread>
+#include <atomic>  // Add this for atomic operations
+#include <algorithm> // For std::find
 #include "../raster/Program.h"
 #include "../color/Distance.h"
 #include "../cache/LineCache.h"
@@ -16,6 +22,7 @@
 
 // Forward declarations
 class Executor;
+class Mutator;
 
 // Define these types before use
 typedef std::vector<unsigned char> color_index_line;
@@ -40,6 +47,62 @@ public:
     EvaluationContext();
     ~EvaluationContext();
 
+    // Centralized finish setter with reason and origin info
+    bool MarkFinished(const char* reason, const char* file, int line);
+
+    // Convenience macro to capture file/line automatically
+    #define CTX_MARK_FINISHED(ctx, reason) (ctx).MarkFinished((reason), __FILE__, __LINE__)
+
+    /**
+     * Report the initial score for DLAS initialization
+     * 
+     * @param score Initial solution score
+     */
+    void ReportInitialScore(double score);
+
+    /**
+     * Report an evaluation result to the DLAS algorithm
+     * 
+     * @param result The evaluation result/distance
+     * @param pic The solution that was evaluated
+     * @param line_results Results for each line (for visualization)
+     * @param sprites_memory Sprite memory for visualization
+     * @param mutator Mutator that created this solution
+     * @return Whether the solution was accepted
+     */
+    bool ReportEvaluationResult(double result, 
+                               raster_picture* pic, 
+                               const std::vector<const line_cache_result*>& line_results,
+                               const sprites_memory_t& sprites_memory,
+                               Mutator* mutator);
+
+    /**
+     * Register an executor for thread creation
+     * 
+     * @param executor Executor to register
+     */
+    void RegisterExecutor(Executor* executor);
+    
+    /**
+     * Unregister an executor (for cleanup)
+     * 
+     * @param executor Executor to unregister
+     */
+    void UnregisterExecutor(Executor* executor);
+
+    /**
+     * Create and start worker threads
+     * 
+     * @param threadFunc Thread function to run
+     * @return Number of threads started
+     */
+    int StartWorkerThreads(std::function<void(int)> threadFunc);
+
+    /**
+     * Join all worker threads
+     */
+    void JoinWorkerThreads();
+
     // Vector of possible colors for each line
     std::vector<std::vector<unsigned char>> m_possible_colors_for_each_line;
 
@@ -54,15 +117,23 @@ public:
     bool m_update_improvement = false;
     bool m_update_initialized = false;
     bool m_initialized = false;
-    bool m_finished = false;
+    std::atomic<bool> m_finished{false};
 
-    int m_threads_active = 0;
+    // Using atomic for thread counter to prevent race conditions
+    std::atomic<int> m_threads_active{0};
 
     // Evaluation limits and counters
     unsigned long long m_save_period = 0;
     unsigned long long m_max_evals = 0;
     unsigned long long m_evaluations = 0;
     unsigned long long m_last_best_evaluation = 0;
+
+    // Finish diagnostics (protected by m_mutex)
+    std::string m_finish_reason;
+    std::string m_finish_file;
+    int m_finish_line = 0;
+    std::string m_finish_thread;
+    unsigned long long m_finish_evals_at = 0;
 
     // Best solution found
     raster_picture m_best_pic;
@@ -94,8 +165,8 @@ public:
     size_t m_previous_results_index = 0;          // Current index in history
     double m_current_cost = DBL_MAX;              // Current accepted cost
 
-    // Tracking of previous costs per thread for DLAS
-    std::vector<double> m_thread_previous_costs;
+    // Regional mutation config
+    bool m_use_regional_mutation = false;         // Whether to use regional mutation
 
     // Auto-save timing
     std::chrono::time_point<std::chrono::steady_clock> m_previous_save_time;
@@ -105,7 +176,6 @@ public:
     linear_allocator m_linear_allocator;          // For memory allocation
 
     // Error map and target picture reference
-    // Change this type to match what RastaConverter is passing
     const std::vector<distance_t>* m_picture_all_errors[128];
     const screen_line* m_picture = nullptr;
 
@@ -118,6 +188,11 @@ public:
 
     // Cache size in bytes
     size_t m_cache_size = 0;
+
+private:
+    // Thread management
+    std::vector<std::thread> m_worker_threads;
+    std::vector<Executor*> m_executors;
 };
 
 #endif // EVALUATION_CONTEXT_H

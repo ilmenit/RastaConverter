@@ -8,13 +8,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Define options
 option(NO_GUI "Build without GUI" OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(THREAD_DEBUG "Enable detailed thread/synchronization debug logs" OFF)
+option(SUPPRESS_IMPROVEMENT_LOGS "Suppress 'New best solution' improvement logging" OFF)
+option(UI_DEBUG "Enable SDL UI event debug logging" OFF)
+option(IGNORE_SDL_QUIT "Ignore SDL_QUIT and ESC (for diagnosing unexpected exits)" OFF)
 
 # Add optimization flags for Release builds
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     if(MSVC)
         # MSVC optimization flags
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /Oi /Ot /GL")
-        set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /Oi /Ot /GL /Zi")
+        set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG /DEBUG:FULL")
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         if(WIN32)
             # Clang-cl on Windows
@@ -176,6 +180,20 @@ target_include_directories(rasta PRIVATE
 # Link libraries
 target_link_libraries(rasta PRIVATE ${FREEIMAGE_LIBRARIES})
 
+# Compile-time debug controls
+if(THREAD_DEBUG)
+    target_compile_definitions(rasta PRIVATE THREAD_DEBUG=1)
+endif()
+if(SUPPRESS_IMPROVEMENT_LOGS)
+    target_compile_definitions(rasta PRIVATE SUPPRESS_IMPROVEMENT_LOGS=1)
+endif()
+if(UI_DEBUG)
+    target_compile_definitions(rasta PRIVATE UI_DEBUG=1)
+endif()
+if(IGNORE_SDL_QUIT)
+    target_compile_definitions(rasta PRIVATE IGNORE_SDL_QUIT=1)
+endif()
+
 # Add SDL dependencies if GUI is enabled
 if(NOT NO_GUI)
     target_include_directories(rasta PRIVATE
@@ -191,7 +209,7 @@ endif()
 # Platform-specific settings
 if(WIN32)
     # Add Windows-specific libraries
-    target_link_libraries(rasta PRIVATE ws2_32)
+    target_link_libraries(rasta PRIVATE ws2_32 dbghelp)
 
     # Copy DLLs on Windows
     if(FREEIMAGE_DLL)

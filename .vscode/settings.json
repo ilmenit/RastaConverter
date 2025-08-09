@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "fstream": "cpp",
+        "functional": "cpp",
+        "algorithm": "cpp",
+        "thread": "cpp",
+        "cfloat": "cpp"
+    }
+}

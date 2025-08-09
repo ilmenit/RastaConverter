@@ -7,8 +7,11 @@
 #undef int64_t
 #undef uint64_t
 #include <stdint.h>
+#include "platform/ConsoleCtrlWin.h"
 #include "RastaConverter.h"
 #include <iostream>
+#include <fstream>
+#include <mutex>
 
 bool quiet = false;
 
@@ -17,6 +20,14 @@ void create_cycles_table();
 
 int main(int argc, char *argv[])
 {	
+    // Simple atexit and terminate diagnostics
+    std::atexit([](){ std::cout << "[EXIT] atexit called" << std::endl; });
+    std::set_terminate([](){ std::cerr << "[TERM] std::terminate called" << std::endl; std::abort(); });
+
+    // Log console control events (CTRL+C, console close, etc.) and crashes
+    RegisterConsoleCtrlLogger();
+    RegisterUnhandledExceptionLogger();
+    RegisterSignalHandlers();
     // Initialize FreeImage
     FreeImage_Initialise(TRUE);
 
@@ -30,13 +41,16 @@ int main(int argc, char *argv[])
     // Create RastaConverter
     RastaConverter rasta;
 
+    // Respect quiet mode (headless)
+    quiet = cfg.quiet;
+
     // Resume if requested
     if (cfg.continue_processing)
     {
         quiet = true;
         rasta.Resume();
         rasta.cfg.continue_processing = true;
-        quiet = false;
+        quiet = cfg.quiet;
     }
     else
     {
@@ -53,6 +67,9 @@ int main(int argc, char *argv[])
     {
         rasta.MainLoop();
         rasta.SaveBestSolution();
+    }
+    else {
+        std::cout << "[MAIN] ProcessInit returned false (preprocess-only or error)" << std::endl;
     }
 
     // Clean up SDL

@@ -10,6 +10,7 @@
 #include "../execution/Executor.h"
 #include "../mutation/Mutator.h"
 #include "Optimizer.h"
+#include "DLAS.h"
 
 /**
  * Controls and manages the optimization process
@@ -39,16 +40,18 @@ public:
      * @param cacheSize Size of the instruction cache
      * @param initialSeed Random seed
      * @param onoffMap Register enable/disable map
+     * @param useRegionalMutation Whether to use region-based mutation
      * @return True if initialization succeeded
      */
     bool Initialize(int threads, int width, int height, 
                   const std::vector<screen_line>* picture,
-                  const std::vector<distance_t>* pictureAllErrors[128],  // Changed back to match RastaConverter
+                  const std::vector<distance_t>* pictureAllErrors[128],
                   unsigned long long maxEvals, 
                   int savePeriod,
                   size_t cacheSize,
                   unsigned long initialSeed,
-                  const OnOffMap* onoffMap = nullptr);
+                  const OnOffMap* onoffMap = nullptr,
+                  bool useRegionalMutation = false);
     
     /**
      * Initialize the optimization with a starting raster program
@@ -136,6 +139,13 @@ public:
      */
     void UpdateRate();
     
+    /**
+     * Check and handle auto-save logic
+     * 
+     * @return True if auto-save was triggered
+     */
+    bool CheckAutoSave();
+    
 private:
     // Evaluation context shared across threads
     EvaluationContext m_evalContext;
@@ -154,6 +164,7 @@ private:
     double m_rate;
     unsigned long long m_lastEval;
     std::chrono::time_point<std::chrono::steady_clock> m_lastRateCheckTime;
+    std::chrono::time_point<std::chrono::steady_clock> m_lastAutoSaveTime;
 };
 
 #endif // OPTIMIZATION_CONTROLLER_H

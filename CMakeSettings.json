@@ -7,7 +7,7 @@
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "buildRoot": "${projectDir}\\out\\build\\${name}",
       "installRoot": "${projectDir}\\out\\install\\${name}",
-      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=D:\\Projekty\\FreeImage -DSDL2_DIR=D:\\Projekty\\SDL2 -DSDL2_TTF_DIR=D:\\Projekty\\SDL2_ttf",
       "buildCommandArgs": "",
       "ctestCommandArgs": ""
     },
@@ -29,7 +29,7 @@
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "buildRoot": "${projectDir}\\out\\build\\${name}",
       "installRoot": "${projectDir}\\out\\install\\${name}",
-      "cmakeCommandArgs": "-DFREEIMAGE_DIR=${env.FREEIMAGE_DIR} -DSDL2_DIR=${env.SDL2_DIR} -DSDL2_TTF_DIR=${env.SDL2_TTF_DIR}",
+      "cmakeCommandArgs": "-DFREEIMAGE_DIR=D:\\Projekty\\FreeImage -DSDL2_DIR=D:\\Projekty\\SDL2 -DSDL2_TTF_DIR=D:\\Projekty\\SDL2_ttf",
       "buildCommandArgs": "",
       "ctestCommandArgs": ""
     },

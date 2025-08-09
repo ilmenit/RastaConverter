@@ -54,7 +54,7 @@ void Configuration::Process(int argc, char *argv[])
 	else
 		continue_processing=false;
 
-	command_line=parser.mn_command_line;
+    command_line=parser.mn_command_line;
 
 	input_file = parser.getValue("i","NoFileName");
 	output_file = parser.getValue("o","output.png");
@@ -62,6 +62,17 @@ void Configuration::Process(int argc, char *argv[])
 
 	if (parser.switchExists("palette"))
 		palette_file = parser.getValue("palette","Palettes/laoo.act");
+
+    // Parse mutation strategy - global is the default for backward compatibility
+    string mutation_strategy_value = parser.getValue("mutation_strategy", "global");
+    if (mutation_strategy_value == "regional")
+        mutation_strategy = E_MUTATION_REGIONAL;
+    else
+        mutation_strategy = E_MUTATION_GLOBAL;
+
+    // Optimizer selection
+    string optimizer_value = parser.getValue("optimizer", "dlashc");
+    if (optimizer_value == "lahc") optimizer_type = E_OPT_LAHC; else optimizer_type = E_OPT_DLASHC;
 
 	string dst_name = parser.getValue("distance","yuv");
 	if (dst_name=="euclid")
@@ -152,10 +163,13 @@ void Configuration::Process(int argc, char *argv[])
 	if (solutions<1)
 		solutions=1;
 
-	if (parser.switchExists("preprocess"))
+    if (parser.switchExists("preprocess"))
 		preprocess_only=true;
 	else
 		preprocess_only=false;
+
+    // Quiet flag for headless/CLI operation
+    quiet = parser.switchExists("quiet");
 
 	string brightness_value = parser.getValue("brightness","0");
 	brightness=String2Value<int>(brightness_value);

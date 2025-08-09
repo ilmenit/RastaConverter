@@ -1,3 +1,0 @@
-Writing object file...
-6328 lines of source assembled in 3 pass
-19617 bytes written to the object file

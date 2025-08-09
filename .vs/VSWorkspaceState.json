@@ -29,13 +29,10 @@
   },
   "ExpandedNodes": [
     "",
-    "\\cmake",
     "\\src",
-    "\\src\\io",
     "\\src\\mutation",
-    "\\src\\optimization",
     "\\src\\raster"
   ],
-  "SelectedNode": "\\CMakeSettings.json",
+  "SelectedNode": "\\CMakeLists.txt",
   "PreviewInSolutionExplorer": false
 }

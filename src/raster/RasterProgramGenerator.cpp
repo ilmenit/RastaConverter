@@ -290,6 +290,9 @@ void RasterProgramGenerator::OptimizeRasterProgram(raster_picture* pic)
     for (int y = 0; y < (int)pic->raster_lines.size(); ++y)
     {
         size_t size = pic->raster_lines[y].instructions.size();
+        if (size == 0) {
+            continue;
+        }
         SRasterInstruction* __restrict rastinsns = &pic->raster_lines[y].instructions[0];
         
         for (size_t i = 0; i < size; ++i)

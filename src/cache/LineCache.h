@@ -11,20 +11,23 @@
 struct line_cache_key
 {
     register_state entry_state;
-    const insn_sequence *insn_seq;
+    const insn_sequence* insn_seq;
 
     uint32_t hash()
     {
         uint32_t hash = 0;
-        
+
         hash += (size_t)entry_state.reg_a;
         hash += (size_t)entry_state.reg_x << 8;
         hash += (size_t)entry_state.reg_y << 16;
 
-        for(int i=0; i<E_TARGET_MAX; ++i)
-            hash += (size_t)entry_state.mem_regs[i] << (8*(i & 3));
+        for (int i = 0; i < E_TARGET_MAX; ++i)
+            hash += (size_t)entry_state.mem_regs[i] << (8 * (i & 3));
 
-        hash += insn_seq->hash;
+        // Check for null pointer before dereferencing
+        if (insn_seq != nullptr) {
+            hash += insn_seq->hash;
+        }
 
         hash += (hash * 0x1a572cf3) >> 20;
 
@@ -34,7 +37,20 @@ struct line_cache_key
 
 inline bool operator==(const line_cache_key& key1, const line_cache_key& key2)
 {
-    if (key1.insn_seq != key2.insn_seq) return false;
+    // Check for null pointers first
+    if (key1.insn_seq == nullptr && key2.insn_seq == nullptr) {
+        // Both are null, consider equal based on registers only
+    }
+    else if (key1.insn_seq == nullptr || key2.insn_seq == nullptr) {
+        // One is null but the other isn't, they can't be equal
+        return false;
+    }
+    else if (key1.insn_seq != key2.insn_seq) {
+        // Both non-null but different pointers
+        return false;
+    }
+
+    // Check register state equality
     if (key1.entry_state.reg_a != key2.entry_state.reg_a) return false;
     if (key1.entry_state.reg_x != key2.entry_state.reg_x) return false;
     if (key1.entry_state.reg_y != key2.entry_state.reg_y) return false;
@@ -47,8 +63,8 @@ struct line_cache_result
 {
     distance_accum_t line_error;
     register_state new_state;
-    unsigned char *color_row;
-    unsigned char *target_row;
+    unsigned char* color_row;
+    unsigned char* target_row;
     unsigned char sprite_data[4][8];
 };
 
@@ -60,7 +76,7 @@ public:
     struct hash_node
     {
         uint32_t hash;
-        value_type *value;
+        value_type* value;
     };
 
     struct hash_block
@@ -68,18 +84,19 @@ public:
         static const int N = 15;
 
         hash_node nodes[N];
-        hash_block *next;
+        hash_block* next;
     };
 
     struct hash_chain
     {
-        hash_block *first;
+        hash_block* first;
         int offset;
     };
 
     typedef std::vector<hash_node> hash_list;
 
-    static const int HTSIZE = 8192;
+    // Use a unique name to avoid collision with Windows' HTSIZE macro (WM_NCHITTEST constants)
+    static const int LINE_CACHE_HTABLE_SIZE = 8192;
 
     line_cache();
 
@@ -90,16 +107,16 @@ public:
 
     /**
      * Find a cached line result
-     * 
+     *
      * @param key Cache key to look up
      * @param hash Pre-computed hash value
      * @return Pointer to cached result or NULL if not found
      */
-    const line_cache_result *find(const line_cache_key& key, uint32_t hash) const;
+    const line_cache_result* find(const line_cache_key& key, uint32_t hash) const;
 
     /**
      * Insert a new cache entry
-     * 
+     *
      * @param key Cache key to insert
      * @param hash Pre-computed hash value
      * @param alloc Linear allocator for memory allocation
@@ -108,7 +125,7 @@ public:
     line_cache_result& insert(const line_cache_key& key, uint32_t hash, linear_allocator& alloc);
 
 private:
-    hash_chain hash_table[HTSIZE];
+    hash_chain hash_table[LINE_CACHE_HTABLE_SIZE];
 };
 
 #endif // LINECACHE_H

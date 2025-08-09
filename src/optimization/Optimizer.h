@@ -24,6 +24,9 @@ public:
     
     // Start optimization in separate thread(s)
     virtual void Start() = 0;
+
+    // Request optimization to stop
+    virtual void Stop() = 0;
     
     // Check if optimization is complete
     virtual bool IsFinished() const = 0;

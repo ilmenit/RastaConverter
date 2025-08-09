@@ -22,6 +22,23 @@ const int CYCLES_MAX = 114;
 
 extern ScreenCycle screen_cycles[CYCLES_MAX];
 
+// Safely get screen cycle offset; returns a large value if out of range to skip instruction scheduling
+inline int safe_screen_cycle_offset(int cycle)
+{
+    if (cycle < 0)
+        return -100000;
+    if (cycle >= CYCLES_MAX)
+        return 1000; // past end of drawable area
+    return screen_cycles[cycle].offset;
+}
+
+inline int safe_screen_cycle_length(int cycle)
+{
+    if (cycle < 0 || cycle >= CYCLES_MAX)
+        return 0;
+    return screen_cycles[cycle].length;
+}
+
 enum e_raster_instruction {
 	// DO NOT CHANGE ORDER OF THOSE. A LOT OF THINGS DEPEND ON THE ORDER. ADD STH AT THE END IF YOU NEED!
 	// 2 bytes instruction
@@ -158,9 +175,23 @@ struct raster_picture {
 
 		for(size_t i=0; i<n; ++i)
 		{
-			raster_lines[i].recache_insns(cache, alloc);
+            // Defensive: ensure vector data is contiguous and count matches
+            raster_lines[i].rehash();
+            raster_lines[i].recache_insns(cache, alloc);
 		}
 	}
+
+    void recache_insns_if_needed(insn_sequence_cache& cache, linear_allocator& alloc)
+    {
+        size_t n = raster_lines.size();
+        for (size_t i = 0; i < n; ++i)
+        {
+            if (raster_lines[i].cache_key == NULL) {
+                raster_lines[i].rehash();
+                raster_lines[i].recache_insns(cache, alloc);
+            }
+        }
+    }
 
 	void uncache_insns()
 	{

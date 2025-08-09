@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <thread>
 #include <functional>
+#include <iostream>
 
 Executor::Executor()
     : m_gstate(nullptr)
@@ -27,7 +28,7 @@ Executor::Executor()
 }
 
 void Executor::Init(unsigned width, unsigned height, 
-                   const std::vector<distance_t>* pictureAllErrors[128],  // Changed to match RastaConverter
+                   const std::vector<distance_t>* pictureAllErrors[128],
                    const screen_line* picture, const OnOffMap* onoff, 
                    EvaluationContext* gstate, int solutions, 
                    unsigned long long randseed, size_t cache_size, 
@@ -100,10 +101,8 @@ void Executor::UpdateLRU(int line_index) {
 void Executor::Start()
 {
     if (m_gstate) {
-        ++m_gstate->m_threads_active;
-
-        std::thread thread{ std::bind(&Executor::Run, this) };
-        thread.detach();
+        // Register this executor with the evaluation context
+        m_gstate->RegisterExecutor(this);
     }
 }
 
@@ -115,44 +114,70 @@ void Executor::Run() {
 
     unsigned last_eval = 0;
     bool clean_first_evaluation = true;
-    clock_t last_rate_check_time = clock();
 
     raster_picture new_picture;
     std::vector<const line_cache_result*> line_results(m_height);
 
-    for (;;) {
+    while (!m_gstate->m_finished.load()) {
+        // Periodic diagnostics on very low progress to detect stalls
+        static thread_local unsigned int slow_counter = 0;
+        if ((m_gstate->m_evaluations % 20000 == 0) && (m_gstate->m_evaluations > 0)) {
+            if (++slow_counter % 3 == 0) {
+                std::cout << "[DBG] Executor " << m_thread_id
+                          << " heartbeat: evals=" << m_gstate->m_evaluations
+                          << ", finished=" << m_gstate->m_finished.load()
+                          << ", threads_active=" << m_gstate->m_threads_active.load()
+                          << ", cache_used=" << GetCacheMemoryUsage()
+                          << "/" << m_gstate->m_cache_size
+                          << std::endl;
+            }
+        }
+        // Check for cache size with cooldown to avoid thrash
+        static thread_local unsigned long long last_clear_evals = 0;
+        static thread_local unsigned long long last_clear_time_ms = 0;
+        auto now = std::chrono::steady_clock::now();
+        auto now_ms = (unsigned long long)std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
         if (m_linear_allocator_ptr->size() > m_cache_size) {
-            // Acquire a mutex to coordinate cache clearing
-            std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);
+            bool cooldown_elapsed = (now_ms - last_clear_time_ms) > 1000; // 1s
+            bool evals_progressed = (m_gstate->m_evaluations - last_clear_evals) > 5000;
+            if (cooldown_elapsed && evals_progressed) {
+                // Acquire a mutex to coordinate cache clearing
+                std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);
 
-            // Check again after acquiring the lock (another thread might have cleared)
-            if (m_linear_allocator_ptr->size() > m_cache_size) {
-                // First, try clearing least recently used lines (25% of height)
-                size_t lines_to_clear = std::max((size_t)m_height / 4, (size_t)1);
-                size_t cleared = 0;
+                // Check again after acquiring the lock (another thread might have cleared)
+                if (m_linear_allocator_ptr->size() > m_cache_size) {
+                    // First, try clearing least recently used lines (25% of height)
+                    size_t lines_to_clear = std::max((size_t)m_height / 4, (size_t)1);
+                    size_t cleared = 0;
 
-                // Clear the least recently used lines
-                while (cleared < lines_to_clear && !m_lru_lines.empty()) {
-                    int y = m_lru_lines.front();
-                    m_lru_lines.pop_front();
-                    m_lru_set.erase(y);
+                    // Clear the least recently used lines
+                    while (cleared < lines_to_clear && !m_lru_lines.empty()) {
+                        int y = m_lru_lines.front();
+                        m_lru_lines.pop_front();
+                        m_lru_set.erase(y);
 
-                    // Clear just this line's cache
-                    m_line_caches[y].clear();
-                    cleared++;
-                }
+                        // Clear just this line's cache
+                        m_line_caches[y].clear();
+                        cleared++;
+                    }
 
-                // If we're still using too much memory, do a full clear
-                if (m_linear_allocator_ptr->size() > m_cache_size * 0.9) {
-                    m_insn_seq_cache_ptr->clear();
-                    for (int y2 = 0; y2 < (int)m_height; ++y2)
-                        m_line_caches[y2].clear();
-                    m_linear_allocator_ptr->clear();
-                    m_best_pic.recache_insns(*m_insn_seq_cache_ptr, *m_linear_allocator_ptr);
+                    // If we're still using too much memory, do a full clear
+                    if (m_linear_allocator_ptr->size() > m_cache_size * 0.9) {
+                        m_insn_seq_cache_ptr->clear();
+                        for (int y2 = 0; y2 < (int)m_height; ++y2)
+                            m_line_caches[y2].clear();
+                        m_linear_allocator_ptr->clear();
+                        m_best_pic.recache_insns(*m_insn_seq_cache_ptr, *m_linear_allocator_ptr);
 
-                    // Reset LRU tracking
-                    m_lru_lines.clear();
-                    m_lru_set.clear();
+                        // Reset LRU tracking
+                        m_lru_lines.clear();
+                        m_lru_set.clear();
+                    }
+
+                    // Update cooldown trackers
+                    last_clear_time_ms = now_ms;
+                    last_clear_evals = m_gstate->m_evaluations;
                 }
             }
         }
@@ -171,134 +196,48 @@ void Executor::Run() {
 
         double result = (double)ExecuteRasterProgram(&new_picture, line_results.data());
 
+        // Update global state with the evaluation
         std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };
 
         ++m_gstate->m_evaluations;
 
-        // Initialize DLAS on first evaluation
-        if (!m_gstate->m_initialized) {
-            if (m_gstate->m_previous_results.empty()) {
-                const double init_margin = result * 0.1; // 10% margin
-                m_gstate->m_cost_max = result + init_margin;
-                m_gstate->m_current_cost = result;
-                m_gstate->m_previous_results.resize(m_solutions, m_gstate->m_cost_max);
-                m_gstate->m_N = m_solutions;
-            }
-            m_gstate->m_initialized = true;
-            m_gstate->m_update_initialized = true;
-            m_gstate->m_condvar_update.notify_one();
+        // Check for termination condition first (respect max_evals only when > 0)
+        if (((m_gstate->m_max_evals > 0) && (m_gstate->m_evaluations >= m_gstate->m_max_evals)) || m_gstate->m_finished.load()) {
+            std::cout << "[FIN] Executor thread " << m_thread_id << ": finish condition met (finished="
+                      << m_gstate->m_finished.load() << ", max_evals=" << m_gstate->m_max_evals
+                      << ", evals=" << m_gstate->m_evaluations << ")" << std::endl;
+            CTX_MARK_FINISHED((*m_gstate), "executor_finish_guard");
+            break;
         }
 
-        // Store previous cost before potential update 
-        double prev_cost = m_gstate->m_current_cost;
-
-        // Calculate index for circular array
-        size_t l = m_gstate->m_previous_results_index % m_solutions;
-
-        // DLAS acceptance criteria
-        if (result == m_gstate->m_current_cost || result < m_gstate->m_cost_max) {
-            // Accept the candidate solution
-            m_gstate->m_current_cost = result;
-
-            // Update best solution if better 
-            if (result < m_gstate->m_best_result) {
-                m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
-                m_gstate->m_best_pic = new_picture;
-                m_gstate->m_best_pic.uncache_insns();
-                m_gstate->m_best_result = result;
-
-                // Update visualization state
-                m_gstate->m_created_picture.resize(m_height);
-                m_gstate->m_created_picture_targets.resize(m_height);
-
-                for (int y = 0; y < (int)m_height; ++y) {
-                    const line_cache_result& lcr = *line_results[y];
-                    m_gstate->m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
-                    m_gstate->m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
-                }
-
-                memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
-                m_gstate->m_update_improvement = true;
-
-                // Get mutation statistics from the mutator
-                const int* current_mutations = m_mutator->GetCurrentMutations();
-                for (int i = 0; i < E_MUTATION_MAX; ++i) {
-                    if (current_mutations[i]) {
-                        m_gstate->m_mutation_stats[i] += current_mutations[i];
-                    }
-                }
-
-                m_gstate->m_condvar_update.notify_one();
-            }
-        }
-
-        // DLAS replacement strategy - MOVED OUTSIDE acceptance condition
-        if (m_gstate->m_current_cost > m_gstate->m_previous_results[l]) {
-            m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
-        }
-        else if (m_gstate->m_current_cost < m_gstate->m_previous_results[l] &&
-            m_gstate->m_current_cost < prev_cost) {
-            // Track if we're removing a max value
-            if (m_gstate->m_previous_results[l] == m_gstate->m_cost_max) {
-                --m_gstate->m_N;
-            }
-
-            // Replace the value
-            m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
-
-            // Recompute max and N if needed
-            if (m_gstate->m_N <= 0) {
-                // Find new cost_max
-                m_gstate->m_cost_max = *std::max_element(
-                    m_gstate->m_previous_results.begin(),
-                    m_gstate->m_previous_results.end()
-                );
-
-                // Recount occurrences of max
-                m_gstate->m_N = std::count(
-                    m_gstate->m_previous_results.begin(),
-                    m_gstate->m_previous_results.end(),
-                    m_gstate->m_cost_max
-                );
-            }
-        }
-
-        // Always increment index
-        ++m_gstate->m_previous_results_index;
-
-        // Handle saving and termination checks
-        if (m_gstate->m_save_period && m_gstate->m_evaluations % m_gstate->m_save_period == 0) {
-            m_gstate->m_update_autosave = true;
-            m_gstate->m_condvar_update.notify_one();
-        }
-
-        if (m_gstate->m_evaluations >= m_gstate->m_max_evals) {
-            m_gstate->m_finished = true;
-            m_gstate->m_condvar_update.notify_one();
-        }
+        // The evaluation context now handles best solution tracking and DLAS acceptance
+        bool accepted = m_gstate->ReportEvaluationResult(
+            result, 
+            &new_picture, 
+            line_results, 
+            m_sprites_memory, 
+            m_mutator
+        );
 
         if (m_best_result != m_gstate->m_best_result) {
             m_best_result = m_gstate->m_best_result;
             m_best_pic = m_gstate->m_best_pic;
             m_best_pic.recache_insns(*m_insn_seq_cache_ptr, *m_linear_allocator_ptr);
         }
-
-        if (m_gstate->m_evaluations % 10000 == 0) {
-            statistics_point stats;
-            stats.evaluations = (unsigned)m_gstate->m_evaluations;
-            stats.seconds = (unsigned)(time(NULL) - m_gstate->m_time_start);
-            stats.distance = m_gstate->m_current_cost;
-
-            m_gstate->m_statistics.push_back(stats);
-        }
-
-        if (m_gstate->m_finished)
-            break;
     }
 
-    std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };
-    --m_gstate->m_threads_active;
-    m_gstate->m_condvar_update.notify_one();
+    // Decrement active thread count
+    {
+        std::unique_lock<std::mutex> lock{ m_gstate->m_mutex };
+        --m_gstate->m_threads_active;
+        
+        // Notify all waiting threads if this was the last one
+        if (m_gstate->m_threads_active <= 0) {
+            m_gstate->m_condvar_update.notify_all();
+        } else {
+            m_gstate->m_condvar_update.notify_one();
+        }
+    }
 }
 
 distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_cache_result** results_array)
@@ -374,13 +313,13 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
             ResetSpriteShiftStartArray();
         }
 
-        const SRasterInstruction* __restrict rastinsns = &rline.instructions[0];
         const int rastinsncnt = (int)rline.instructions.size();
+        const SRasterInstruction* __restrict rastinsns = (rastinsncnt > 0 && !rline.instructions.empty()) ? &rline.instructions[0] : nullptr;
 
         restart_line = false;
         ip = 0;
         cycle = 0;
-        next_instr_offset = screen_cycles[cycle].offset;
+        next_instr_offset = safe_screen_cycle_offset(cycle);
 
         // on new line clear sprite shifts and wait to be taken from mem_regs
         memset(m_sprite_shift_regs, 0, sizeof(m_sprite_shift_regs));
@@ -412,11 +351,15 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
 
             while (next_instr_offset < x && ip < rastinsncnt) // execute instructions
             {
+                if (!rastinsns || ip >= rastinsncnt) {
+                    next_instr_offset = 1000;
+                    break;
+                }
                 instr = &rastinsns[ip++];
                 ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
 
                 cycle += GetInstructionCycles(*instr);
-                next_instr_offset = screen_cycles[cycle].offset;
+                next_instr_offset = safe_screen_cycle_offset(cycle);
                 if (ip >= rastinsncnt)
                     next_instr_offset = 1000;
             }
@@ -465,12 +408,18 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
 e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int index, int x, int y, bool &restart_line, distance_t& best_error)
 {
     distance_t distance;
-    int sprite_bit;
-    int best_sprite_bit;
+    int sprite_bit = 0;  // Initialize to prevent uninitialized use
+    int best_sprite_bit = 0;  // Initialize to prevent uninitialized use
     e_target result = E_COLBAK;
     distance_t min_distance = DISTANCE_MAX;
     bool sprite_covers_colbak = false;
 
+    // Additional input validation
+    if (index < 0) {
+        best_error = DISTANCE_MAX;
+        return E_COLBAK;
+    }
+    
     // check sprites
     // Sprites priority is 0,1,2,3
     for (int temp = E_COLPM0; temp <= E_COLPM3; ++temp)
@@ -482,6 +431,12 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
         if (x_offset < sprite_size)        // (x>=sprite_x && x<sprite_x+sprite_size)
         {
             sprite_bit = x_offset >> 2; // bit of this sprite memory
+            
+            // Ensure sprite_bit is within bounds
+            if (sprite_bit < 0 || sprite_bit >= 8) {
+                sprite_bit = 0;
+            }
+            
             assert(sprite_bit < 8);
 
             sprite_covers_colbak = true;
@@ -492,11 +447,27 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
             if (sprite_leftover < sprite_size)
             {
                 int sprite_leftover_bit = sprite_leftover >> 2;
-                sprite_leftover_pixel = spriterow[temp - E_COLPM0][sprite_leftover_bit];
+                
+                // Ensure sprite_leftover_bit is within bounds
+                if (sprite_leftover_bit >= 0 && sprite_leftover_bit < 8) {
+                    sprite_leftover_pixel = spriterow[temp - E_COLPM0][sprite_leftover_bit];
+                }
             }
 
-            // MODIFIED: Use the vector of distance values properly
-            distance = (m_picture_all_errors[m_mem_regs[temp] / 2])->at(index);
+            // Initialize distance to maximum value
+            distance = DISTANCE_MAX;
+            
+            // MODIFIED: Use the vector of distance values properly with bounds checking
+            unsigned char mem_reg_value = m_mem_regs[temp];
+            unsigned char color_index = mem_reg_value / 2;
+            
+            // Validate color index and array access
+            if (color_index < 128 && m_picture_all_errors[color_index] != nullptr) {
+                const std::vector<distance_t>* error_vector = m_picture_all_errors[color_index];
+                if (index < (int)error_vector->size()) {
+                    distance = (*error_vector)[index];
+                }
+            }
             
             if (spriterow[temp - E_COLPM0][sprite_bit] || sprite_leftover_pixel)
             {
@@ -525,8 +496,20 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
 
     for (int temp = E_COLOR0; temp <= last_color_register; ++temp)
     {
-        // MODIFIED: Use the vector of distance values properly
-        distance = (m_picture_all_errors[m_mem_regs[temp] / 2])->at(index);
+        // Initialize distance to maximum value
+        distance = DISTANCE_MAX;
+        
+        // MODIFIED: Use the vector of distance values properly with bounds checking
+        unsigned char mem_reg_value = m_mem_regs[temp];
+        unsigned char color_index = mem_reg_value / 2;
+        
+        // Validate color index and array access
+        if (color_index < 128 && m_picture_all_errors[color_index] != nullptr) {
+            const std::vector<distance_t>* error_vector = m_picture_all_errors[color_index];
+            if (index < (int)error_vector->size()) {
+                distance = (*error_vector)[index];
+            }
+        }
         
         if (distance < min_distance)
         {
@@ -538,11 +521,14 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
     // the best color is in sprite, then set the proper bit of the sprite memory and then restart this line
     if (result >= E_COLPM0 && result <= E_COLPM3)
     {
-        // if PMG bit has been modified, then restart this line, because previous pixels of COLBAK may be covered
-        if (spriterow[result - E_COLPM0][best_sprite_bit] == false)
-        {
-            restart_line = true;
-            spriterow[result - E_COLPM0][best_sprite_bit] = true;
+        // Ensure best_sprite_bit is within bounds before accessing
+        if (best_sprite_bit >= 0 && best_sprite_bit < 8) {
+            // if PMG bit has been modified, then restart this line, because previous pixels of COLBAK may be covered
+            if (spriterow[result - E_COLPM0][best_sprite_bit] == false)
+            {
+                restart_line = true;
+                spriterow[result - E_COLPM0][best_sprite_bit] = true;
+            }
         }
     }
 
@@ -697,6 +683,11 @@ void Executor::ClearLineCaches()
     // Reset LRU tracking
     m_lru_lines.clear();
     m_lru_set.clear();
+}
+
+size_t Executor::GetCacheMemoryUsage() const
+{
+    return m_linear_allocator_ptr ? m_linear_allocator_ptr->size() : 0;
 }
 
 int Executor::Random(int range)

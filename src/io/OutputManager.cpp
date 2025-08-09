@@ -130,6 +130,17 @@ void OutputManager::SaveRasterProgram(const std::string& filename,
     fprintf(fp, "; CmdLine: %s\n", cmdLine.c_str());
     fprintf(fp, "; Evaluations: %llu\n", evaluations);
     fprintf(fp, "; Score: %g\n", NormalizeScore(score));
+    // Persist seed if present in command line (best-effort parse)
+    {
+        const char* seed_key = "/seed=";
+        auto pos = cmdLine.find(seed_key);
+        if (pos != std::string::npos) {
+            pos += strlen(seed_key);
+            size_t end = cmdLine.find(' ', pos);
+            std::string seed_str = cmdLine.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+            fprintf(fp, "; Seed: %s\n", seed_str.c_str());
+        }
+    }
     fprintf(fp, "; ---------------------------------- \n");
 
     // Proper offset

@@ -17,6 +17,11 @@ enum e_init_type {
 	E_INIT_LESS,
 };
 
+enum e_mutation_strategy {
+    E_MUTATION_GLOBAL,    // Original approach - all threads can mutate any line
+    E_MUTATION_REGIONAL,  // Region-based approach - threads focus on their specific region
+};
+
 enum e_dither_type {
 	E_DITHER_NONE,
 	E_DITHER_FLOYD,
@@ -37,6 +42,11 @@ enum e_distance_function {
 	E_DISTANCE_CIE94,
 };
 
+enum e_optimizer_type {
+    E_OPT_DLASHC,
+    E_OPT_LAHC,
+};
+
 struct Configuration {
 	std::string input_file;
 	std::string output_file;
@@ -49,6 +59,7 @@ struct Configuration {
 	e_distance_function pre_dstf;
 	bool continue_processing;
 
+    e_mutation_strategy mutation_strategy;
 	e_dither_type dither;
 	double dither_randomness; // 0-1
 	double dither_strength;
@@ -59,6 +70,8 @@ struct Configuration {
 	double gamma;
 	int save_period;
 	unsigned long initial_seed;
+    unsigned long resume_seed; // seed extracted from saved program (for /continue)
+    bool have_resume_seed = false;
 	int cache_size;
 
 	bool preprocess_only;
@@ -68,6 +81,8 @@ struct Configuration {
 	unsigned long long max_evals;
 	FREE_IMAGE_FILTER rescale_filter;
 	e_init_type init_type;
+    e_optimizer_type optimizer_type;
+    bool quiet;
 
 	CommandLineParser parser; 
 
