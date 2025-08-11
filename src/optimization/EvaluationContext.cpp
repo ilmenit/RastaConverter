@@ -182,34 +182,12 @@ bool EvaluationContext::MarkFinished(const char* reason, const char* file, int l
 void EvaluationContext::ReportInitialScore(double score)
 {
     // Do not need to acquire the mutex here, as it should already be locked by the caller
-    std::cout << "Reporting initial score: " << score << std::endl;
-    
+    // Keep this method algorithm-agnostic: policies handle acceptance/history state.
     if (!m_initialized) {
-        // Initialize DLAS parameters with the first score
-        const double init_margin = score * 0.1; // 10% margin
-        m_cost_max = score + init_margin;
-        m_current_cost = score;
-        
-        // Use the user-configured solutions parameter for history size
-        // Use configured history length if provided; fallback to thread count at least 1
-        int solutions_size = (m_history_length_config > 0) ? m_history_length_config : (m_thread_count > 1 ? m_thread_count : 1);
-        
-        // Make sure we have enough space and all entries are initialized
-        if (m_previous_results.empty()) {
-            m_previous_results.resize(solutions_size, m_cost_max);
-        } else if (m_previous_results.size() != solutions_size) {
-            m_previous_results.resize(solutions_size, m_cost_max);
-        }
-        
-        m_N = solutions_size;
-        
-        // Only now mark as initialized
+        m_current_cost = score; // informational baseline for UI/state
         m_initialized = true;
         m_update_initialized = true;
         m_condvar_update.notify_all();
-        
-        std::cout << "DLAS initialization complete. Cost max: " << m_cost_max 
-                  << ", Solutions size: " << solutions_size << std::endl;
     }
 }
 
@@ -219,75 +197,20 @@ bool EvaluationContext::ReportEvaluationResult(double result,
                                              const sprites_memory_t& sprites_memory,
                                              Mutator* mutator)
 {
-    bool accepted = false;
-    
     // Do not need to acquire the mutex here, as it should already be locked by the caller
-    
-    // Validate parameters
-    if (!pic || !m_initialized || m_previous_results.empty()) {
+    // Policies handle acceptance/history state. This method only tracks global "best" and UI data.
+    // Validate basic parameters
+    if (!pic || !m_initialized) {
         std::cerr << "Invalid parameters in ReportEvaluationResult" << std::endl;
         return false;
     }
-    
-    // Check termination condition first - this should be checked regardless of other logic
+    // Check termination condition first
     if (m_max_evals > 0 && m_evaluations >= m_max_evals) {
         std::cout << "[FIN] EvaluationContext: max_evals reached (" << m_evaluations << "/" << m_max_evals << ")" << std::endl;
         CTX_MARK_FINISHED((*this), "max_evals_reached");
         return false;
     }
-    
-    // Store previous cost before potential update
-    double prev_cost = m_current_cost;
-    
-    // Calculate index for circular array (protect against empty vector)
-    if (m_previous_results.size() == 0) {
-        // This should never happen if initialization is correct
-        std::cerr << "Previous results vector is empty in ReportEvaluationResult" << std::endl;
-        return false;
-    }
-    
-    size_t l = m_previous_results_index % m_previous_results.size();
-    
-    // DLAS acceptance criteria
-    if (result == m_current_cost || result < m_cost_max) {
-        // Accept the candidate solution
-        m_current_cost = result;
-        accepted = true;
-    }
-    
-    // DLAS replacement strategy
-    if (m_current_cost > m_previous_results[l]) {
-        m_previous_results[l] = m_current_cost;
-    }
-    else if (m_current_cost < m_previous_results[l] && m_current_cost < prev_cost) {
-        // Track if we're removing a max value
-        if (m_previous_results[l] == m_cost_max) {
-            --m_N;
-        }
-        
-        // Replace the value
-        m_previous_results[l] = m_current_cost;
-        
-        // Recompute max and N if needed
-        if (m_N <= 0) {
-            // Find new cost_max
-            m_cost_max = *std::max_element(
-                m_previous_results.begin(),
-                m_previous_results.end()
-            );
-            
-            // Recount occurrences of max
-            m_N = std::count(
-                m_previous_results.begin(),
-                m_previous_results.end(),
-                m_cost_max
-            );
-        }
-    }
-    
-    // Always increment index
-    ++m_previous_results_index;
-    
+
     // Update best solution if better than current best
     if (result < m_best_result) {
         m_last_best_evaluation = m_evaluations;
@@ -362,7 +285,8 @@ bool EvaluationContext::ReportEvaluationResult(double result,
         m_condvar_update.notify_all();
     }
     
-    return accepted;
+    // Return value is not used by callers; return whether we improved the best.
+    return (result <= m_best_result);
 }
 
 bool EvaluationContext::ReportEvaluationResultDual(double result,
@@ -374,36 +298,16 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
                                                        const sprites_memory_t& sprites_memory_B,
                                                        Mutator* mutator)
 {
-    // Reuse DLAS acceptance and best-tracking, but update both best pictures and a blended preview
-    bool accepted = false;
-    if (!picA || !picB || !m_initialized || m_previous_results.empty()) {
+    // Only track global "best" and UI data for dual mode. Policies manage acceptance/history.
+    if (!picA || !picB || !m_initialized) {
         std::cerr << "Invalid parameters in ReportEvaluationResultDual" << std::endl;
         return false;
     }
-
     if (m_max_evals > 0 && m_evaluations >= m_max_evals) {
         std::cout << "[FIN] EvaluationContext: max_evals reached (" << m_evaluations << "/" << m_max_evals << ")" << std::endl;
         CTX_MARK_FINISHED((*this), "max_evals_reached");
         return false;
     }
-
-    double prev_cost = m_current_cost;
-    size_t l = m_previous_results_index % m_previous_results.size();
-    if (result == m_current_cost || result < m_cost_max) {
-        m_current_cost = result;
-        accepted = true;
-    }
-    if (m_current_cost > m_previous_results[l]) {
-        m_previous_results[l] = m_current_cost;
-    } else if (m_current_cost < m_previous_results[l] && m_current_cost < prev_cost) {
-        if (m_previous_results[l] == m_cost_max) --m_N;
-        m_previous_results[l] = m_current_cost;
-        if (m_N <= 0) {
-            m_cost_max = *std::max_element(m_previous_results.begin(), m_previous_results.end());
-            m_N = std::count(m_previous_results.begin(), m_previous_results.end(), m_cost_max);
-        }
-    }
-    ++m_previous_results_index;
 
     if (result < m_best_result) {
         m_last_best_evaluation = m_evaluations;
@@ -472,7 +376,8 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
         m_update_autosave = true;
         m_condvar_update.notify_all();
     }
-    return accepted;
+    // Return whether we improved the best
+    return (result <= m_best_result);
 }
 
 void EvaluationContext::RegisterExecutor(Executor* executor)

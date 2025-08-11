@@ -3,11 +3,8 @@
 
 #include "Optimizer.h"
 #include "EvaluationContext.h"
-#include "../execution/Executor.h"
-#include "../mutation/Mutator.h"
-#include <thread>
 #include <memory>
-#include <vector>
+#include <thread>
 
 /**
  * Dynamic Late Acceptance Search optimizer
@@ -85,39 +82,12 @@ public:
      *
      * @param threadId ID of this worker thread
      */
-    void RunWorker(int threadId);
-
     const char* Name() const override { return "DLAS"; }
 
 private:
-    /**
-     * Evaluate the initial solution
-     *
-     * @return Initial solution score
-     */
-    double EvaluateInitialSolution();
-
-private:
     EvaluationContext* m_context;
-    Executor* m_executor;
-    Mutator* m_mutator;
-
-    // Thread-local resources for each worker
-    linear_allocator m_thread_local_allocator;
-    insn_sequence_cache m_thread_local_cache;
-
-    // Worker thread management
-    std::vector<std::unique_ptr<Mutator>> m_thread_mutators;
-    bool m_running;
-    std::thread m_control_thread; // control thread running Run()
-
-    // Configuration
     int m_solutions;
-
-    // Thread synchronization
-    std::mutex m_init_mutex;
-    std::condition_variable m_init_condvar;
-    bool m_init_completed = false;
+    std::thread m_control_thread;
 };
 
 #endif // DLAS_H

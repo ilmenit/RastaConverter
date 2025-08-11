@@ -3,10 +3,7 @@
 
 #include "Optimizer.h"
 #include "EvaluationContext.h"
-#include "../execution/Executor.h"
-#include "../mutation/Mutator.h"
 #include <thread>
-#include <memory>
 
 // Classic Late Acceptance Hill Climbing optimizer
 class LAHC : public Optimizer {

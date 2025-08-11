@@ -54,8 +54,10 @@ Common options
   /details=FILE           Optional details map
   /details_val=FLOAT      Details strength (default 0.5)
 
-- Optimizer:
+-- Optimizer:
   /optimizer=dlashc|lahc  Select optimizer (default dlashc)
+    Internals: both optimizers now use a shared optimization runner and evaluator.
+    Acceptance is pluggable via policies (DLAS/LAHC). LAHC supports dual mode.
   /threads=N              Number of threads (default 1)
   /max_evals=ULL         Stop after N evaluations (default very large)
   /s=N                   DLAS/LAHC history length (default 1)
@@ -78,6 +80,7 @@ Alternates two frames A/B each refresh; the eye perceives the average, increasin
 
 Enable:
   /dual[=on|off]         Enable dual-frame mode (default off). Bare /dual enables it.
+  Notes: LAHC also runs in dual mode via the shared evaluator.
 
 Flicker control (soft hinge penalties):
   /flicker_luma_weight=WL      (default 1.0)

@@ -106,6 +106,12 @@ set(OPTIMIZATION_SOURCES
     src/optimization/EvaluationContext.h
     src/optimization/OptimizationController.cpp
     src/optimization/OptimizationController.h
+    src/optimization/AcceptancePolicy.cpp
+    src/optimization/AcceptancePolicy.h
+    src/optimization/CoreEvaluator.cpp
+    src/optimization/CoreEvaluator.h
+    src/optimization/OptimizationRunner.cpp
+    src/optimization/OptimizationRunner.h
     src/optimization/DLAS.cpp
     src/optimization/DLAS.h
     src/optimization/LAHC.cpp

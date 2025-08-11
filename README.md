@@ -7,18 +7,25 @@ The tool uses [SDL2](https://www.libsdl.org/) and [FreeImage](http://freeimage.s
 The conversion process is optimization of the [Kernel Program](http://www.atariarchives.org/dere/chapt05.php#H5_7).
 It uses most of the Atari graphics capabilities including sprites, midline color changes and sprite multiplication. 
 
-The converter supports two optimization algorithms:
+The converter supports two optimization algorithms which now share a common modular pipeline:
 
 - Diversified Late Acceptance Search (DLAS)
 - Late Acceptance Hill Climbing (LAHC)
 
-You can select the algorithm with `/optimizer=dlashc` (default) or `/optimizer=lahc`. Some users report LAHC can surpass DLAS on very long runs; DLAS is typically faster early on.
+You can select the algorithm with `/optimizer=dlashc` (default) or `/optimizer=lahc`.
+
+Architecture highlights (post-refactor):
+- A unified optimization loop orchestrated by `OptimizationRunner` manages worker threads and mutations.
+- Rendering and scoring are centralized in `CoreEvaluator` (single- and dual-frame), preserving existing caches and fast-paths.
+- Acceptance/rejection is pluggable via `AcceptancePolicy` (with `DLASPolicy`, `LAHCPolicy` and a skeleton `SimAnnealingPolicy`).
+- LAHC gains dual-frame support automatically through the shared runner/evaluator.
 
 Dual-frame mode (CRT blending)
 ---------------------------------------
 RastaConverter can optimize two frames A/B and alternate them each refresh to leverage CRT persistence. The perceived color approximates the average of A and B, effectively increasing the number of colors. Large luminance differences between A and B cause flicker; the optimization penalizes such differences via soft thresholds.
 
 Enable with `/dual=on`. Defaults aim for good quality with low flicker while keeping evaluation fast by blending and measuring in YUV.
+Both DLAS and LAHC work in dual mode when enabled.
 
 Key options:
  - Luma/chroma flicker control:
