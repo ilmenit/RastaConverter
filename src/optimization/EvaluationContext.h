@@ -19,6 +19,7 @@
 #include "../cache/InsnSequenceCache.h"
 #include "../utils/LinearAllocator.h"
 #include "../OnOffMap.h"
+#include "../config.h"
 
 // Forward declarations
 class Executor;
@@ -138,13 +139,18 @@ public:
     // Best solution found
     raster_picture m_best_pic;
     double m_best_result = DBL_MAX;
+    // Second best program for dual mode (frame B)
+    raster_picture m_best_pic_B;
 
     // Sprites memory for the best solution
     sprites_memory_t m_sprites_memory;
+    sprites_memory_t m_sprites_memory_B; // for temporal mode
 
     // Created picture data
     std::vector<color_index_line> m_created_picture;
     std::vector<line_target> m_created_picture_targets;
+    std::vector<color_index_line> m_created_picture_B; // dual mode
+    std::vector<line_target> m_created_picture_targets_B; // dual mode
 
     // Mutation statistics
     int m_mutation_stats[E_MUTATION_MAX] = { 0 };
@@ -157,6 +163,7 @@ public:
 
     // Statistics tracking
     statistics_list m_statistics;
+    unsigned m_last_statistics_seconds = 0;
 
     // DLAS specific fields
     double m_cost_max = DBL_MAX;                  // Maximum cost threshold
@@ -164,6 +171,7 @@ public:
     std::vector<double> m_previous_results;       // History list for DLAS
     size_t m_previous_results_index = 0;          // Current index in history
     double m_current_cost = DBL_MAX;              // Current accepted cost
+    int m_history_length_config = 1;              // Desired history length (/s)
 
     // Regional mutation config
     bool m_use_regional_mutation = false;         // Whether to use regional mutation
@@ -188,6 +196,71 @@ public:
 
     // Cache size in bytes
     size_t m_cache_size = 0;
+
+    // Statistics helper - call with m_mutex held
+    void CollectStatisticsTickUnsafe();
+
+    // --- Dual-frame blend mode configuration/state ---
+public:
+    bool m_dual_mode = false;
+    e_blend_space m_blend_space = E_BLEND_YUV;
+    e_distance_function m_blend_distance = E_DISTANCE_YUV;
+    double m_blend_gamma = 2.2;
+    double m_blend_gamma_inv = 1.0 / 2.2;
+    double m_flicker_luma_weight = 1.0;
+    double m_flicker_luma_thresh = 3.0;
+    int    m_flicker_exp_luma = 2;
+    double m_flicker_chroma_weight = 0.2;
+    double m_flicker_chroma_thresh = 8.0;
+    int    m_flicker_exp_chroma = 2;
+    e_dual_strategy m_dual_strategy = E_DUAL_STRAT_ALTERNATE;
+    e_dual_init m_dual_init = E_DUAL_INIT_DUP;
+    double m_dual_mutate_ratio = 0.5;
+    // Cross-frame structural ops probabilities
+    double m_dual_cross_share_prob = 0.05;  // copy/swap line A<->B probability
+    double m_dual_both_frames_prob = 0.0;   // reserved for future small pair tweak
+
+    // Flicker weight ramp
+    unsigned long long m_blink_ramp_evals = 0; // 0 disables ramp
+    double m_flicker_luma_weight_initial = 1.0; // starting WL if ramp enabled
+
+    // Palette YUV and target per-pixel YUV (for YUV blend/distance fast path)
+    float m_palette_y[128] = {0};
+    float m_palette_u[128] = {0};
+    float m_palette_v[128] = {0};
+    // Palette linear RGB for rgb-linear blending
+    float m_palette_lin_r[128] = {0};
+    float m_palette_lin_g[128] = {0};
+    float m_palette_lin_b[128] = {0};
+    std::vector<float> m_target_y; // size = width*height
+    std::vector<float> m_target_u;
+    std::vector<float> m_target_v;
+    // Flicker heatmap (per-pixel luma delta) for diagnostics
+    std::vector<unsigned char> m_flicker_heatmap; // size = width*height, 0..255
+    // Target Lab for CIE distances (optional)
+    std::vector<float> m_target_L; // Lab L
+    std::vector<float> m_target_a;
+    std::vector<float> m_target_b;
+
+    // Prepare YUV precomputations (call after m_picture and dimensions are set)
+    void PrecomputeDualTransforms();
+
+    // Report evaluation for dual pair (A,B)
+    bool ReportEvaluationResultDual(double result,
+                                        raster_picture* picA,
+                                        raster_picture* picB,
+                                        const std::vector<const line_cache_result*>& line_results_A,
+                                        const std::vector<const line_cache_result*>& line_results_B,
+                                        const sprites_memory_t& sprites_memory_A,
+                                        const sprites_memory_t& sprites_memory_B,
+                                        Mutator* mutator);
+
+    // Dual-specific statistics (displayed in GUI)
+    std::atomic<unsigned long long> m_stat_dualComplementValue{0};
+    std::atomic<unsigned long long> m_stat_dualSeedAdd{0};
+    std::atomic<unsigned long long> m_stat_crossCopyLine{0};
+    std::atomic<unsigned long long> m_stat_crossSwapLine{0};
+    std::atomic<unsigned long long> m_stat_bothFramesTweak{0}; // reserved for future
 
 private:
     // Thread management

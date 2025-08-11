@@ -4,5 +4,8 @@ enum GUI_command {
 	STOP,
 	CONTINUE,
 	SAVE,
-	REDRAW
+    REDRAW,
+    SHOW_BLENDED,
+    SHOW_A,
+    SHOW_B
 };

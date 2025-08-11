@@ -110,6 +110,18 @@ public:
                          FIBITMAP* outputBitmap,
                          const std::string& cmdLine,
                          const std::string& inputFile);
+
+    // Save dual pair (A/B) assets when dual mode is enabled
+    void SaveBestSolutionDual(const EvaluationContext& evalContext,
+                                  FIBITMAP* blendedBitmap,
+                                  const std::string& cmdLine,
+                                  const std::string& inputFile);
+
+    // Save an 8-bit grayscale heatmap (width x height) to PNG
+    bool SaveGrayMapPNG(const std::string& filename,
+                        const unsigned char* data,
+                        int width,
+                        int height);
     
     /**
      * Convert a raw score to a normalized score

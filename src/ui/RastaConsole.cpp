@@ -14,8 +14,7 @@ void RastaConsole::DisplayText(int x, int y, const std::string& text)
 
 void RastaConsole::Error(std::string e)
 {
-	std::cerr << e << std::endl;
-	exit(1);
+    std::cerr << e << std::endl;
 }
 
 void RastaConsole::DisplayBitmapLine(int x, int y, int line_y, FIBITMAP* fiBitmap)

@@ -48,34 +48,49 @@ namespace Epoch
 					mn_command_line+=" ";
 				mn_command_line+=token;
 
-				if(token[0] != '/'){	// non interpreted
+				if(token.empty())
+					continue;
+
+				// Accept options starting with '/', '-' or '--'
+				bool starts_with_slash = (token[0] == '/');
+				bool starts_with_dash = (token[0] == '-');
+
+				if(!(starts_with_slash || starts_with_dash)){	// non interpreted
 					mn_NonInterpreted++;
 					mVec_NonInterpreted.push_back(token);
 					continue;
 				}
 				else if(token.find_first_of('=') == string::npos){ // not a pair, and not interpreted so a switch
+					size_t cut = 1;
+					if (starts_with_dash && token.size() > 1 && token[1] == '-') {
+						cut = 2; // handle "--"
+					}
 
 					mn_Switches++;
-					mVec_Switches.push_back(token.substr(1)); // remove the '/'
+					mVec_Switches.push_back(token.substr(cut));
 					continue;
 				}
-				else // '/' and '=' was found
+				else // option with '=' was found
 				{
 					string		name;
 					string		value;
 					int			breakAt;
 
-					token = token.substr(1);
+					size_t cut = 1;
+					if (starts_with_dash && token.size() > 1 && token[1] == '-') {
+						cut = 2; // handle "--"
+					}
+					token = token.substr(cut);
 
 					breakAt = token.find_first_of('=');
 
 					name  = token.substr(0,breakAt);
 					value = token.substr(breakAt+1);
 
-                    // Remove surrounding quotes if present
-                    if (!value.empty() && value.front() == '"' && value.back() == '"' && value.size() >= 2) {
-                        value = value.substr(1, value.size() - 2);
-                    }
+					// Remove surrounding quotes if present
+					if (!value.empty() && value.front() == '"' && value.back() == '"' && value.size() >= 2) {
+						value = value.substr(1, value.size() - 2);
+					}
 
 					mn_PairCount++;
 					mMap_nvPairs[name] = value;

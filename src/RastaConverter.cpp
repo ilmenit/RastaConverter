@@ -46,6 +46,10 @@ void RastaConverter::Message(std::string message)
 
 void RastaConverter::Error(std::string error)
 {
+    if (cfg.quiet) {
+        std::cerr << error << std::endl;
+        std::exit(1);
+    }
     gui.Error(error);
     exit(1);
 }
@@ -135,8 +139,62 @@ bool RastaConverter::ProcessInit()
         cfg.cache_size,
         (cfg.continue_processing && cfg.have_resume_seed) ? cfg.resume_seed : cfg.initial_seed,
         &m_onOffMap,
-        useRegionalMutation
+        useRegionalMutation,
+        cfg.optimizer_type
     );
+
+    // Propagate dual-frame configuration into evaluation context and precompute YUV if needed
+    {
+        auto& ctx = m_optimizer.GetEvaluationContext();
+        std::unique_lock<std::mutex> lock{ ctx.m_mutex };
+        ctx.m_dual_mode = cfg.dual_mode;
+        // Only YUV blend space/distance are supported in current build
+        ctx.m_blend_space = E_BLEND_YUV;
+        ctx.m_blend_distance = E_DISTANCE_YUV;
+        ctx.m_blend_gamma = cfg.blend_gamma;
+        ctx.m_flicker_luma_weight = cfg.flicker_luma_weight;
+        ctx.m_flicker_luma_thresh = cfg.flicker_luma_thresh;
+        ctx.m_flicker_exp_luma = cfg.flicker_exp_luma;
+        ctx.m_flicker_chroma_weight = cfg.flicker_chroma_weight;
+        ctx.m_flicker_chroma_thresh = cfg.flicker_chroma_thresh;
+        ctx.m_flicker_exp_chroma = cfg.flicker_exp_chroma;
+        // Only 'alternate' strategy and 'dup' init supported
+        ctx.m_dual_strategy = E_DUAL_STRAT_ALTERNATE;
+        ctx.m_dual_init = E_DUAL_INIT_DUP;
+        ctx.m_dual_mutate_ratio = cfg.dual_mutate_ratio;
+        ctx.m_dual_cross_share_prob = cfg.dual_cross_share_prob;
+        ctx.m_dual_both_frames_prob = cfg.dual_both_frames_prob;
+        // Sensible defaults for dual mode if user did not provide a ramp
+        ctx.m_blink_ramp_evals = (cfg.blink_ramp_evals > 0) ? cfg.blink_ramp_evals : 250000ULL;
+        ctx.m_flicker_luma_weight_initial = cfg.flicker_luma_weight_initial > 0.0 ? cfg.flicker_luma_weight_initial : 0.6;
+        // Prepare YUV data if using dual mode
+        // If dual init dup, initialize B from A at start; else leave for optimizer to mutate
+        if (cfg.dual_mode && cfg.dual_init == E_DUAL_INIT_DUP) {
+            ctx.m_best_pic_B = ctx.m_best_pic; // will be cached during evaluation
+        }
+        // Precompute dual transforms using source image, not destination
+        const std::vector<screen_line>* dualTarget = &m_imageProcessor.GetSourcePicture();
+        // Temporarily reroute the picture pointer for dual target precompute
+        if (cfg.dual_mode) {
+            const screen_line* prevPtr = ctx.m_picture;
+            ctx.m_picture = dualTarget->data();
+            lock.unlock();
+            m_optimizer.GetEvaluationContext().PrecomputeDualTransforms();
+            lock.lock();
+            // Restore pointer to destination picture for single-frame data paths
+            ctx.m_picture = prevPtr ? prevPtr : m_imageProcessor.GetPicture().data();
+            // If history is still the minimal default (1), increase it for dual mode to help acceptance
+            if (m_optimizer.GetEvaluationContext().m_history_length_config <= 1) {
+                m_optimizer.GetEvaluationContext().m_history_length_config = 16;
+            }
+        }
+    }
+    
+    // If resuming, load optimizer state now that optimizer is constructed
+    if (cfg.continue_processing) {
+        const std::string base = cfg.output_file.empty() ? std::string("output.png") : cfg.output_file;
+        m_optimizer.LoadState(base + ".lahc");
+    }
     
     // Allocate output bitmap
     output_bitmap = FreeImage_Allocate(
@@ -173,7 +231,19 @@ void RastaConverter::Init()
             );
         
         // Set initial program for optimization
-        m_optimizer.SetInitialProgram(m, m_imageProcessor.GetPossibleColorsForEachLine());
+        if (cfg.dual_mode) {
+            // In dual mode, allow full 128-color palette on every line to avoid constraint by single-frame destination
+            std::vector<std::vector<unsigned char>> fullPalettePerLine;
+            fullPalettePerLine.resize(m_imageProcessor.GetHeight());
+            for (int y = 0; y < m_imageProcessor.GetHeight(); ++y) {
+                auto& vec = fullPalettePerLine[y];
+                vec.resize(128);
+                for (int i = 0; i < 128; ++i) vec[i] = (unsigned char)(i * 2);
+            }
+            m_optimizer.SetInitialProgram(m, fullPalettePerLine);
+        } else {
+            m_optimizer.SetInitialProgram(m, m_imageProcessor.GetPossibleColorsForEachLine());
+        }
     }
 
     init_finished = true;
@@ -196,6 +266,7 @@ void RastaConverter::MainLoop()
     bool running = true;
     while (running && !m_optimizer.IsFinished())
     {
+        #ifdef UI_DEBUG
         static auto last_heartbeat = std::chrono::steady_clock::now();
         auto now_hb = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now_hb - last_heartbeat).count() >= 5) {
@@ -206,6 +277,7 @@ void RastaConverter::MainLoop()
                       << ", evals=" << evalContext.m_evaluations << std::endl;
             last_heartbeat = now_hb;
         }
+        #endif
         // Update statistics
         m_optimizer.UpdateRate();
         
@@ -246,6 +318,12 @@ void RastaConverter::MainLoop()
             ShowLastCreatedPicture();
             ShowMutationStats();
             break;
+        case GUI_command::SHOW_BLENDED:
+            dual_view_mode = 0; pending_update = true; break;
+        case GUI_command::SHOW_A:
+            dual_view_mode = 1; pending_update = true; break;
+        case GUI_command::SHOW_B:
+            dual_view_mode = 2; pending_update = true; break;
         default:
             break;
         }
@@ -283,9 +361,11 @@ void RastaConverter::MainLoop()
             evalContext.m_condvar_update.wait_until(lock, deadline);
 
             // Heartbeat: detect stagnation where no threads are active but not finished
+            #ifdef THREAD_DEBUG
             if (!evalContext.m_finished.load() && evalContext.m_threads_active.load() <= 0) {
                 std::cout << "[RC] No active workers but not finished. Requesting DLAS re-spawn." << std::endl;
             }
+            #endif
         }
 
         // Perform UI updates and autosave outside of the lock to avoid deadlocks
@@ -310,10 +390,13 @@ void RastaConverter::MainLoop()
     {
         auto& evalContext = m_optimizer.GetEvaluationContext();
         std::unique_lock<std::mutex> lock{ evalContext.m_mutex };
+        #ifdef THREAD_DEBUG
         std::cout << "[RC] MainLoop exiting: running=false, ctx.finished=" << (evalContext.m_finished.load() ? 1 : 0)
                   << ", threads_active=" << evalContext.m_threads_active.load()
                   << ", evals=" << evalContext.m_evaluations << std::endl;
+        #endif
         if (evalContext.m_finished.load()) {
+            #ifdef THREAD_DEBUG
             std::cout << "[RC] Finish reason='" << evalContext.m_finish_reason
                       << "' at " << evalContext.m_finish_file << ":" << evalContext.m_finish_line
                       << ", evals_at=" << evalContext.m_finish_evals_at
@@ -324,6 +407,7 @@ void RastaConverter::MainLoop()
                       << ", current_cost=" << evalContext.m_current_cost
                       << ", previous_idx=" << evalContext.m_previous_results_index
                       << std::endl;
+            #endif
         }
     }
 
@@ -428,7 +512,17 @@ void RastaConverter::ShowInputBitmap()
     unsigned int height = FreeImage_GetHeight(m_imageProcessor.GetInputBitmap());
     gui.DisplayBitmap(0, 0, m_imageProcessor.GetInputBitmap());
     gui.DisplayText(0, height + 10, "Source");
-    gui.DisplayText(width * 2, height + 10, "Current output");
+    // Label center panel depending on mode
+    const auto& ctx = m_optimizer.GetEvaluationContext();
+    if (ctx.m_dual_mode) {
+        const char* modeLabel = dual_view_mode == 0 ? "Blended output (A/B)"
+                              : dual_view_mode == 1 ? "Frame A output"
+                              : "Frame B output";
+        gui.DisplayText(width * 2, height + 10, modeLabel);
+        gui.DisplayText(width * 2, height + 30, "Toggle view: [A]=A  [Z]=B  [B]=Blended");
+    } else {
+        gui.DisplayText(width * 2, height + 10, "Current output");
+    }
     gui.DisplayText(width * 4, height + 10, "Destination");
 }
 
@@ -454,6 +548,8 @@ void RastaConverter::ShowLastCreatedPicture()
 {
     // Snapshot evaluation data under lock to avoid data races
     std::vector<std::vector<unsigned char>> created_picture_copy;
+    std::vector<std::vector<unsigned char>> created_picture_copy_B;
+    bool temporal = false;
     unsigned snap_width = 0;
     unsigned snap_height = 0;
     {
@@ -462,6 +558,10 @@ void RastaConverter::ShowLastCreatedPicture()
         snap_width = ctx.m_width;
         snap_height = ctx.m_height;
         created_picture_copy = ctx.m_created_picture; // copy
+        if (ctx.m_dual_mode) {
+            temporal = true;
+            created_picture_copy_B = ctx.m_created_picture_B;
+        }
     }
     int x, y;
 
@@ -477,20 +577,39 @@ void RastaConverter::ShowLastCreatedPicture()
         }
     }
     else {
-        // Draw the created picture
+        // Draw the created picture (blend A/B in dual mode)
         for (y = 0; y < (int)snap_height; ++y) {
-            // Skip any rows that aren't sized correctly
-            if (created_picture_copy[y].size() < snap_width) {
-                continue;
-            }
-
+            if (created_picture_copy[y].size() < snap_width) continue;
             for (x = 0; x < (int)snap_width; ++x) {
-                rgb atari_color = atari_palette[created_picture_copy[y][x]];
-                RGBQUAD color;
-                color.rgbRed = atari_color.r;
-                color.rgbGreen = atari_color.g;
-                color.rgbBlue = atari_color.b;
-                FreeImage_SetPixelColor(output_bitmap, x, y, &color);
+                if (temporal && y < (int)created_picture_copy_B.size() && created_picture_copy_B[y].size() >= snap_width) {
+                    if (dual_view_mode == 1) {
+                        rgb ca = atari_palette[created_picture_copy[y][x]];
+                        RGBQUAD c; c.rgbRed = ca.r; c.rgbGreen = ca.g; c.rgbBlue = ca.b;
+                        FreeImage_SetPixelColor(output_bitmap, x, y, &c);
+                    } else if (dual_view_mode == 2) {
+                        rgb cb = atari_palette[created_picture_copy_B[y][x]];
+                        RGBQUAD c; c.rgbRed = cb.r; c.rgbGreen = cb.g; c.rgbBlue = cb.b;
+                        FreeImage_SetPixelColor(output_bitmap, x, y, &c);
+                    } else {
+                        unsigned char a = created_picture_copy[y][x];
+                        unsigned char b = created_picture_copy_B[y][x];
+                        rgb ca = atari_palette[a];
+                        rgb cb = atari_palette[b];
+                        // Simple average in RGB for preview; runtime objective uses YUV fast path
+                        RGBQUAD c;
+                        c.rgbRed = (unsigned char)(((int)ca.r + (int)cb.r) >> 1);
+                        c.rgbGreen = (unsigned char)(((int)ca.g + (int)cb.g) >> 1);
+                        c.rgbBlue = (unsigned char)(((int)ca.b + (int)cb.b) >> 1);
+                        FreeImage_SetPixelColor(output_bitmap, x, y, &c);
+                    }
+                } else {
+                    rgb atari_color = atari_palette[created_picture_copy[y][x]];
+                    RGBQUAD color;
+                    color.rgbRed = atari_color.r;
+                    color.rgbGreen = atari_color.g;
+                    color.rgbBlue = atari_color.b;
+                    FreeImage_SetPixelColor(output_bitmap, x, y, &color);
+                }
             }
         }
     }
@@ -523,10 +642,35 @@ void RastaConverter::ShowMutationStats()
                                         std::to_string(stats[i]));
     }
 
+    // Dual-mode additional stats
+    const auto& ctx = m_optimizer.GetEvaluationContext();
+    if (ctx.m_dual_mode) {
+        // Move dual-mode stats under the 'Destination' column to avoid cutting off
+        unsigned destX = FreeImage_GetWidth(m_imageProcessor.GetDestinationBitmap()) * 2;
+        unsigned destY = FreeImage_GetHeight(m_imageProcessor.GetDestinationBitmap()) + 50; // below 'Destination' label
+        int ybase = (int)destY;
+        gui.DisplayText(destX, ybase + 0,  std::string("DualComplementValue  ") + std::to_string((unsigned long long)ctx.m_stat_dualComplementValue.load()));
+        gui.DisplayText(destX, ybase + 20, std::string("DualSeedAdd         ") + std::to_string((unsigned long long)ctx.m_stat_dualSeedAdd.load()));
+        gui.DisplayText(destX, ybase + 40, std::string("CrossCopyLine       ") + std::to_string((unsigned long long)ctx.m_stat_crossCopyLine.load()));
+        gui.DisplayText(destX, ybase + 60, std::string("CrossSwapLine       ") + std::to_string((unsigned long long)ctx.m_stat_crossSwapLine.load()));
+    }
+
     gui.DisplayText(320, 250, std::string("Evaluations: ") + std::to_string(evaluations));
     gui.DisplayText(320, 270, std::string("LastBest: ") + std::to_string(last_best_eval) + std::string("                "));
     gui.DisplayText(320, 290, std::string("Rate: ") + std::to_string((unsigned long long)m_optimizer.GetRate()) + std::string("                "));
-    gui.DisplayText(320, 310, std::string("Norm. Dist: ") + std::to_string(m_outputManager.NormalizeScore(best_result)) + std::string("                "));
+    {
+        double norm = m_outputManager.NormalizeScore(best_result);
+        std::string normText;
+        if (std::isfinite(norm) && norm < 1e12) {
+            char buf[64];
+            // Print with 6 decimals max for readability
+            std::snprintf(buf, sizeof(buf), "%.6f", norm);
+            normText = buf;
+        } else {
+            normText = "-"; // hide unreasonable values (e.g., uninitialized)
+        }
+        gui.DisplayText(320, 310, std::string("Norm. Dist: ") + normText + std::string("                "));
+    }
 }
 
 void RastaConverter::SaveBestSolution()
@@ -534,16 +678,25 @@ void RastaConverter::SaveBestSolution()
     if (!init_finished)
         return;
 
-    // Show the final picture
+    // Show the final picture (output_bitmap contains blended when dual-mode)
     ShowLastCreatedPicture();
-    
-    // Save all files
-    m_outputManager.SaveBestSolution(
-        m_optimizer.GetEvaluationContext(),
-        output_bitmap,
-        cfg.command_line,
-        cfg.input_file
-    );
+
+    const auto& ctx = m_optimizer.GetEvaluationContext();
+    if (ctx.m_dual_mode) {
+        m_outputManager.SaveBestSolutionDual(
+            ctx,
+            output_bitmap,
+            cfg.command_line,
+            cfg.input_file
+        );
+    } else {
+        m_outputManager.SaveBestSolution(
+            ctx,
+            output_bitmap,
+            cfg.command_line,
+            cfg.input_file
+        );
+    }
 }
 
 bool RastaConverter::Resume()
@@ -556,7 +709,7 @@ bool RastaConverter::Resume()
     // Load raster program
     LoadRasterProgram(base + ".rp");
     
-    // Load LAHC state
+    // Load LAHC/DLAS state (state file is shared format for both)
     m_optimizer.LoadState(base + ".lahc");
     
     // Process command line for config

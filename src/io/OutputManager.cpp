@@ -1,4 +1,5 @@
 #include "OutputManager.h"
+#include "../TargetPicture.h"
 #include <iostream>
 #include <fstream>
 #include <cstring>
@@ -71,6 +72,29 @@ bool OutputManager::SavePicture(const std::string& filename, FIBITMAP* to_save)
     }
 }
 
+bool OutputManager::SaveGrayMapPNG(const std::string& filename,
+                                   const unsigned char* data,
+                                   int width,
+                                   int height)
+{
+    FIBITMAP* gray = FreeImage_Allocate(width, height, 8);
+    if (!gray) return false;
+    // Build grayscale palette
+    RGBQUAD* pal = FreeImage_GetPalette(gray);
+    if (pal) {
+        for (int i = 0; i < 256; ++i) { pal[i].rgbRed = pal[i].rgbGreen = pal[i].rgbBlue = (BYTE)i; }
+    }
+    // Write rows top-down then flip to match other previews
+    for (int y = 0; y < height; ++y) {
+        BYTE* scan = FreeImage_GetScanLine(gray, y);
+        memcpy(scan, &data[y * width], width);
+    }
+    FreeImage_FlipVertical(gray);
+    bool ok = FreeImage_Save(FIF_PNG, gray, filename.c_str()) != 0;
+    FreeImage_Unload(gray);
+    return ok;
+}
+
 void OutputManager::SaveRasterProgram(const std::string& filename, 
                                     const raster_picture* pic,
                                     const std::string& cmdLine,
@@ -130,6 +154,17 @@ void OutputManager::SaveRasterProgram(const std::string& filename,
     fprintf(fp, "; CmdLine: %s\n", cmdLine.c_str());
     fprintf(fp, "; Evaluations: %llu\n", evaluations);
     fprintf(fp, "; Score: %g\n", NormalizeScore(score));
+    // Persist optimizer type if detectable from command line
+    {
+        const char* opt_key = "/optimizer=";
+        auto pos = cmdLine.find(opt_key);
+        if (pos != std::string::npos) {
+            pos += strlen(opt_key);
+            size_t end = cmdLine.find(' ', pos);
+            std::string opt_str = cmdLine.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+            fprintf(fp, "; Optimizer: %s\n", opt_str.c_str());
+        }
+    }
     // Persist seed if present in command line (best-effort parse)
     {
         const char* seed_key = "/seed=";
@@ -374,25 +409,16 @@ void OutputManager::SaveBestSolution(const EvaluationContext& evalContext,
                                     const std::string& cmdLine,
                                     const std::string& inputFile)
 {
-    // Create optimized version of the raster program
+    // Single-frame path stays as-is for backward compatibility
     raster_picture pic = evalContext.m_best_pic;
-    
     // Save best solution in all formats
     SaveRasterProgram(m_outputFile + ".rp", &pic, cmdLine, inputFile, 
                      evalContext.m_evaluations, evalContext.m_best_result);
-    
-    // Output PMG data
     SavePMG(m_outputFile + ".pmg", evalContext.m_sprites_memory);
-    
-    // Output screen data
     SaveScreenData(m_outputFile + ".mic", 
                   evalContext.m_created_picture, 
                   evalContext.m_created_picture_targets);
-    
-    // Save the output image
     SavePicture(m_outputFile, outputBitmap);
-    
-    // Save statistics and optimization state
     SaveStatistics(m_outputFile + ".csv", evalContext.m_statistics);
     SaveLAHC(m_outputFile + ".lahc", 
             evalContext.m_previous_results,
@@ -400,6 +426,67 @@ void OutputManager::SaveBestSolution(const EvaluationContext& evalContext,
             evalContext.m_cost_max,
             evalContext.m_N,
             evalContext.m_current_cost);
+}
+
+void OutputManager::SaveBestSolutionDual(const EvaluationContext& evalContext,
+                                             FIBITMAP* blendedBitmap,
+                                             const std::string& cmdLine,
+                                             const std::string& inputFile)
+{
+    // Save A
+    raster_picture picA = evalContext.m_best_pic;
+    SaveRasterProgram(m_outputFile + "-A.rp", &picA, cmdLine, inputFile,
+                      evalContext.m_evaluations, evalContext.m_best_result);
+    SavePMG(m_outputFile + "-A.pmg", evalContext.m_sprites_memory);
+    SaveScreenData(m_outputFile + "-A.mic", evalContext.m_created_picture, evalContext.m_created_picture_targets);
+    // Save B
+    raster_picture picB = evalContext.m_best_pic_B.raster_lines.empty() ? evalContext.m_best_pic : evalContext.m_best_pic_B;
+    SaveRasterProgram(m_outputFile + "-B.rp", &picB, cmdLine, inputFile,
+                      evalContext.m_evaluations, evalContext.m_best_result);
+    SavePMG(m_outputFile + "-B.pmg", evalContext.m_sprites_memory_B);
+    SaveScreenData(m_outputFile + "-B.mic", evalContext.m_created_picture_B, evalContext.m_created_picture_targets_B);
+    // Save A/B PNG previews built from created pictures
+    FIBITMAP* aBitmap = FreeImage_Allocate(m_width, m_height, 24);
+    FIBITMAP* bBitmap = FreeImage_Allocate(m_width, m_height, 24);
+    if (aBitmap && bBitmap) {
+        for (int y = 0; y < m_height; ++y) {
+            const auto& rowA = (y < (int)evalContext.m_created_picture.size()) ? evalContext.m_created_picture[y] : std::vector<unsigned char>();
+            const auto& rowB = (y < (int)evalContext.m_created_picture_B.size()) ? evalContext.m_created_picture_B[y] : std::vector<unsigned char>();
+            for (int x = 0; x < m_width; ++x) {
+                if (x < (int)rowA.size()) {
+                    const rgb ca = atari_palette[rowA[x]];
+                    RGBQUAD c; c.rgbRed = ca.r; c.rgbGreen = ca.g; c.rgbBlue = ca.b; c.rgbReserved = 0;
+                    FreeImage_SetPixelColor(aBitmap, x, y, &c);
+                }
+                if (x < (int)rowB.size()) {
+                    const rgb cb = atari_palette[rowB[x]];
+                    RGBQUAD c; c.rgbRed = cb.r; c.rgbGreen = cb.g; c.rgbBlue = cb.b; c.rgbReserved = 0;
+                    FreeImage_SetPixelColor(bBitmap, x, y, &c);
+                }
+            }
+        }
+        SavePicture(m_outputFile + "-A.png", aBitmap);
+        SavePicture(m_outputFile + "-B.png", bBitmap);
+    }
+    if (aBitmap) FreeImage_Unload(aBitmap);
+    if (bBitmap) FreeImage_Unload(bBitmap);
+
+    // Save blended preview (uses provided bitmap which UI renders as blended)
+    SavePicture(m_outputFile + "-blended.png", blendedBitmap);
+    // Save flicker heatmap if available
+    if (!evalContext.m_flicker_heatmap.empty()) {
+        SaveGrayMapPNG(m_outputFile + "-flicker.png",
+                       evalContext.m_flicker_heatmap.data(),
+                       m_width, m_height);
+    }
+    // Save stats/state
+    SaveStatistics(m_outputFile + "-dual.csv", evalContext.m_statistics);
+    SaveLAHC(m_outputFile + "-dual.lahc",
+             evalContext.m_previous_results,
+             evalContext.m_previous_results_index,
+             evalContext.m_cost_max,
+             evalContext.m_N,
+             evalContext.m_current_cost);
 }
 
 double OutputManager::NormalizeScore(double rawScore) const

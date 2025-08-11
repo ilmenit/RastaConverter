@@ -7,6 +7,11 @@ set BUILD_TYPE=Release
 set GUI_OPTION=
 set ARCH=x64
 set GENERATOR="Visual Studio 17 2022"
+REM Default debug flags are OFF unless explicitly enabled via args
+set THREAD_DEBUG_FLAG=-DTHREAD_DEBUG=OFF
+set SUPPRESS_IMPROVEMENT_LOGS_FLAG=-DSUPPRESS_IMPROVEMENT_LOGS=OFF
+set UI_DEBUG_FLAG=-DUI_DEBUG=OFF
+set IGNORE_SDL_QUIT_FLAG=-DIGNORE_SDL_QUIT=OFF
 
 REM Determine repository root (directory of this script)
 set ROOT_DIR=%~dp0

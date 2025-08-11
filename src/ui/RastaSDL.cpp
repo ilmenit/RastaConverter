@@ -22,14 +22,14 @@ bool RastaSDL::Init(std::string command_line)
 	font_path += "clacon2.ttf";
 
 	font = TTF_OpenFont(font_path.c_str(), 16);
-	if (!font) {
-		std::cerr << "SDL_Init: Cannot load font clacon2.ttf" << std::endl;
-		string error_text = string("TTF_OpenFont: ") + TTF_GetError();
-		std::cerr << error_text << std::endl;
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", error_text.c_str(), NULL);
+    if (!font) {
+        std::cerr << "SDL_Init: Cannot load font clacon2.ttf" << std::endl;
+        string error_text = string("TTF_OpenFont: ") + TTF_GetError();
+        std::cerr << error_text << std::endl;
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", error_text.c_str(), NULL);
 
-		return false;
-	}
+        return false;
+    }
 
 
 
@@ -71,7 +71,7 @@ void RastaSDL::DisplayText(int x, int y, const std::string& text)
 
 void RastaSDL::Error(std::string e)
 {
-	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", e.c_str(), NULL);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", e.c_str(), NULL);
     if (font) { TTF_CloseFont(font); font = nullptr; }
     if (renderer) { SDL_DestroyRenderer(renderer); renderer = nullptr; }
     if (window) { SDL_DestroyWindow(window); window = nullptr; }
@@ -117,7 +117,7 @@ void RastaSDL::DisplayBitmapLine(int x, int y, int line_y, FIBITMAP* fiBitmap) {
 	SDL_DestroyTexture(lineTexture);
 	SDL_FreeSurface(lineSurface);
 
-	SDL_RenderPresent(renderer);
+    SDL_RenderPresent(renderer);
 }
 
 // Function to convert FIBITMAP to SDL_Surface
@@ -168,7 +168,7 @@ GUI_command RastaSDL::NextFrame()
 {
 	SDL_Event e;
 
-	while (SDL_PollEvent(&e) > 0)
+    while (SDL_PollEvent(&e) > 0)
 	{
 #ifdef UI_DEBUG
         std::cout << "[UI] Event type=" << e.type << std::endl;
@@ -179,17 +179,37 @@ GUI_command RastaSDL::NextFrame()
 #ifdef UI_DEBUG
             std::cout << "[UI] SDL_QUIT received" << std::endl;
 #endif
-#ifdef IGNORE_SDL_QUIT
+            // Ask for confirmation before quitting via window close
+            {
+                const SDL_MessageBoxButtonData buttons[] = {
+                    { /* .flags, .buttonid, .text */        0, 0, "No" },
+                    { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Yes" },
+                };
+                const SDL_MessageBoxData messageboxdata = {
+                    SDL_MESSAGEBOX_INFORMATION, /* .flags */
+                    NULL, /* .window */
+                    "Rasta Converter", /* .title */
+                    "Are you sure you want to quit?", /* .message */
+                    SDL_arraysize(buttons), /* .numbuttons */
+                    buttons, /* .buttons */
+                    NULL /* .colorScheme */
+                };
+                int buttonid = 0;
+                if (SDL_ShowMessageBox(&messageboxdata, &buttonid) < 0) {
+                    SDL_Log("error displaying message box");
+                    return GUI_command::CONTINUE;
+                }
+                if (buttonid == 1) {
 #ifdef UI_DEBUG
-            std::cout << "[UI] Ignoring SDL_QUIT due to IGNORE_SDL_QUIT" << std::endl;
+                    std::cout << "[UI] SDL_QUIT -> STOP confirmed by message box" << std::endl;
 #endif
-            return GUI_command::CONTINUE;
-#else
+                    return GUI_command::STOP;
+                }
 #ifdef UI_DEBUG
-            std::cout << "[UI] Returning STOP due to SDL_QUIT" << std::endl;
+                std::cout << "[UI] SDL_QUIT -> CONTINUE (No selected)" << std::endl;
 #endif
-			return GUI_command::STOP;
-#endif
+                return GUI_command::CONTINUE;
+            }
 		case SDL_KEYDOWN:
 			if (e.key.repeat == 0)
 			{
@@ -201,60 +221,49 @@ GUI_command RastaSDL::NextFrame()
                     std::cout << "[UI] Key S/D -> SAVE" << std::endl;
 #endif
 					return GUI_command::SAVE;
-				case SDLK_ESCAPE:
-#ifdef UI_DEBUG
+                case SDLK_ESCAPE: {
+                    #ifdef UI_DEBUG
                     std::cout << "[UI] ESC pressed" << std::endl;
-#endif
-#ifdef IGNORE_SDL_QUIT
-                    // Ignore ESC if diagnostic flag is set
-#ifdef UI_DEBUG
-                    std::cout << "[UI] Ignoring ESC due to IGNORE_SDL_QUIT" << std::endl;
-#endif
-                    return GUI_command::CONTINUE;
-#else
-					const SDL_MessageBoxButtonData buttons[] = {
-						{ /* .flags, .buttonid, .text */        0, 0, "No" },
-						{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Yes" },
-					};
-					const SDL_MessageBoxColorScheme colorScheme = {
-						{ /* .colors (.r, .g, .b) */
-							/* [SDL_MESSAGEBOX_COLOR_BACKGROUND] */
-							{ 255,   0,   0 },
-							/* [SDL_MESSAGEBOX_COLOR_TEXT] */
-							{   0, 255,   0 },
-							/* [SDL_MESSAGEBOX_COLOR_BUTTON_BORDER] */
-							{ 255, 255,   0 },
-							/* [SDL_MESSAGEBOX_COLOR_BUTTON_BACKGROUND] */
-							{   0,   0, 255 },
-							/* [SDL_MESSAGEBOX_COLOR_BUTTON_SELECTED] */
-							{ 255,   0, 255 }
-						}
-					};
-					const SDL_MessageBoxData messageboxdata = {
-						SDL_MESSAGEBOX_INFORMATION, /* .flags */
-						NULL, /* .window */
-						"Rasta Converter", /* .title */
-						"Do you really want to quit?", /* .message */
-						SDL_arraysize(buttons), /* .numbuttons */
-						buttons, /* .buttons */
-						&colorScheme /* .colorScheme */
-					};
-					int buttonid;
-					if (SDL_ShowMessageBox(&messageboxdata, &buttonid) < 0) {
-						SDL_Log("error displaying message box");
-						return GUI_command::STOP;
-					}
-					if (buttonid == 1) {
-#ifdef UI_DEBUG
+                    #endif
+                    // Wrap message box locals in a block to avoid cross-case init issues
+                    const SDL_MessageBoxButtonData buttons[] = {
+                        { 0, 0, "No" },
+                        { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Yes" },
+                    };
+                    const SDL_MessageBoxColorScheme colorScheme = {
+                        { { 255, 0, 0 }, { 0, 255, 0 }, { 255, 255, 0 }, { 0, 0, 255 }, { 255, 0, 255 } }
+                    };
+                    const SDL_MessageBoxData messageboxdata = {
+                        SDL_MESSAGEBOX_INFORMATION,
+                        NULL,
+                        "Rasta Converter",
+                        "Are you sure you want to quit?",
+                        SDL_arraysize(buttons),
+                        buttons,
+                        &colorScheme
+                    };
+                    int buttonid = 0;
+                    if (SDL_ShowMessageBox(&messageboxdata, &buttonid) < 0) {
+                        SDL_Log("error displaying message box");
+                        return GUI_command::STOP;
+                    }
+                    if (buttonid == 1) {
+                        #ifdef UI_DEBUG
                         std::cout << "[UI] ESC -> STOP confirmed by message box" << std::endl;
-#endif
-						return GUI_command::STOP;
-					}
-#ifdef UI_DEBUG
+                        #endif
+                        return GUI_command::STOP;
+                    }
+                    #ifdef UI_DEBUG
                     std::cout << "[UI] ESC -> CONTINUE (No selected)" << std::endl;
-#endif
-					return GUI_command::CONTINUE;
-#endif
+                    #endif
+                    return GUI_command::CONTINUE;
+                }
+                case SDLK_b:
+                    return GUI_command::SHOW_BLENDED;
+                case SDLK_a:
+                    return GUI_command::SHOW_A;
+                case SDLK_z:
+                    return GUI_command::SHOW_B;
 				}
 			}
 			break;
@@ -284,9 +293,9 @@ GUI_command RastaSDL::NextFrame()
 		}
 	}
 	SDL_RenderPresent(renderer);
-#ifdef UI_DEBUG
+    #ifdef UI_DEBUG
     std::cout << "[UI] Returning CONTINUE (no events)" << std::endl;
-#endif
+    #endif
 	return GUI_command::CONTINUE;
 }
 

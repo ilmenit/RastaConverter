@@ -150,6 +150,11 @@ void ImageProcessor::InitLocalStructure()
     {
         m_picture[y].Resize(width);
     }
+    // Also prepare a source-picture buffer to preserve pre-quantized input
+    m_source_picture.resize(height);
+    for (y = 0; y < height; ++y) {
+        m_source_picture[y].Resize(width);
+    }
 
     // Copy data from input_bitmap to our structure
     RGBQUAD fpixel;
@@ -161,6 +166,7 @@ void ImageProcessor::InitLocalStructure()
             FreeImage_GetPixelColor(m_input_bitmap, x, y, &fpixel);
             atari_color = PIXEL2RGB(fpixel);
             m_picture[y][x] = atari_color;
+            m_source_picture[y][x] = atari_color;
             fpixel.rgbRed = atari_color.r;
             fpixel.rgbGreen = atari_color.g;
             fpixel.rgbBlue = atari_color.b;

@@ -69,6 +69,14 @@ public:
      * @return Array of mutation counts
      */
     virtual const int* GetCurrentMutations() const = 0;
+
+    // Dual-mode hint: which frame is being mutated (false=A, true=B). Default no-op.
+    // Implementers may ignore if not applicable.
+    virtual void SetDualFrameRole(bool /*isFrameB*/) {}
+
+    // Dual-mode instrumentation hooks: default to false/no-op
+    virtual bool GetAndResetUsedComplementaryPick() { return false; }
+    virtual bool GetAndResetUsedSeedAdd() { return false; }
 };
 
 #endif // MUTATOR_H

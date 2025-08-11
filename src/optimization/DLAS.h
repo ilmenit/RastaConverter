@@ -87,6 +87,8 @@ public:
      */
     void RunWorker(int threadId);
 
+    const char* Name() const override { return "DLAS"; }
+
 private:
     /**
      * Evaluate the initial solution

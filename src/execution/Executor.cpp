@@ -6,6 +6,7 @@
 #include <thread>
 #include <functional>
 #include <iostream>
+#include <cmath>
 
 Executor::Executor()
     : m_gstate(nullptr)
@@ -121,6 +122,7 @@ void Executor::Run() {
     while (!m_gstate->m_finished.load()) {
         // Periodic diagnostics on very low progress to detect stalls
         static thread_local unsigned int slow_counter = 0;
+        #ifdef THREAD_DEBUG
         if ((m_gstate->m_evaluations % 20000 == 0) && (m_gstate->m_evaluations > 0)) {
             if (++slow_counter % 3 == 0) {
                 std::cout << "[DBG] Executor " << m_thread_id
@@ -132,6 +134,7 @@ void Executor::Run() {
                           << std::endl;
             }
         }
+        #endif
         // Check for cache size with cooldown to avoid thrash
         static thread_local unsigned long long last_clear_evals = 0;
         static thread_local unsigned long long last_clear_time_ms = 0;
@@ -203,9 +206,11 @@ void Executor::Run() {
 
         // Check for termination condition first (respect max_evals only when > 0)
         if (((m_gstate->m_max_evals > 0) && (m_gstate->m_evaluations >= m_gstate->m_max_evals)) || m_gstate->m_finished.load()) {
+            #ifdef THREAD_DEBUG
             std::cout << "[FIN] Executor thread " << m_thread_id << ": finish condition met (finished="
                       << m_gstate->m_finished.load() << ", max_evals=" << m_gstate->m_max_evals
                       << ", evals=" << m_gstate->m_evaluations << ")" << std::endl;
+            #endif
             CTX_MARK_FINISHED((*m_gstate), "executor_finish_guard");
             break;
         }
@@ -240,8 +245,17 @@ void Executor::Run() {
     }
 }
 
-distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_cache_result** results_array)
+distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_cache_result** results_array,
+                                                dual_render_role_t dual_role,
+                                                const std::vector<const line_cache_result*>* other_results)
 {
+    // Ensure any mutated lines have valid cache keys using this executor's caches.
+    // The mutator deliberately leaves changed lines with cache_key == NULL so execution
+    // can recache them into the per-executor allocator/cache to avoid cross-thread races.
+    if (pic) {
+        pic->recache_insns_if_needed(*m_insn_seq_cache_ptr, *m_linear_allocator_ptr);
+    }
+
     int x, y; // currently processed pixel
 
     int cycle;
@@ -265,6 +279,41 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
     bool restart_line = false;
     bool shift_start_array_dirty = true;
     distance_accum_t total_error = 0;
+
+    // If dual-aware role is requested, prepare a flat other-frame pixel buffer and parameters
+    m_dual_render_role = dual_role;
+    if (m_dual_render_role != DUAL_NONE && other_results != nullptr && m_gstate && m_gstate->m_dual_mode) {
+        m_dual_other_pixels.assign((size_t)m_width * (size_t)m_height, 0);
+        m_dual_transient_results.clear();
+        m_dual_transient_results.resize(m_height);
+        for (int yy = 0; yy < (int)m_height; ++yy) {
+            const line_cache_result* lr = ((*other_results)[yy]);
+            if (lr && lr->color_row) {
+                memcpy(&m_dual_other_pixels[(size_t)yy * m_width], lr->color_row, m_width);
+            } else {
+                // leave zeros for this row (black)
+            }
+        }
+        // Cache flicker weights/thresholds once for this call
+        // Compute effective WL with optional ramp as in DLAS
+        float wl = (float)m_gstate->m_flicker_luma_weight;
+        if (m_gstate->m_blink_ramp_evals > 0) {
+            double t = std::min<double>(1.0, (double)m_gstate->m_evaluations / (double)m_gstate->m_blink_ramp_evals);
+            wl = (float)((1.0 - t) * m_gstate->m_flicker_luma_weight_initial + t * m_gstate->m_flicker_luma_weight);
+        } else {
+            if (m_gstate->m_evaluations < 50000ULL) wl = (float)(0.7 * wl);
+        }
+        m_dual_wl = wl;
+        m_dual_wc = (float)m_gstate->m_flicker_chroma_weight;
+        m_dual_Tl = (float)m_gstate->m_flicker_luma_thresh;
+        m_dual_Tc = (float)m_gstate->m_flicker_chroma_thresh;
+        m_dual_pl = m_gstate->m_flicker_exp_luma;
+        m_dual_pc = m_gstate->m_flicker_exp_chroma;
+    } else {
+        m_dual_render_role = DUAL_NONE;
+        m_dual_other_pixels.clear();
+        m_dual_transient_results.clear();
+    }
 
     for (y = 0; y < (int)m_height; ++y)
     {
@@ -291,7 +340,10 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         unsigned char* __restrict created_picture_row = &m_created_picture[y][0];
         unsigned char* __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
 
-        const line_cache_result* cached_line_result = m_line_caches[y].find(lck, lck_hash);
+        const line_cache_result* cached_line_result = nullptr;
+        if (m_dual_render_role == DUAL_NONE) {
+            cached_line_result = m_line_caches[y].find(lck, lck_hash);
+        }
         if (cached_line_result)
         {
             // sweet! cache hit!!
@@ -366,7 +418,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
 
             if ((unsigned)x < (unsigned)m_width)        // x>=0 && x<m_width
             {
-                // put pixel closest to one of the current color registers
+                // put pixel closest per current mode (single-frame or dual-aware)
                 distance_t closest_dist;
                 e_target closest_register = FindClosestColorRegister(spriterow, picture_row_index + x, x, y, restart_line, closest_dist);
                 total_line_error += closest_dist;
@@ -383,22 +435,33 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         {
             total_error += total_line_error;
 
-            // add this to line cache
-            line_cache_result& result_state = m_line_caches[y].insert(lck, lck_hash, *m_linear_allocator_ptr);
-            // Update LRU status for this line
-            UpdateLRU(y);
+            if (m_dual_render_role == DUAL_NONE) {
+                // add this to line cache
+                line_cache_result& result_state = m_line_caches[y].insert(lck, lck_hash, *m_linear_allocator_ptr);
+                // Update LRU status for this line
+                UpdateLRU(y);
 
-            result_state.line_error = total_line_error;
-            CaptureRegisterState(result_state.new_state);
-            result_state.color_row = (unsigned char*)m_linear_allocator_ptr->allocate(m_width);
-            memcpy(result_state.color_row, created_picture_row, m_width);
+                result_state.line_error = total_line_error;
+                CaptureRegisterState(result_state.new_state);
+                result_state.color_row = (unsigned char*)m_linear_allocator_ptr->allocate(m_width);
+                memcpy(result_state.color_row, created_picture_row, m_width);
 
-            result_state.target_row = (unsigned char*)m_linear_allocator_ptr->allocate(m_width);
-            memcpy(result_state.target_row, created_picture_targets_row, m_width);
+                result_state.target_row = (unsigned char*)m_linear_allocator_ptr->allocate(m_width);
+                memcpy(result_state.target_row, created_picture_targets_row, m_width);
 
-            memcpy(result_state.sprite_data, m_sprites_memory[y], sizeof result_state.sprite_data);
+                memcpy(result_state.sprite_data, m_sprites_memory[y], sizeof result_state.sprite_data);
 
-            results_array[y] = &result_state;
+                results_array[y] = &result_state;
+            } else {
+                // In dual-aware path, do not cache globally; provide transient result referencing current rows
+                line_cache_result& temp_result = m_dual_transient_results[y];
+                temp_result.line_error = total_line_error;
+                CaptureRegisterState(temp_result.new_state);
+                temp_result.color_row = created_picture_row;        // points to m_created_picture[y]
+                temp_result.target_row = created_picture_targets_row; // points to m_created_picture_targets[y]
+                memcpy(temp_result.sprite_data, m_sprites_memory[y], sizeof temp_result.sprite_data);
+                results_array[y] = &temp_result;
+            }
         }
     }
 
@@ -454,34 +517,64 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
                 }
             }
 
-            // Initialize distance to maximum value
-            distance = DISTANCE_MAX;
-            
-            // MODIFIED: Use the vector of distance values properly with bounds checking
+            // Compute distance/cost for this sprite color
+            double distance_d = (double)DISTANCE_MAX;
             unsigned char mem_reg_value = m_mem_regs[temp];
             unsigned char color_index = mem_reg_value / 2;
-            
-            // Validate color index and array access
-            if (color_index < 128 && m_picture_all_errors[color_index] != nullptr) {
-                const std::vector<distance_t>* error_vector = m_picture_all_errors[color_index];
-                if (index < (int)error_vector->size()) {
-                    distance = (*error_vector)[index];
+
+            if (m_dual_render_role != DUAL_NONE && !m_dual_other_pixels.empty() && m_gstate && m_gstate->m_dual_mode) {
+                if (color_index < 128) {
+                    const float Yc = m_gstate->m_palette_y[color_index];
+                    const float Uc = m_gstate->m_palette_u[color_index];
+                    const float Vc = m_gstate->m_palette_v[color_index];
+                    const unsigned idx_pix = (unsigned)y * m_width + (unsigned)x;
+                    unsigned char other_idx = m_dual_other_pixels[idx_pix];
+                    if (other_idx > 127) other_idx = 0;
+                    const float Yo = m_gstate->m_palette_y[other_idx];
+                    const float Uo = m_gstate->m_palette_u[other_idx];
+                    const float Vo = m_gstate->m_palette_v[other_idx];
+                    const float Ty = m_gstate->m_target_y[idx_pix];
+                    const float Tu = m_gstate->m_target_u[idx_pix];
+                    const float Tv = m_gstate->m_target_v[idx_pix];
+                    const float Ey = 2.0f * Ty - Yo;
+                    const float Eu = 2.0f * Tu - Uo;
+                    const float Ev = 2.0f * Tv - Vo;
+                    const float dy = Yc - Ey; const float du = Uc - Eu; const float dv = Vc - Ev;
+                    double base = (double)(dy*dy + du*du + dv*dv);
+                    const float dY = fabsf(Yc - Yo);
+                    const float dC = sqrtf((Uc - Uo)*(Uc - Uo) + (Vc - Vo)*(Vc - Vo));
+                    float yl = dY - m_dual_Tl; if (yl < 0) yl = 0;
+                    float yc = dC - m_dual_Tc; if (yc < 0) yc = 0;
+                    double flick = 0.0;
+                    if (m_dual_wl > 0.0f) { double t = yl; if (m_dual_pl == 2) t = t*t; else if (m_dual_pl == 3) t = t*t*t; else t = pow(t, (double)m_dual_pl); flick += (double)m_dual_wl * t; }
+                    if (m_dual_wc > 0.0f) { double t = yc; if (m_dual_pc == 2) t = t*t; else if (m_dual_pc == 3) t = t*t*t; else t = pow(t, (double)m_dual_pc); flick += (double)m_dual_wc * t; }
+                    distance_d = base + flick;
                 }
+            } else {
+                // Single-frame: use precomputed error map
+                distance = DISTANCE_MAX;
+                if (color_index < 128 && m_picture_all_errors[color_index] != nullptr) {
+                    const std::vector<distance_t>* error_vector = m_picture_all_errors[color_index];
+                    if (index < (int)error_vector->size()) {
+                        distance = (*error_vector)[index];
+                    }
+                }
+                distance_d = (double)distance;
             }
-            
+
             if (spriterow[temp - E_COLPM0][sprite_bit] || sprite_leftover_pixel)
             {
                 // priority of sprites - next sprites are hidden below that one, so they are not processed
                 best_sprite_bit = sprite_bit;
                 result = (e_target)temp;
-                min_distance = distance;
+                min_distance = (distance_t)distance_d;
                 break;
             }
-            if (distance < min_distance)
+            if (distance_d < (double)min_distance)
             {
                 best_sprite_bit = sprite_bit;
                 result = (e_target)temp;
-                min_distance = distance;
+                min_distance = (distance_t)distance_d;
             }
         }
     }
@@ -496,24 +589,68 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
 
     for (int temp = E_COLOR0; temp <= last_color_register; ++temp)
     {
-        // Initialize distance to maximum value
-        distance = DISTANCE_MAX;
-        
-        // MODIFIED: Use the vector of distance values properly with bounds checking
+        // Compute cost depending on mode
+        double distance_d = (double)DISTANCE_MAX;
         unsigned char mem_reg_value = m_mem_regs[temp];
-        unsigned char color_index = mem_reg_value / 2;
-        
-        // Validate color index and array access
-        if (color_index < 128 && m_picture_all_errors[color_index] != nullptr) {
-            const std::vector<distance_t>* error_vector = m_picture_all_errors[color_index];
-            if (index < (int)error_vector->size()) {
-                distance = (*error_vector)[index];
+        unsigned char color_index = mem_reg_value / 2; // 0..127
+
+        if (m_dual_render_role != DUAL_NONE && !m_dual_other_pixels.empty() && m_gstate && m_gstate->m_dual_mode) {
+            // Pair-aware selection against other frame pixel and source target
+            // Get candidate color YUV
+            if (color_index < 128) {
+                const float Yc = m_gstate->m_palette_y[color_index];
+                const float Uc = m_gstate->m_palette_u[color_index];
+                const float Vc = m_gstate->m_palette_v[color_index];
+                // Get other frame pixel index at (y,x)
+                const unsigned idx_pix = (unsigned)y * m_width + (unsigned)x;
+                unsigned char other_idx = m_dual_other_pixels[idx_pix];
+                if (other_idx > 127) other_idx = 0;
+                const float Yo = m_gstate->m_palette_y[other_idx];
+                const float Uo = m_gstate->m_palette_u[other_idx];
+                const float Vo = m_gstate->m_palette_v[other_idx];
+                // Target (source image) YUV
+                const float Ty = m_gstate->m_target_y[idx_pix];
+                const float Tu = m_gstate->m_target_u[idx_pix];
+                const float Tv = m_gstate->m_target_v[idx_pix];
+                // Effective target for this frame in YUV
+                const float Ey = 2.0f * Ty - Yo;
+                const float Eu = 2.0f * Tu - Uo;
+                const float Ev = 2.0f * Tv - Vo;
+                const float dy = Yc - Ey;
+                const float du = Uc - Eu;
+                const float dv = Vc - Ev;
+                double base = (double)(dy*dy + du*du + dv*dv);
+                // Flicker penalties relative to other frame
+                const float dY = fabsf(Yc - Yo);
+                const float dC = sqrtf((Uc - Uo)*(Uc - Uo) + (Vc - Vo)*(Vc - Vo));
+                float yl = dY - m_dual_Tl; if (yl < 0) yl = 0;
+                float yc = dC - m_dual_Tc; if (yc < 0) yc = 0;
+                double flick = 0.0;
+                if (m_dual_wl > 0.0f) {
+                    double t = yl; if (m_dual_pl == 2) t = t*t; else if (m_dual_pl == 3) t = t*t*t; else t = pow(t, (double)m_dual_pl);
+                    flick += (double)m_dual_wl * t;
+                }
+                if (m_dual_wc > 0.0f) {
+                    double t = yc; if (m_dual_pc == 2) t = t*t; else if (m_dual_pc == 3) t = t*t*t; else t = pow(t, (double)m_dual_pc);
+                    flick += (double)m_dual_wc * t;
+                }
+                distance_d = base + flick;
             }
+        } else {
+            // Single-frame original selection using precomputed error map to destination
+            distance = DISTANCE_MAX;
+            if (color_index < 128 && m_picture_all_errors[color_index] != nullptr) {
+                const std::vector<distance_t>* error_vector = m_picture_all_errors[color_index];
+                if (index < (int)error_vector->size()) {
+                    distance = (*error_vector)[index];
+                }
+            }
+            distance_d = (double)distance;
         }
-        
-        if (distance < min_distance)
+
+        if (distance_d < (double)min_distance)
         {
-            min_distance = distance;
+            min_distance = (distance_t)distance_d;
             result = (e_target)temp;
         }
     }

@@ -57,10 +57,16 @@ public:
      * 
      * @param pic The raster program to execute
      * @param results Array to store line results (must be pre-allocated with height elements)
+     * @param dual_role When dual-frame mode is active, indicate which frame is being rendered.
+     *                  This enables pair-aware per-pixel selection inside the executor.
+     *                  Defaults to DUAL_NONE for single-frame behavior.
      * @return Total error for the program
      */
-    distance_accum_t ExecuteRasterProgram(raster_picture* pic, 
-                                         const line_cache_result** results);
+    enum dual_render_role_t { DUAL_NONE = 0, DUAL_A = 1, DUAL_B = 2 };
+    distance_accum_t ExecuteRasterProgram(raster_picture* pic,
+                                          const line_cache_result** results,
+                                          dual_render_role_t dual_role = DUAL_NONE,
+                                          const std::vector<const line_cache_result*>* other_results = nullptr);
     
     /**
      * Find the closest color register for a pixel
@@ -208,6 +214,10 @@ private:
     sprites_memory_t m_sprites_memory;
     std::vector<color_index_line> m_created_picture;
     std::vector<line_target> m_created_picture_targets;
+    // Dual-frame: snapshot of the other frame's created picture for pair-aware selection
+    std::vector<unsigned char> m_dual_other_pixels; // size width*height when used
+    // Dual-frame: transient per-line results pointing into m_created_picture memory
+    std::vector<line_cache_result> m_dual_transient_results;
     
     // Parameters
     unsigned m_width;
@@ -229,6 +239,13 @@ private:
     
     // Mutator instance
     Mutator* m_mutator;
+
+    // Dual-frame render role for current execution call
+    dual_render_role_t m_dual_render_role = DUAL_NONE;
+    // Dual-frame cached parameters for current execution call
+    float m_dual_wl = 0.0f, m_dual_wc = 0.0f;
+    float m_dual_Tl = 0.0f, m_dual_Tc = 0.0f;
+    int   m_dual_pl = 2, m_dual_pc = 2;
 };
 
 #endif // EXECUTOR_H

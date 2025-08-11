@@ -68,6 +68,13 @@ public:
      */
     const int* GetCurrentMutations() const override { return m_current_mutations; }
 
+    // Indicate which frame is currently being mutated in dual mode
+    void SetDualFrameRole(bool isFrameB) override { m_is_mutating_B = isFrameB; }
+
+    // Instrumentation for UI: expose whether last mutation used complementary or seed-add
+    bool GetAndResetUsedComplementaryPick() override { bool t = m_used_complementary_pick; m_used_complementary_pick = false; return t; }
+    bool GetAndResetUsedSeedAdd() override { bool t = m_used_seed_add; m_used_seed_add = false; return t; }
+
 private:
     // Helper methods
     void MutateLine(raster_line& prog, raster_picture& pic);
@@ -75,6 +82,9 @@ private:
     void BatchMutateLine(raster_line& prog, raster_picture& pic, int count);
     int SelectMutation();
     int Random(int range);
+    // Dual-mode helpers
+    bool TryComplementaryPick(int y, int x, unsigned char& outValue);
+    int ComputePixelXForInstructionIndex(const raster_line& prog, int insnIndex);
 
 private:
     unsigned m_width;
@@ -83,6 +93,10 @@ private:
     EvaluationContext* m_gstate;
     int m_thread_id;
     int m_currently_mutated_y;
+    bool m_is_mutating_B = false;
+    // UI instrumentation flags for per-mutation feedback
+    bool m_used_complementary_pick = false;
+    bool m_used_seed_add = false;
     
     // Mutation statistics
     MutationStats m_stats;

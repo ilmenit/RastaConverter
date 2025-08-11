@@ -49,7 +49,7 @@ double cbrt(double d) {
 typedef std::unordered_map < rgb, Lab, rgb_hash > rgb_lab_map_t;
 rgb_lab_map_t rgb_lab_map;
 
-static void RGB2LAB(const rgb &c, Lab &result)
+void RGB2LAB(const rgb &c, Lab &result)
 {
 	static std::shared_mutex rwlock{};
 	rwlock.lock_shared();

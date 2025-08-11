@@ -1,0 +1,230 @@
+### Dual-frame blend mode: design and implementation plan
+
+This document proposes a new dual-frame blend mode that alternates two frames (A/B) on CRT displays so colors perceptually average, effectively increasing the perceived palette size while controlling flicker. It consolidates options, analyzes trade-offs, and specifies the implementation surfaces in this codebase.
+
+### Problem framing and design goals
+- Leverage CRT temporal integration by alternating two frames A and B at video refresh. The eye perceives the time-averaged color, but luminance differences cause visible flicker; chroma differences are less objectionable.
+- Optimize a pair of raster programs jointly with a smooth objective that balances target fidelity (to the blended color) and flicker suppression (penalizing per-pixel A↔B differences, especially luminance).
+- Keep the hot loops fast: reuse existing executor and line caches; avoid per-pixel heavy color math in the inner loop; amortize transforms by precomputing where helpful.
+
+### Objective function (pair scoring)
+For pixel i with palette indices a (from A) and b (from B), and target color T:
+
+- Base term: distance between target and blended color of A/B in a chosen blend space.
+  - Base_error_i = D_blend( BLEND_space(C_a, C_b), T )
+- Flicker term: soft penalties beyond thresholds, stronger on luminance than chroma.
+  - Let Y(·) be luminance, C(·) be chroma vector in the same space.
+  - Luma delta: ΔY = |Y(C_a) − Y(C_b)|
+  - Chroma delta: ΔC = ||C(C_a) − C(C_b)||
+  - Hinge penalties: max(0, ΔY − T_l)^p_l and max(0, ΔC − T_c)^p_c
+  - Flicker_i = w_l · hinge(ΔY − T_l)^{p_l} + w_c · hinge(ΔC − T_c)^{p_c}
+- Total per-pixel: Cost_i = Base_error_i + Flicker_i
+- Total image score: Cost = Σ_i Cost_i
+
+Key choices:
+- Use hinge (soft) penalties rather than hard thresholds. This keeps the landscape smooth; “bad” solutions are expensive but still improvable, avoiding stalls.
+- Quadratic exponents p_l = p_c = 2 by default give a smooth, well-behaved penalty ramp.
+- Optionally schedule w_l (luma weight) to ramp from a slightly lower value to its final value over the first ~20–30% evaluations, allowing early exploration before tightening flicker.
+
+### Blend and distance spaces
+- BLEND space (where we average A and B):
+  - yuv (default): Average Y, U, V. Matches the flicker model and is fast.
+  - rgb-linear: Convert palette to linear RGB using `gamma` (default 2.2), average in linear, convert back as needed for distance; approximates CRT response.
+  - lab: Average in L,a,b; perceptual but slower.
+  - auto: Follow selected blended distance when possible; otherwise fall back to yuv.
+- Blended distance metric D_blend for Base_error:
+  - yuv (default, fast), euclid, cie94, ciede (slower).
+
+Recommended defaults:
+- blend_space = yuv; blended_distance = yuv; gamma = 2.2 (used only for rgb-linear).
+
+### Precomputation for speed (low overhead)
+- Palette transforms (once):
+  - palette_yuv[128], palette_lab[128], palette_rgb_linear[128] (if rgb-linear used).
+- Target transforms (once per input):
+  - Per-pixel target in the chosen D_blend space (e.g., target_y[i], target_u[i], target_v[i]) to avoid repeated conversions.
+- Optional small pair tables (fast lookup, 128×128):
+  - pair_blink_luma[a,b] = |Y(a) − Y(b)|
+  - pair_blink_chroma[a,b] = ||C(a) − C(b)|| in chosen space
+  - pair_blend_yuv[a,b] = 0.5·(Y,U,V) when blend_space=yuv
+
+MVP note: Start with palette-space arrays and per-pixel on-the-fly arithmetic using those arrays (no pair tables). Add pair tables later if profiling calls for it.
+
+### Efficient evaluation procedure
+1) Execute A and B with the current `Executor` to get their created color index maps. Reuse line caches; no changes to per-line execution logic.
+2) For each pixel:
+   - Look up Ca = palette_space[a], Cb = palette_space[b]
+   - Compute blend = 0.5·(Ca, Cb) in the selected BLEND space
+   - Compute Base_error_i = D_blend(blend, target_space[i])
+   - Lookup/compute ΔY, ΔC and add flicker hinge penalties
+3) Accumulate to get Cost. Return Cost to the optimizer.
+
+This keeps the hot loop tightly numeric with table lookups and a handful of float ops per pixel after two executor runs.
+
+### Mutation/optimization strategies
+We need to optimize two raster programs jointly. Three viable options:
+
+1) Alternating coordinate descent (recommended baseline):
+   - Initialize B = A.
+   - Optimize B while holding A fixed using the pair objective.
+   - Alternate short runs: optimize A|B fixed, then B|A fixed.
+   - Add couple-aware mutations (occasional copy/swap of lines A↔B, nudge B toward A’s luminance, chroma-only tweaks).
+   - Pros: Simple integration with current mutator; stable; good quality; ~2–2.5× runtime.
+
+2) Symmetric joint evolution:
+   - Treat (A,B) as a single genome; mutate A-only, B-only, and both; accept by pair objective.
+   - Pros: Potentially better global optimum; Cons: more invasive and CPU-costly.
+
+3) Independent then merge:
+   - Optimize A and B independently toward the target (single-frame), then switch to pair objective for fine-tuning.
+   - Pros: Fast start; Cons: can lock-in suboptimal structure for blending.
+
+Choice: Start with option (1) alternating. It meshes with current `Mutator` and DLAS flow with minimal surface area and gives robust improvements.
+
+### Parameters to expose (CLI/config)
+- Activation:
+- /dual=on|off (off by default)
+- Blend configuration:
+  - /blend_space=yuv|rgb-linear|lab|auto (default yuv)
+  - /blend_gamma=2.2 (used only for rgb-linear)
+  - /blend_distance=yuv|euclid|cie94|ciede (default yuv)
+- Flicker control:
+  - /blink_luma_weight=WL (default 1.0)
+  - /blink_luma_thresh=TL (default 3 in Y units)
+  - /blink_chroma_weight=WC (default 0.2)
+  - /blink_chroma_thresh=TC (default 8 in U/V units)
+  - /blink_exp_luma=PL (default 2)
+  - /blink_exp_chroma=PC (default 2)
+  - Optional: /blink_detail_mod=K (0..1) to reduce penalty where the existing details map is high
+  - Optional: /blink_max_luma=LMAX (applies a large soft penalty beyond this to clamp egregious flicker)
+- Search behavior:
+- B initialized from A (dup)
+- /dual_mutate_ratio=0.5 (probability of choosing B over A to mutate; default 0.5)
+- /dual_cross_share_prob=0.05 (low-probability copy/swap current line A↔B)
+- /dual_both_frames_prob=0.0 (reserved; tiny joint tweak probability)
+- /blink_ramp_evals=N, /flicker_luma_weight_initial=0.6 (start WL lower, ramp to final over N evals)
+
+### Why soft penalties over hard rejection
+Hard thresholds that reject pairs exceeding ΔY or ΔC stall exploration and prevent bad-but-improvable areas from evolving. Hinge penalties preserve gradients: solutions can move toward both lower blended error and lower flicker over time.
+
+### Integration plan with current codebase
+- config.h/.cpp
+- Add new fields for dual mode, blend space/distance, flicker weights/thresholds/exponents.
+  - Parse via existing `CommandLineParser` (accept both `/` and `--`).
+
+- TargetPicture
+  - Add palette-space precomputations exposed via small helper (e.g., cached YUV/Lab arrays). Optionally place in a new utility if preferred.
+
+- ImageProcessor
+- Preserve the pre-quantized source picture (after resize/BCG) and expose it for dual-target transforms. Precompute per-pixel target transforms in the selected blended distance space (e.g., target YUV arrays). This parallels `GeneratePictureErrorMap()` but stores a compact per-pixel vector instead of per-palette errors.
+
+- Executor
+  - No changes in line execution logic.
+- Reuse `ExecuteRasterProgram` to render A and B and capture `line_results` for both; then ignore its returned single-frame error in dual mode.
+
+- EvaluationContext
+  - Add storage for the second best program (`m_best_pic_B`) and the last created picture for A and B (and optionally blended preview and a per-pixel flicker heatmap = ΔY).
+  - Track and expose pair objective parameters and the combined best result.
+
+- DLAS/LAHC (optimizers)
+- Add a dual evaluation path: given current (A,B), run executor twice, compute pair cost using the precomputed target transforms and palette-space arrays, and call acceptance on the combined score.
+- Implement alternating updates: each iteration, choose to mutate A or B (per `/dual_mutate_ratio`), with occasional both-frames mutations if enabled.
+- Seed initialization: B=A at the start.
+
+- Mutator (`RasterMutator`)
+  - Baseline: reuse as-is by passing it the chosen frame. Optionally add couple-aware mutations later (copy/swap lines, luma alignment nudges, chroma-only tweaks).
+
+- OutputManager
+  - Save both frames: `output-A.rp`, `output-B.rp`, `output-A.mic`, `output-B.mic`.
+  - Save preview images: `output-A.png`, `output-B.png`, `output-blended.png`.
+  - Save `output-flicker.png` (heatmap from ΔY scaled to 0..255) for diagnostics.
+
+- UI (`RastaSDL`)
+- In dual mode, display A, B, blended, and optional flicker heatmap panels. The existing draw paths can be reused with small additions.
+
+### Performance considerations
+- Two executor runs plus one lightweight blending pass per evaluation → ~2–2.5× runtime vs single-frame.
+- Palette-space arrays and per-pixel target transforms are small and computed once.
+- Staying in YUV for both blending and distance keeps evaluation fast; Lab/CIE* is optional and slower.
+- Optional pair tables (128×128) are tiny and can shave a few ops per pixel if profiling indicates a bottleneck.
+
+### Option analyses and selections
+- Hard reject vs soft penalty: choose soft (hinge) for a smooth search landscape and better convergence.
+- Blend space: YUV as default aligns with luminance-centric flicker and is fast. Offer rgb-linear and Lab for advanced users; rgb-linear can better mimic CRT gamma. Distance metric decoupled from blend space to keep flexibility.
+- Optimization strategy: Alternating coordinate descent as default (simple, robust). Joint evolution is a future power option. “Independent then merge” is viable but risks suboptimal plateaus; keep as an optional strategy.
+- Precompute pair tables vs on-the-fly: Start on-the-fly using palette arrays; add pair tables later if needed.
+
+### Defaults (recommended starting values)
+- /dual=on
+- /blend_space=yuv
+- /blend_distance=yuv
+- /blink_luma_weight=1.0, /blink_luma_thresh=3, /blink_exp_luma=2
+- /blink_chroma_weight=0.2, /blink_chroma_thresh=8, /blink_exp_chroma=2
+- /dual_strategy=alternate, /dual_init=dup, /dual_mutate_ratio=0.5, /dual_cross_share_prob=0.05
+- WL ramp: /blink_ramp_evals=250000, /flicker_luma_weight_initial=0.6 (ramp from 0.6 → 1.0 over 250k evals)
+- Fallback when ramp disabled: early WL relaxed to ~0.7× default for first ~50k evals to improve exploration
+
+### Implementation status (current build)
+1) MVP (implemented)
+   - YUV-only blending/distance, dual DLAS evaluation with alternating A/B updates.
+   - Complementary picks for color mutations in dual mode.
+   - Saved A/B programs and MIC/PMG; UI preview supports A/B/blended.
+   - Saved PNGs: A (`-A.png`), B (`-B.png`), blended (`-blended.png`), flicker heatmap (`-flicker.png`).
+
+2) Target alignment (implemented)
+   - Dual targets are computed from the pre-quantized source image (after resize/BCG), not the Atari-quantized destination.
+   - Implementation: temporarily set `EvaluationContext::m_picture` to `GetSourcePicture().data()` for `PrecomputeDualTransforms()`.
+
+3) Exploration improvements (implemented)
+   - Complementary picks sample both per-line candidates and a random subset of the full 128-color palette.
+   - In dual mode, per-line candidate sets default to the full 128-color palette to avoid single-frame trapping.
+
+4) Quality & UX (planned)
+   - rgb-linear and Lab options; optional YUV-accurate blended preview.
+   - `/blink_detail_mod` to reduce flicker penalties in high-detail regions.
+
+5) Performance & mutations (planned)
+   - Optional 128×128 pair tables (blended YUV and ΔY/ΔC) to cut per-pixel math.
+   - Couple-aware structural tweaks: rare both-frames nudges, luma alignment, chroma-only tweaks.
+
+6) Packaging (ongoing)
+   - Full output set and GUI panels; incrementally refine docs and presets.
+
+### Validation plan
+- Sanity: With /dual=off, behavior and scores remain identical to current build.
+- With /dual=on, verify that the blended preview approaches the source image (not Atari destination) more closely while the flicker heatmap (ΔY) stays low under recommended defaults.
+- Confirm `-A.png`, `-B.png`, `-blended.png`, and `-flicker.png` are produced and look correct.
+- Sweep WL and thresholds to confirm expected tradeoff curves between fidelity and flicker.
+- Regression: ensure executor caches and memory limits behave under doubled runs; monitor eval rate.
+
+### Pair tables and caches (design for performance)
+- Precompute small 128×128 tables once per run:
+  - pair_Ybl[a][b], pair_Ubl[a][b], pair_Vbl[a][b] for YUV blending
+  - pair_DeltaY[a][b] = |Y(a) − Y(b)|; pair_DeltaC[a][b] = sqrt((Ua−Ub)^2 + (Va−Vb)^2)
+- Memory footprint ~ a few hundred KB; reduces ops per pixel inside the dual evaluation loop.
+- Optional and guarded by a flag; recommended when image sizes or thread counts are high.
+
+### Couple-aware micro-mutations (design)
+- Luma-alignment nudge: bias color changes that reduce ΔY with small cost trade-off.
+- Chroma-only tweak: propose alternate color with similar Y but different U/V to reduce base error without adding flicker.
+- Rare both-frames tweak: adjust A and B simultaneously at the same (y,x) to follow a local blended gradient.
+
+### Debugging & metrics
+- Track acceptance rate separately for A and B mutations and for cross-share operations.
+- Log dual score components: averaged base error vs flicker cost to tune WL/TL/TC.
+- Add a toggle to display the YUV-accurate blended preview for closer visual parity with scoring.
+
+### Risks and mitigations
+- Runtime increases ~2×: mitigate by keeping the blending pass lightweight and defaulting to YUV mode; users can scale threads as today.
+- Parameter complexity: provide reasonable defaults; group related flags; document presets.
+- Over-penalizing detail: offer `/blink_detail_mod` to relax flicker in high-frequency regions where temporal differences are masked.
+
+### Summary of final choices
+- Pair objective: distance(target, blend(A,B)) + hinge flicker penalties (strong on luma, mild on chroma).
+- Default spaces: YUV blending and YUV distance for speed and perceptual alignment; options for rgb-linear and Lab.
+- Search: Alternating coordinate descent with B initialized from A; optional joint/staged strategies via flags.
+- Soft penalties over hard rejection to keep the landscape smooth and explorative.
+- Efficient implementation: two `Executor` runs + table-driven blend/penalty pass with small precomputations; minimal intrusion into hot paths.
+- Correct target alignment in dual mode: compare to source image colors; do not quantize target to Atari palette.
+
+

@@ -164,6 +164,26 @@ The Release build configurations include the following optimizations based on co
 
 These optimizations ensure the best performance for the release builds while being compatible with each compiler's supported flags.
 
+## Optional debug logging categories
+
+By default, console logging is minimal. You can opt-in to verbose logs by defining these CMake options:
+
+- THREAD_DEBUG: Enables detailed logs from optimization/control threads and executor.
+- UI_DEBUG: Enables SDL UI event and heartbeat logs.
+
+Example:
+
+```bash
+cmake -B build -S . -DTHREAD_DEBUG=ON -DUI_DEBUG=ON
+cmake --build build --config Release
+```
+
+Or in Visual Studio CMake Settings, add to CMake command arguments:
+
+```
+-DTHREAD_DEBUG=ON -DUI_DEBUG=ON
+```
+
 ## Troubleshooting
 
 ### CMake can't find the libraries

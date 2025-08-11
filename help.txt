@@ -1,165 +1,213 @@
+RastaConverter - Help
+=====================
 RastaConverter by Jakub 'Ilmenit' Debski
 
+Overview
+--------
+RastaConverter converts modern images to 8-bit Atari (mode 15) using an optimizer that builds a raster/kernel program with mid-line color changes and sprites. It uses FreeImage and (for GUI builds) SDL2/SDL2_ttf.
 Usage:
-RastaConverter.exe InputFile [options]
+  RastaConverter.exe InputFile [options]
 
-To save the output during the optimization process, press the 's' key.
+Display layout (GUI)
+--------------------
+- Left: Source image resized to Atari width
+ - Center: Current output preview (see dual-frame mode below)
+- Right: Destination (source remapped to the Atari palette)
+If the palette-mapped (right) image looks wrong (e.g., too gray), try a different palette file (/pal) or remap the source using an external tool (e.g., Timanthes) to better fit the chosen Atari palette.
 
-Copy created output files to the Generator directory and run 'build.bat' to create executable file.
+Hotkeys (GUI)
+-------------
+- S / D: Save current best solution (all outputs)
+- ESC:   Exit (asks for confirmation)
+- In dual-frame mode:
+  - A: show Frame A
+  - Z: show Frame B
+  - B: show Blended A/B (default)
+Tip: With the current algorithms, the longer you run, the better the results. Some images require >1,000,000 evaluations for top quality.
 
-The application displays three images:
-- the left one is the original picture resized to Atari width.
-- the right one is the original picture mapped to chosen Atari palette. This is our goal to reach.
-- the central one is a preview of the output picture.
+Basic usage
+-----------
+RastaConverter supports both “/” and “--” style options and key=value pairs.
 
-If the colors on the right image are wrong (e.g. too gray) then try a different palette file
-or remap original picture to chosen palette file using other another tool e.g. Timanthes.
-Below on the screen are some statistics from the optimization process.
-With the current algorithm the longer you wait, the better results you get. 
-For some pictures, more than 1 million evaluations are needed to get really good results.
+Required:
+  /i=FILE or --input FILE      Input image path (PNG/JPG/etc.)
+  /o=OUT  or --output OUT      Output base name (defaults to output.png)
 
-Command line options:
+Common options
+--------------
+- Palette and distance:
+  /pal=FILE or /palette=FILE   Atari palette file (default Palettes/laoo.act)
+  /distance=euclid|yuv|ciede|cie94    Color distance for optimization (default yuv)
+  /predistance=euclid|yuv|ciede|cie94 Preprocess distance (default ciede)
 
-/i=Input File
-  File to process. All the formats of the FreeImage library supported, including JPG, PNG, GIF and BMP.
-  Warning: it is not possible to load 16 colors pictures (4 bits per pixel). Increase the color depth first
-  using other graphics program.
+- Image adjustments:
+  /brightness=-100..100   (default 0)
+  /contrast=-100..100     (default 0)
+  /gamma=0..8             (default 1.0)
+  /filter=box|bicubic|bilinear|bspline|catmullrom|lanczos3 (rescale, default box)
+  /h=HEIGHT               Target height (default auto, max 240)
 
-/h=Output Height
-  Default: Proportional to picture size rescaled to 320xheight or 240.
-  Generated file height. The speed of the optimization process depends on the height.
-  
-/continue
-  Continue previously stopped process. Currently it uses previously generated files (output*.*) therefore
-  be careful not to overwrite them with other instance of RastaConverter. 
+- Dithering (preprocess):
+  /dither=none|floyd|rfloyd|line|line2|chess|2d|jarvis|simple|knoll (default none)
+  /dither_val=FLOAT       Dither strength (default 1.0)
+  /dither_rand=FLOAT      Randomness 0..1 (default 0)
+  /details=FILE           Optional details map
+  /details_val=FLOAT      Details strength (default 0.5)
 
-/pal=Palette File
-  Default: Palettes\laoo.act
-  The output quality depends a lot on similarity between chosen Atari palette and the image palette.
-  The default palette covers a large color range and is close to real Atari palette.
-  You can also use shortcuts: /pal=laoo and the converter will try to load palette from 'Palettes\laoo.act'
-  
-/dither=Dithering Type
-  Possible dithering types are: chess, floyd, 2d, jarvis, simple, knoll
-  'chess' is Chessboard Dithering - typical 8bit dithering technique
-  'floyd' is Floyd-Steinberg dithering - more "random" than chessboard dithering
-  '2d' and 'simple' are between chess and floyd.
-  'jarvis' dithering is more artistic
-  'knoll' is similar to Adobe patented pattern dithering algorithm. Very slow with /predistance=ciede (which is default!).
-  'line' dithering that tries to keep a low number of color changes on the line
-  'line2' similar to 'line'
+- Optimizer:
+  /optimizer=dlashc|lahc  Select optimizer (default dlashc)
+  /threads=N              Number of threads (default 1)
+  /max_evals=ULL         Stop after N evaluations (default very large)
+  /s=N                   DLAS/LAHC history length (default 1)
+  /mutation_strategy=global|regional  (default global)
+  /cache=MB              Line cache size in MB (default 16)
+  /seed=random|NUMBER    Initial RNG seed (default random)
+  /save=auto|N           Auto-save period: auto=time-based, or every N evals
+  /onoff=FILE            Enable/disable registers per line from file
+  /init=random|empty|less|smart  Initial program (default random)
+     - random: broad exploration, stable default
+     - empty: minimalist start
+     - less: fewer colors initially; often yields quick gains but can plateau
+     - smart: heuristic guided start
+  /preprocess            Only run preprocessing; save -src.png and -dst.png and exit
+  /quiet or /q           Reduce console output
 
-/dither_val=Dithering strength
-  Default: 1, should be set from 0.0 to 3.0. 
-  Some dithering algorithms set to /dither_val=2 may increase color saturation if the output picture is too gray.
+Dual-frame mode (CRT blending)
+--------------------------------------
+Alternates two frames A/B each refresh; the eye perceives the average, increasing effective colors. Flicker arises from per-pixel A/B luminance differences, so the optimizer applies soft penalties.
 
-/dither_rand=Dithering randomness
-  Default: 0, should be set from 0.0 to 1.0
-  Current implementation of dithering algorithm produces output which may look too patterned.
-  Set /dither_rand to 0.5 or 1.0 to make output more random.
+Enable:
+  /dual[=on|off]         Enable dual-frame mode (default off). Bare /dual enables it.
 
-/details=Details picture
-  To help the optimization algorithm you can set the details mask. 
-  The brighter the color on the mask is, the higher is distance of the color difference between input and output file on the masked region.
-  This way you can make some objects like faces, eyes or other small objects more detailed.
+Flicker control (soft hinge penalties):
+  /flicker_luma_weight=WL      (default 1.0)
+  /flicker_luma_thresh=TL      (default 3)
+  /flicker_exp_luma=PL         (default 2)
+  /flicker_chroma_weight=WC    (default 0.2)
+  /flicker_chroma_thresh=TC    (default 8)
+  /flicker_exp_chroma=PC       (default 2)
+  WHAT: Penalize A↔B differences to reduce flicker, stronger for luminance (Y) than for chroma (U/V).
+  WHY: Human vision is more sensitive to flicker from brightness than from color.
+  HOW: For each pixel, penalties grow smoothly once difference exceeds the threshold TL/TC; exponents (PL/PC) control slope (2=quadratic is smooth and stable).
+  UNITS: Y is on roughly 0..255 scale; U/V magnitudes are smaller (scales derived from the YUV transform used in code).
 
-/details_val=Details influence strength
-  Default: 1
+Search behavior:
+  The optimizer alternates updates between frames A and B. Initialization duplicates A to B.
+  /dual_mutate_ratio=0.5                (default 0.5; chance to mutate B vs A)
+     WHY: Balances effort between A and B; 0.5 mutates both equally often.
 
-/filter=Resize filter
-  Default: box
-  Filter used to resize the picture to the Atari width=160 color pixels (40 bytes). 
-	Possible filters are: lanczos, box, bicubic, bilinear, bspline, catmullrom
+GUI behavior in dual-frame mode:
+- Center preview defaults to Blended A/B; toggle with A/Z/B. The current mode is shown under the preview.
 
-/brightness=[-100,100]
-  Default: 0
-  Brightness color correction.
+Outputs
+-------
+Single-frame mode:
+- OUT.rp          Raster program
+- OUT.mic         Screen data
+- OUT.pmg         Player/missile data
+- OUT.png         Saved preview
+- OUT.csv         Statistics
+- OUT.lahc        Optimizer state
 
-/contrast=[-100,100]
-  Default: 0
-  Contrast color correction.
+Dual-frame mode adds:
+- OUT-A.rp, OUT-A.mic, OUT-A.pmg   (Frame A)
+- OUT-B.rp, OUT-B.mic, OUT-B.pmg   (Frame B)
+- OUT-blended.png                  Blended preview
+- OUT-flicker.png                  Flicker heatmap (luma delta)
+- OUT-dual.csv, OUT-dual.lahc
+To build an Atari executable, copy the generated outputs to the Generator directory and run build.bat there.
 
-/gamma=[0.0-8.0]
-  Default: 1.0
-  Gamma color correction.
+Notes
+-----
+- Dual mode is ~2–2.5× more expensive per evaluation (A and B are rendered each step).
+- Internal pair evaluation uses a YUV fast path.
 
-/init=Initial optimization state
-   Default: random
-   The optimization search space is large and the final results depends a lot on the initial values.
-   You may see that RastaConverter sometimes optimizes not those details of the picture that you want.
-   To change the initial value you may use other states: random, empty, less, smart
-   
-   '/init=less' option sets less colors in the initial state of the picture. This gives better result
-   quick, but then picture is harder to optimize than with /init=smart 
+Debug logging (build-time)
+--------------------------
+At runtime, console logs are minimal. For verbose logging, configure CMake with:
+-DTHREAD_DEBUG=ON  (optimization/executor logs)
+-DUI_DEBUG=ON      (SDL UI event logs)
+See BUILD.md: “Optional debug logging categories”.
 
-/o=Output File
-  Output file name. The default name is 'output.png'. 
-  Using a different name you have to change the file names used in the Generator.
-  
-/s=Number of solutions
-  You may set a different number of solutions used in the optimization process.
-  With /s=1 (default) the optimization algorithm is heuristic Hill Climbing.
-  With more solutions the "Diversified Late Acceptance Search" algorithm is used
-  It works much faster at finding quality solutions than previous algorithms. Even small values like
-  /s=3 to /s=5 can produce excellent results. There is no memory impact so you can still use
-  larger values if needed (/s=10), but the returns diminish quickly with DLAS.
-  
-/distance=Color distance function
-  Default: yuv, other options: euclid, ciede
- 
-  euclid - Use Euclidian RGB distance for colors instead of default YUV distance. This function is fast.
-  yuv - produces usually better color mapping than Euclidian, but for some pictures RGB distance is also useful.
-  ciede - uses the best visual color distance algorithm CIEDE2000, but can be very slow.
+Examples
+--------
+  RastaConverter.exe c64.png /threads=8 /optimizer=dlashc /s=5
+  RastaConverter.exe c64.png /optimizer=lahc /s=1000 /save=100000 /o=output_lahc.png
 
-/predistance=Color distance function for preprocess
-  Default: ciede, other options: euclid, yuv
+Why these options (and how to choose)
+-------------------------------------
+Palette (/pal):
+- Why: Atari palette variants differ (emulators, monitors, calibration). A better-matching palette reduces distance and produces fewer artifacts.
+- Choose: Start with laoo.act (balanced). If the destination (right panel) looks dull/gray, try other palettes (e.g., Real.act) or remap your source externally.
 
-  This option sets the preprocess color distance function to create destination picture.
-  For the rest of the optimization the distance set by the /distance is used.
-  The default option /predistance=ciede is VERY slow with Knoll dithering.
-    
-/max_evals=Maximum number of evaluations
-  RastaConverter will save the current solution and exit when this limit is reached.
+Distance functions (/distance, /predistance):
+- Why: Euclidean RGB is fast but not perceptual; YUV weights luminance; CIE* distances match human perception but are slow.
+- Choose: Default /distance=yuv balances quality/speed. Use /distance=ciede for the highest-fidelity runs if time permits. For preprocessing (/predistance), CIEDE helps make a better initial destination target but can slow dithering like /dither=knoll (switch to /predistance=yuv for speed).
 
-/onoff=OnOff File
-  Text file that describes where to turn on and turn off usable registers. The format of each line in "OnOff file" is:
+Dithering (/dither, /dither_val, /dither_rand):
+- Why: Preprocessing can add benign noise to reduce banding and steer optimization.
+- Choose: Start with none. If your input has large smooth areas or banding, try floyd or chess. knoll yields pattern-like dither (slow with CIEDE preprocess). Use /dither_val≈1.0, increase to 2.0 if too gray; /dither_rand≈0.3–0.5 to reduce visible patterns.
 
-REGISTER OFF|ON FROM TO
+Details map (/details, /details_val):
+- Why: Emphasizes important regions (faces, eyes) by inflating their distance in preprocess; the optimizer then respects these areas more.
+- Choose: Provide a grayscale mask; increase /details_val up to ~1.0 for stronger emphasis.
 
-  REGISTER is one of the following registers: COLOR0,COLOR1,COLOR2,COLBAK,COLPM0,COLPM1,COLPM2,COLPM3,HPOSP0,HPOSP1,HPOSP2,HPOSP3
-  OFF turns off the usage of registers in lines, ON turns on. ON is default for all the registers in the whole picture.
-  FROM is line number in picture starting from 0
-  TO is line number in picture up to Picture Height-1
+Initialization (/init):
+- Why: Search space is huge; initial conditions bias early progress.
+- Choose: random is stable default. empty is minimal (can be slow to get started). less gives quick first gains but can plateau; smart uses heuristics to align to the target structure.
 
-  Every line in "OnOff file" is processed one after another.
+Optimizer (/optimizer, /s):
+- Why: DLAS generally moves fast early; LAHC can sometimes improve more in long plateaus.
+- Choose: Keep /optimizer=dlashc for most runs. Try LAHC on marathon runs. /s controls history; 3..10 are reasonable for DLAS.
 
-  Example:
-  To turn off usage of player 0 and player 1 in picture of height 240 pixels use the following OnOff file:
+Cache and threads (/cache, /threads):
+- Why: Line caches reduce recomputation; memory and CPU scale with image height.
+- Choose: /cache=16 is a good starting point per thread; increase if you observe frequent cache clears. Set /threads to the number of physical cores (or 1–2 less) to keep system responsive.
 
-COLPM0 OFF 0 239
-HPOSP0 OFF 0 239
-COLPM1 OFF 0 239
-HPOSP1 OFF 0 239
+Dual-frame mode: deeper dive
+-------------------------------------
+Why dual mode (/dual=on):
+- Alternating A/B frames produces a perceived average on CRTs, effectively increasing available colors beyond the 128 palette entries.
+- Flicker comes mainly from luminance differences (Y) between A and B. Human vision tolerates chroma differences better.
 
-/preprocess
-  If this switch exists then RastaConverter generates and saves only destination picture.
+Blend/distance:
+- YUV is used internally for blending and distance for performance and perceptual alignment.
 
-/seed = seed for the random number generator
+Flicker penalties (/flicker_*):
+- Why: Hard thresholds stall exploration. Hinge penalties (max(0, Δ−T)^p) keep the landscape smooth so “bad” regions can improve while still discouraging flicker.
+- Choose: Start with WL=1.0, TL=3; WC=0.2, TC=8; exponents=2. Increase WL or lower TL to suppress flicker harder; increase TC or lower WC to allow more chroma variance. Consider relaxing penalties in very detailed regions (masked by motion and texture).
 
-/save=number of solutions or auto
-  Default: auto
-  To disable set: 0
-  Saves best solution after every 'n' evaluations. When 'auto' is used then 'n' is dynamically calculated according to conversion ratio to save each 30 seconds.
-  This is useful for a long-run optimizations, when the run can be stopped by power outage for example. If you run many instances of RastaConverter /o option may be useful.
-   
-/cache=number
-  Default: 16
-  Sets number of megabytes per thread to use as memory buffer to speed up conversion.
-   
-/threads=number of threads
-  Set number of processing threads running in parallel (1 to your number of cores).
+Mutation strategy (dual internal alternating updates, /dual_mutate_ratio):
+- Why: Coordinated evolution prevents one frame from diverging too far from the other while still creating color diversity.
+- Choose: alternate updates internally with /dual_mutate_ratio≈0.5 to balance A and B updates. B is initialized from A for stability.
 
-Example:
-RastaConverter.exe c64.png /threads=8 /s=1000
+Performance tips
+----------------
+- Height matters: runtime scales with total pixels (160×H). Use smaller H when experimenting; scale up for final runs.
+- Preprocess CIEDE is slow with /dither=knoll. Switch to /predistance=yuv if needed.
+- Dual mode roughly doubles evaluation cost. Use fewer threads or smaller height if constrained.
+- If cache clear logs appear, increase /cache or allow more time between clears.
 
+Troubleshooting
+---------------
+- Flicker too visible: Increase /flicker_luma_weight or decrease /flicker_luma_thresh; optionally increase /flicker_chroma_weight modestly. Inspect OUT-flicker.png to locate problem areas.
+- Colors look washed out: Try another palette (/pal) or use /distance=ciede (slower). Increase /dither_val ≈ 1.5–2.0.
+- Progress stalls early: Try a different /init (smart or less), or switch optimizer to LAHC for a long run.
+- UI prints too many logs: make sure you did not enable UI_DEBUG/THREAD_DEBUG in your CMake options; otherwise rebuild without these flags.
+
+Handy presets
+-------------
+- Fast preview (single-frame):
+  /threads=4 /distance=yuv /init=random /save=auto
+
+- High quality (single-frame):
+  /threads=8 /distance=ciede /init=smart /s=7 /save=auto
+
+- Dual balanced (dual-frame):
+  /dual=on \
+  /flicker_luma_weight=1.0 /flicker_luma_thresh=3 /flicker_chroma_weight=0.2 /flicker_chroma_thresh=8 \
+  /dual_mutate_ratio=0.5
+
+- Dual flicker-minimized:
+  Same as above, but /flicker_luma_weight=1.3 /flicker_luma_thresh=2.5
 

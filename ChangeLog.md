@@ -12,9 +12,10 @@ RastaConverterBeta12      2025-03-06
 * Better work distribution to minimize thread contention
 
 RastaConverterBeta11      2025-03-05
-* Implemented Diversified Late Acceptance Search (DLAS) algorithm replacing LAHC
-* Much faster convergence to quality solutions
-* Better quality results with fewer solutions (5-10 solutions work well)
+* Added selectable optimizers: DLAS (default) and LAHC (classic)
+* New `/optimizer=` flag and `/s=` history length parameter (shared)
+* Resume and CSV statistics unified across algorithms
+* Incorporated mutation fix (preserve instruction order on erase)
 
 RastaConverterBeta10      
 * Added command line parameter to window title

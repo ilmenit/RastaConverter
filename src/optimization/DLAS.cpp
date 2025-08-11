@@ -6,6 +6,20 @@
 #include <functional>
 #include <chrono>
 #include <iostream>
+#include <cmath>
+// Needed for atari_palette and distances
+#include "../TargetPicture.h"
+#include "../color/Distance.h"
+// Local helpers (keep in sync with EvaluationContext)
+static inline void rgb_to_yuv_fast_local(const rgb& c, float& y, float& u, float& v) {
+    float r = (float)c.r;
+    float g = (float)c.g;
+    float b = (float)c.b;
+    y = 0.299f*r + 0.587f*g + 0.114f*b;
+    float dy = 0.0f; (void)dy;
+    u = (b - y) * 0.565f;
+    v = (r - y) * 0.713f;
+}
 extern bool quiet;
 
 DLAS::DLAS(EvaluationContext* context, Executor* executor, Mutator* mutator, int solutions)
@@ -42,8 +56,10 @@ DLAS::~DLAS()
     // Wake up any threads waiting on the evaluation context
     if (m_context) {
         std::unique_lock<std::mutex> lock(m_context->m_mutex);
+#ifdef THREAD_DEBUG
         std::cout << "[FIN] DLAS destructor: setting finished and notifying; threads_active="
                   << m_context->m_threads_active.load() << std::endl;
+#endif
         if (!m_context->m_finished.load()) CTX_MARK_FINISHED((*m_context), "dlas_destructor");
         m_context->m_condvar_update.notify_all();
     }
@@ -94,7 +110,9 @@ void DLAS::Initialize(const raster_picture& initialSolution)
 
 double DLAS::EvaluateInitialSolution()
 {
-    if (quiet) std::cout << "Evaluating initial solution..." << std::endl;
+    #ifdef THREAD_DEBUG
+    std::cout << "Evaluating initial solution..." << std::endl;
+    #endif
     
     if (!m_context || !m_executor) {
         std::cerr << "Error: Cannot evaluate initial solution with null context or executor" << std::endl;
@@ -102,70 +120,177 @@ double DLAS::EvaluateInitialSolution()
     }
 
     try {
+            if (m_context->m_dual_mode) {
+                // Initialize B if needed (default dup)
+                if (m_context->m_best_pic_B.raster_lines.empty()) {
+                    m_context->m_best_pic_B = m_context->m_best_pic;
+                }
+                raster_picture picA = m_context->m_best_pic;
+                raster_picture picB = m_context->m_best_pic_B;
+                std::vector<const line_cache_result*> line_results_A(m_context->m_height);
+                std::vector<const line_cache_result*> line_results_B(m_context->m_height);
+                // Render B plain first to get other-frame pixels, then render A pair-aware against B
+                (void)m_executor->ExecuteRasterProgram(&picB, line_results_B.data());
+                sprites_memory_t memB;
+                memcpy(&memB, &m_executor->GetSpritesMemory(), sizeof(memB));
+                (void)m_executor->ExecuteRasterProgram(&picA, line_results_A.data(), Executor::DUAL_A, &line_results_B);
+                sprites_memory_t memA;
+                memcpy(&memA, &m_executor->GetSpritesMemory(), sizeof(memA));
+
+            // Helpers for color conversions
+            auto yuv_to_rgb_approx = [](float Y, float U, float V) -> rgb {
+                float R = Y + (V / 0.713f);
+                float B = Y + (U / 0.565f);
+                float G = (Y - 0.299f * R - 0.114f * B) / 0.587f;
+                auto clamp = [](float v) -> unsigned char { if (v < 0) v = 0; if (v > 255) v = 255; return (unsigned char)(v + 0.5f); };
+                rgb out; out.r = clamp(R); out.g = clamp(G); out.b = clamp(B); out.a = 0; return out;
+            };
+
+            // Pair cost with support for blend_space and blend_distance
+            const unsigned W = m_context->m_width;
+            const unsigned H = m_context->m_height;
+            double total = 0.0;
+            // Effective flicker luma weight with optional ramp
+            float wl = (float)m_context->m_flicker_luma_weight;
+            if (m_context->m_blink_ramp_evals > 0) {
+                double t = std::min<double>(1.0, (double)m_context->m_evaluations / (double)m_context->m_blink_ramp_evals);
+                wl = (float)((1.0 - t) * m_context->m_flicker_luma_weight_initial + t * m_context->m_flicker_luma_weight);
+            }
+            const float wc = (float)m_context->m_flicker_chroma_weight;
+            const float Tl = (float)m_context->m_flicker_luma_thresh;
+            const float Tc = (float)m_context->m_flicker_chroma_thresh;
+            const int pl = m_context->m_flicker_exp_luma;
+            const int pc = m_context->m_flicker_exp_chroma;
+            const float* ty = m_context->m_target_y.data();
+            const float* tu = m_context->m_target_u.data();
+            const float* tv = m_context->m_target_v.data();
+            m_context->m_flicker_heatmap.assign(W*H, 0);
+            for (unsigned y = 0; y < H; ++y) {
+                const line_cache_result* lA = line_results_A[y];
+                const line_cache_result* lB = line_results_B[y];
+                if (!lA || !lB) continue;
+                const unsigned char* rowA = lA->color_row;
+                const unsigned char* rowB = lB->color_row;
+                for (unsigned x = 0; x < W; ++x) {
+                    const unsigned idx = y * W + x;
+                    const unsigned char a = rowA[x];
+                    const unsigned char b = rowB[x];
+                    // Luma/chroma deltas for flicker (YUV always)
+                    const float Ya = m_context->m_palette_y[a];
+                    const float Ua = m_context->m_palette_u[a];
+                    const float Va = m_context->m_palette_v[a];
+                    const float Yb = m_context->m_palette_y[b];
+                    const float Ub = m_context->m_palette_u[b];
+                    const float Vb = m_context->m_palette_v[b];
+                    float dY = fabsf(Ya - Yb);
+                    float dC = sqrtf((Ua - Ub)*(Ua - Ub) + (Va - Vb)*(Va - Vb));
+                    // YUV fast-path: blend in YUV and compute squared distance to target precomputed YUV
+                        float Ybl = 0.5f*(Ya+Yb), Ubl = 0.5f*(Ua+Ub), Vbl = 0.5f*(Va+Vb);
+                        float dy = Ybl - ty[idx]; float du = Ubl - tu[idx]; float dv = Vbl - tv[idx];
+                    double base = (double)(dy*dy + du*du + dv*dv);
+                    float yl = dY - Tl; if (yl < 0) yl = 0;
+                    float yc = dC - Tc; if (yc < 0) yc = 0;
+                    double flick = 0.0;
+                    if (wl > 0) { double t = yl; if (pl == 2) t = t*t; else if (pl == 3) t = t*t*t; else t = pow(t, (double)pl); flick += wl * t; }
+                    if (wc > 0) { double t = yc; if (pc == 2) t = t*t; else if (pc == 3) t = t*t*t; else t = pow(t, (double)pc); flick += wc * t; }
+                    total += base + flick;
+                    // Populate heatmap with scaled luma delta (0..255 after simple clamp)
+                    float scaled = dY * (1.0f/2.0f); if (scaled > 255.0f) scaled = 255.0f; if (scaled < 0.0f) scaled = 0.0f;
+                    m_context->m_flicker_heatmap[idx] = (unsigned char)(scaled + 0.5f);
+                }
+            }
+            #ifdef THREAD_DEBUG
+            std::cout << "Initial dual pair evaluation: " << total << std::endl;
+            #endif
+            {
+                std::unique_lock<std::mutex> lock(m_context->m_mutex);
+                m_context->m_best_result = total;
+                m_context->m_best_pic = picA;
+                m_context->m_best_pic_B = picB;
+                m_context->m_created_picture.resize(m_context->m_height);
+                m_context->m_created_picture_targets.resize(m_context->m_height);
+                m_context->m_created_picture_B.resize(m_context->m_height);
+                m_context->m_created_picture_targets_B.resize(m_context->m_height);
+                const line_cache_result* lastA = nullptr;
+                const line_cache_result* lastB = nullptr;
+                for (int y = 0; y < (int)m_context->m_height; ++y) {
+                    const line_cache_result* lA = line_results_A[y];
+                    if (lA) {
+                        lastA = lA;
+                        m_context->m_created_picture[y].assign(lA->color_row, lA->color_row + m_context->m_width);
+                        m_context->m_created_picture_targets[y].assign(lA->target_row, lA->target_row + m_context->m_width);
+                    } else if (lastA) {
+                        m_context->m_created_picture[y].assign(lastA->color_row, lastA->color_row + m_context->m_width);
+                        m_context->m_created_picture_targets[y].assign(lastA->target_row, lastA->target_row + m_context->m_width);
+                    } else {
+                        m_context->m_created_picture[y].assign(m_context->m_width, 0);
+                        m_context->m_created_picture_targets[y].assign(m_context->m_width, E_COLBAK);
+                    }
+
+                    const line_cache_result* lB = line_results_B[y];
+                    if (lB) {
+                        lastB = lB;
+                        m_context->m_created_picture_B[y].assign(lB->color_row, lB->color_row + m_context->m_width);
+                        m_context->m_created_picture_targets_B[y].assign(lB->target_row, lB->target_row + m_context->m_width);
+                    } else if (lastB) {
+                        m_context->m_created_picture_B[y].assign(lastB->color_row, lastB->color_row + m_context->m_width);
+                        m_context->m_created_picture_targets_B[y].assign(lastB->target_row, lastB->target_row + m_context->m_width);
+                    } else {
+                        m_context->m_created_picture_B[y].assign(m_context->m_width, 0);
+                        m_context->m_created_picture_targets_B[y].assign(m_context->m_width, E_COLBAK);
+                    }
+                }
+                memcpy(&m_context->m_sprites_memory, &memA, sizeof(m_context->m_sprites_memory));
+                memcpy(&m_context->m_sprites_memory_B, &memB, sizeof(m_context->m_sprites_memory_B));
+                m_context->ReportInitialScore(total);
+                m_context->m_initialized = true;
+                m_context->m_update_initialized = true;
+                m_context->m_condvar_update.notify_all();
+            }
+            return total;
+        } else {
+            // Single-frame path
         // Create a copy of the initial solution
         raster_picture pic = m_context->m_best_pic;
-
-        // Allocate storage for line results
         std::vector<const line_cache_result*> line_results(m_context->m_height);
-
-        // Evaluate the initial solution
         double result = m_executor->ExecuteRasterProgram(&pic, line_results.data());
-        if (quiet) std::cout << "Initial solution evaluation: " << result << std::endl;
-
-        // Update the visualization data for the initial solution
+        #ifdef THREAD_DEBUG
+        std::cout << "Initial solution evaluation: " << result << std::endl;
+        #endif
         {
             std::unique_lock<std::mutex> lock(m_context->m_mutex);
-
-            // Set this as the best result since it's the first
             m_context->m_best_result = result;
-
-            // Copy created picture data
             m_context->m_created_picture.resize(m_context->m_height);
             m_context->m_created_picture_targets.resize(m_context->m_height);
-
-            // Keep track of the last valid line result for fallback
             const line_cache_result* last_valid_result = nullptr;
-
             for (int y = 0; y < (int)m_context->m_height; ++y) {
                 if (line_results[y] != nullptr) {
-                    // Store this as the last valid result
                     last_valid_result = line_results[y];
-
-                    // Copy the line data
                     const line_cache_result& lcr = *line_results[y];
                     m_context->m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_context->m_width);
                     m_context->m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_context->m_width);
                 }
                 else {
-                    // Handle null pointer case
                     if (last_valid_result != nullptr) {
-                        // Use the last valid result as a fallback
                         m_context->m_created_picture[y].assign(last_valid_result->color_row,
                             last_valid_result->color_row + m_context->m_width);
                         m_context->m_created_picture_targets[y].assign(last_valid_result->target_row,
                             last_valid_result->target_row + m_context->m_width);
                     }
                     else {
-                        // No valid results yet, initialize with zeros (black)
                         m_context->m_created_picture[y].assign(m_context->m_width, 0);
                         m_context->m_created_picture_targets[y].assign(m_context->m_width, E_COLBAK);
                     }
                 }
             }
-
-            // Copy sprite memory
             memcpy(&m_context->m_sprites_memory, &m_executor->GetSpritesMemory(), sizeof(m_context->m_sprites_memory));
-
-            // Report the initial score to initialize DLAS
             m_context->ReportInitialScore(result);
-
-            // Make sure it's marked as initialized
             m_context->m_initialized = true;
             m_context->m_update_initialized = true;
             m_context->m_condvar_update.notify_all();
         }
-
         return result;
+        }
     }
     catch (const std::exception& e) {
         std::cerr << "Error evaluating initial solution: " << e.what() << std::endl;
@@ -207,13 +332,17 @@ void DLAS::RunWorker(int threadId)
     };
 
     if (!m_running) {
-        std::cerr << "Worker " << threadId << " exiting - not running" << std::endl;
+        #ifdef THREAD_DEBUG
+        std::cout << "[DLAS] Worker " << threadId << " exiting - not running" << std::endl;
+        #endif
         signal_thread_exit();
         return;
     }
 
     if (!m_context) {
-        std::cerr << "Worker " << threadId << " exiting - null context" << std::endl;
+        #ifdef THREAD_DEBUG
+        std::cout << "[DLAS] Worker " << threadId << " exiting - null context" << std::endl;
+        #endif
         signal_thread_exit();
         return;
     }
@@ -221,7 +350,9 @@ void DLAS::RunWorker(int threadId)
     try {
         // If this is thread 0, evaluate the initial solution first
         if (threadId == 0 && !m_context->m_initialized) {
-            if (quiet) std::cout << "Thread 0 evaluating initial solution" << std::endl;
+            #ifdef THREAD_DEBUG
+            std::cout << "[DLAS] Thread 0 evaluating initial solution" << std::endl;
+            #endif
             double initial_result = EvaluateInitialSolution();
 
             if (initial_result == DBL_MAX) {
@@ -238,11 +369,13 @@ void DLAS::RunWorker(int threadId)
                 m_init_condvar.notify_all();
             }
             #ifdef THREAD_DEBUG
-            if (quiet) std::cout << "Thread 0 completed initialization" << std::endl;
+            std::cout << "[DLAS] Thread 0 completed initialization" << std::endl;
             #endif
         }
         else if (!m_context->m_initialized) {
-            if (quiet) std::cout << "Thread " << threadId << " waiting for initialization" << std::endl;
+            #ifdef THREAD_DEBUG
+            std::cout << "[DLAS] Thread " << threadId << " waiting for initialization" << std::endl;
+            #endif
             
             // Other threads wait for initialization to complete
             std::unique_lock<std::mutex> init_lock(m_init_mutex);
@@ -258,7 +391,7 @@ void DLAS::RunWorker(int threadId)
                 if (!m_context->m_initialized) {
                     // Still not initialized - just wait
                     #ifdef THREAD_DEBUG
-                    std::cout << "Thread " << threadId << " still waiting for initialization with context lock" << std::endl;
+                    std::cout << "[DLAS] Thread " << threadId << " still waiting for initialization with context lock" << std::endl;
                     #endif
                     m_context->m_condvar_update.wait(context_lock, [this] {
                         return m_context->m_initialized || !m_running;
@@ -286,8 +419,12 @@ void DLAS::RunWorker(int threadId)
         linear_allocator thread_allocator;
         insn_sequence_cache thread_cache;
 
-        // Copy best picture to work with
+        // Copy best picture(s) to work with
         raster_picture pic = m_context->m_best_pic;
+        raster_picture picB_local;
+                    if (m_context->m_dual_mode) {
+            picB_local = m_context->m_best_pic_B.raster_lines.empty() ? m_context->m_best_pic : m_context->m_best_pic_B;
+        }
         double best_result = m_context->m_best_result;
 
         // Create local executor for this thread
@@ -323,6 +460,8 @@ void DLAS::RunWorker(int threadId)
             executor_registered = true;
 
             std::vector<const line_cache_result*> line_results(m_context->m_height);
+            std::vector<const line_cache_result*> line_results_B(m_context->m_height);
+            sprites_memory_t memA, memB;
             // Hysteresis/cooldown for cache clearing to avoid thrash
             auto last_cache_clear_time = std::chrono::steady_clock::now();
             unsigned long long last_cache_clear_evals = 0;
@@ -336,12 +475,16 @@ void DLAS::RunWorker(int threadId)
             while (m_running && !m_context->m_finished.load())
             {
                 // Periodic status update
-                if (++iteration_count % 2000 == 0) {
+                #ifdef THREAD_DEBUG
+                if (++iteration_count % 20000 == 0) {
                     std::cout << "[DLAS] Thread " << threadId << " iterations=" << iteration_count
                               << " evals=" << m_context->m_evaluations
                               << " finished=" << m_context->m_finished.load()
                               << " active=" << m_context->m_threads_active.load() << std::endl;
                 }
+                #else
+                ++iteration_count;
+                #endif
                 
                 // Check if we need to clear caches due to memory usage with cooldown to prevent thrash
                 // IMPORTANT: Monitor the executor's allocator (line caches), not just the recache allocator
@@ -375,17 +518,133 @@ void DLAS::RunWorker(int threadId)
 
                 // Create a new candidate by mutation
                 raster_picture new_pic = pic;
+                raster_picture new_picB = picB_local;
+                bool mutate_B = false;
+                if (m_context->m_dual_mode) {
+                    int r = local_executor.Random(1000);
+                    mutate_B = (r < (int)(m_context->m_dual_mutate_ratio * 1000.0));
+                }
                 try {
-                    m_thread_mutators[threadId]->MutateProgram(&new_pic);
+                    if (m_context->m_dual_mode && mutate_B) {
+                        m_thread_mutators[threadId]->SetDualFrameRole(true); // frame B
+                        m_thread_mutators[threadId]->MutateProgram(&new_picB);
+                    } else {
+                        m_thread_mutators[threadId]->SetDualFrameRole(false); // frame A
+                        m_thread_mutators[threadId]->MutateProgram(&new_pic);
+                    }
                 }
                 catch (const std::exception& e) {
                     std::cerr << "Error in mutation in thread " << threadId << ": " << e.what() << std::endl;
                     continue;
                 }
 
+                // Low-probability cross-frame structural ops (copy/swap current line)
+                bool didCrossShare = false;
+                if (m_context->m_dual_mode && m_context->m_dual_cross_share_prob > 0.0) {
+                    int rshare = local_executor.Random(1000000);
+                    if ((double)rshare / 1000000.0 < m_context->m_dual_cross_share_prob) {
+                        int y = m_thread_mutators[threadId]->GetCurrentlyMutatedLine();
+                        if (y >= 0 && y < (int)new_pic.raster_lines.size() && y < (int)new_picB.raster_lines.size()) {
+                            bool doSwap = (local_executor.Random(2) == 0);
+                            if (doSwap) {
+                                new_pic.raster_lines[y].swap(new_picB.raster_lines[y]);
+                                new_pic.raster_lines[y].cache_key = NULL;
+                                new_picB.raster_lines[y].cache_key = NULL;
+                                m_context->m_stat_crossSwapLine++;
+                                didCrossShare = true;
+                            } else {
+                                new_picB.raster_lines[y] = new_pic.raster_lines[y];
+                                new_picB.raster_lines[y].cache_key = NULL;
+                                m_context->m_stat_crossCopyLine++;
+                                didCrossShare = true;
+                            }
+                        }
+                    }
+                }
+
+                // If any structural cross-frame ops occurred, ensure recache before evaluation
+                if (m_context->m_dual_mode && didCrossShare) {
+                    // Re-cache only lines marked invalid
+                    new_pic.recache_insns_if_needed(thread_cache, thread_allocator);
+                    new_picB.recache_insns_if_needed(thread_cache, thread_allocator);
+                }
+
                 try {
                     // Evaluate the new candidate
-                    double result = (double)local_executor.ExecuteRasterProgram(&new_pic, line_results.data());
+                    double result = 0.0;
+                    if (m_context->m_dual_mode) {
+                        if (mutate_B) {
+                            // Fixed A first (plain), then B pair-aware against A
+                            (void)local_executor.ExecuteRasterProgram(&new_pic, line_results.data());
+                            memcpy(&memA, &local_executor.GetSpritesMemory(), sizeof(memA));
+                            (void)local_executor.ExecuteRasterProgram(&new_picB, line_results_B.data(), Executor::DUAL_B, &line_results);
+                            memcpy(&memB, &local_executor.GetSpritesMemory(), sizeof(memB));
+                        } else {
+                            // Fixed B first (plain), then A pair-aware against B
+                            (void)local_executor.ExecuteRasterProgram(&new_picB, line_results_B.data());
+                            memcpy(&memB, &local_executor.GetSpritesMemory(), sizeof(memB));
+                            (void)local_executor.ExecuteRasterProgram(&new_pic, line_results.data(), Executor::DUAL_A, &line_results_B);
+                            memcpy(&memA, &local_executor.GetSpritesMemory(), sizeof(memA));
+                        }
+                        const unsigned W = m_context->m_width;
+                        const unsigned H = m_context->m_height;
+                        double total = 0.0;
+                        float wl = (float)m_context->m_flicker_luma_weight;
+                        if (m_context->m_blink_ramp_evals > 0) {
+                            double t = std::min<double>(1.0, (double)m_context->m_evaluations / (double)m_context->m_blink_ramp_evals);
+                            wl = (float)((1.0 - t) * m_context->m_flicker_luma_weight_initial + t * m_context->m_flicker_luma_weight);
+                        } else {
+                            // Default: slightly relaxed luma penalty early to promote exploration in dual mode
+                            if (m_context->m_evaluations < 50000ULL) wl = (float)(0.7 * wl);
+                        }
+                        const float wc = (float)m_context->m_flicker_chroma_weight;
+                        const float Tl = (float)m_context->m_flicker_luma_thresh;
+                        const float Tc = (float)m_context->m_flicker_chroma_thresh;
+                        const int pl = m_context->m_flicker_exp_luma;
+                        const int pc = m_context->m_flicker_exp_chroma;
+                        const float* ty = m_context->m_target_y.data();
+                        const float* tu = m_context->m_target_u.data();
+                        const float* tv = m_context->m_target_v.data();
+                        m_context->m_flicker_heatmap.assign(W*H, 0);
+                        for (unsigned y = 0; y < H; ++y) {
+                            const line_cache_result* lA = line_results[y];
+                            const line_cache_result* lB = line_results_B[y];
+                            if (!lA || !lB) continue;
+                            const unsigned char* rowA = lA->color_row;
+                            const unsigned char* rowB = lB->color_row;
+                            for (unsigned x = 0; x < W; ++x) {
+                                const unsigned idx = y * W + x;
+                                const unsigned char a = rowA[x];
+                                const unsigned char b = rowB[x];
+                                const float Ya = m_context->m_palette_y[a];
+                                const float Ua = m_context->m_palette_u[a];
+                                const float Va = m_context->m_palette_v[a];
+                                const float Yb = m_context->m_palette_y[b];
+                                const float Ub = m_context->m_palette_u[b];
+                                const float Vb = m_context->m_palette_v[b];
+                                const float Ybl = 0.5f * (Ya + Yb);
+                                const float Ubl = 0.5f * (Ua + Ub);
+                                const float Vbl = 0.5f * (Va + Vb);
+                                const float dy = Ybl - ty[idx];
+                                const float du = Ubl - tu[idx];
+                                const float dv = Vbl - tv[idx];
+                                double base = (double)(dy*dy + du*du + dv*dv);
+                                float dY = fabsf(Ya - Yb);
+                                float dC = sqrtf((Ua - Ub)*(Ua - Ub) + (Va - Vb)*(Va - Vb));
+                                float yl = dY - Tl; if (yl < 0) yl = 0;
+                                float yc = dC - Tc; if (yc < 0) yc = 0;
+                                double flick = 0.0;
+                                if (wl > 0) { double t = yl; if (pl == 2) t = t*t; else if (pl == 3) t = t*t*t; else t = pow(t, (double)pl); flick += wl * t; }
+                                if (wc > 0) { double t = yc; if (pc == 2) t = t*t; else if (pc == 3) t = t*t*t; else t = pow(t, (double)pc); flick += wc * t; }
+                                total += base + flick;
+                                float scaled = dY * (1.0f/2.0f); if (scaled > 255.0f) scaled = 255.0f; if (scaled < 0.0f) scaled = 0.0f;
+                                m_context->m_flicker_heatmap[idx] = (unsigned char)(scaled + 0.5f);
+                            }
+                        }
+                        result = total;
+                    } else {
+                        result = (double)local_executor.ExecuteRasterProgram(&new_pic, line_results.data());
+                    }
 
                     // Update global state with the evaluation
                     std::unique_lock<std::mutex> lock(m_context->m_mutex);
@@ -402,27 +661,49 @@ void DLAS::RunWorker(int threadId)
                     }
 
                     // Report to DLAS algorithm for acceptance decision and best solution tracking
-                    bool accepted = m_context->ReportEvaluationResult(
+                    bool accepted = false;
+                    if (m_context->m_dual_mode) {
+                        accepted = m_context->ReportEvaluationResultDual(
+                            result,
+                            &new_pic,
+                            &new_picB,
+                            line_results,
+                            line_results_B,
+                            memA,
+                            memB,
+                            m_thread_mutators[threadId].get());
+                    } else {
+                        accepted = m_context->ReportEvaluationResult(
                         result,
                         &new_pic,
                         line_results,
                         local_executor.GetSpritesMemory(),
                         m_thread_mutators[threadId].get()
                     );
+                    }
 
                     // If accepted, update our local copy
                     if (accepted) {
-                        pic = new_pic;
+                        if (m_context->m_dual_mode) {
+                            if (mutate_B) picB_local = new_picB; else pic = new_pic;
+                        } else {
+                            pic = new_pic;
+                        }
                     }
 
                     // Update local best if global best improved
                     if (m_context->m_best_result < best_result)
                     {
                         pic = m_context->m_best_pic;
+                        if (m_context->m_dual_mode) { picB_local = m_context->m_best_pic_B.raster_lines.empty() ? m_context->m_best_pic : m_context->m_best_pic_B; }
                         best_result = m_context->m_best_result;
                         // Re-cache using this worker's thread-local caches, not the DLAS-wide members
                         pic.recache_insns(thread_cache, thread_allocator);
+                        if (m_context->m_dual_mode) { picB_local.recache_insns(thread_cache, thread_allocator); }
                     }
+
+                    // Update statistics (under lock)
+                    m_context->CollectStatisticsTickUnsafe();
 
                     // Allow other threads to process by releasing the lock
                     lock.unlock();
@@ -541,7 +822,9 @@ void DLAS::RunWorker(int threadId)
 // Fix for DLAS::Run method
 void DLAS::Run()
 {
-    if (quiet) std::cout << "Starting DLAS optimization" << std::endl;
+    #ifdef THREAD_DEBUG
+    std::cout << "Starting DLAS optimization" << std::endl;
+    #endif
     
     m_running = true;
     m_init_completed = false;
@@ -570,7 +853,9 @@ void DLAS::Run()
     // Wait for all threads to complete
     try {
         std::unique_lock<std::mutex> lock(m_context->m_mutex);
+        #ifdef THREAD_DEBUG
         std::cout << "[CTL] Control thread entering wait loop" << std::endl;
+        #endif
         
         // CRITICAL FIX: Improved wait condition and handling
         // Wait until either:
@@ -593,9 +878,11 @@ wait_again:
             }
         }
 
+        #ifdef THREAD_DEBUG
         std::cout << "[CTL] Wait finished: running=" << m_running
                   << ", finished=" << m_context->m_finished.load()
                   << ", active_threads=" << m_context->m_threads_active.load() << std::endl;
+        #endif
 
         // If threads all finished unexpectedly and we have no max evals set, re-spawn workers
         if (!m_context->m_finished.load() && m_context->m_threads_active.load() <= 0 && m_running) {
@@ -606,25 +893,33 @@ wait_again:
             lock.unlock();
             try {
                 int started = m_context->StartWorkerThreads(std::bind(&DLAS::RunWorker, this, std::placeholders::_1));
-                {
-                    std::unique_lock<std::mutex> relock(m_context->m_mutex);
-                    std::cout << "[DLAS] Re-spawned workers: " << started << std::endl;
-                }
+                #ifdef THREAD_DEBUG
+                std::unique_lock<std::mutex> relock(m_context->m_mutex);
+                std::cout << "[DLAS] Re-spawned workers: " << started << std::endl;
+                #endif
             } catch (const std::system_error& e) {
                 // Recoverable thread creation failure. Log and retry after short sleep.
+                #ifdef THREAD_DEBUG
                 std::cerr << "[DLAS] Re-spawn failed with std::system_error: " << e.what() << ". Retrying in 1s..." << std::endl;
+                #endif
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             } catch (const std::bad_alloc& e) {
                 // Memory pressure during spawn; try to free caches and retry
+                #ifdef THREAD_DEBUG
                 std::cerr << "[DLAS] Re-spawn failed with bad_alloc: " << e.what() << ". Clearing caches and retrying..." << std::endl;
+                #endif
                 // Best-effort: signal workers (none active) and clear global caches if any
                 // Note: per-thread caches are cleared on start; here we can only log.
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
             } catch (const std::exception& e) {
+                #ifdef THREAD_DEBUG
                 std::cerr << "[DLAS] Re-spawn failed: " << e.what() << ". Will retry." << std::endl;
+                #endif
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
             } catch (...) {
+                #ifdef THREAD_DEBUG
                 std::cerr << "[DLAS] Re-spawn failed with unknown error. Will retry." << std::endl;
+                #endif
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
             // Continue waiting
@@ -637,10 +932,14 @@ wait_again:
     }
 
     // Join all threads
+    #ifdef THREAD_DEBUG
     std::cout << "[CTL] Joining worker threads" << std::endl;
+    #endif
     m_context->JoinWorkerThreads();
     m_running = false;
+    #ifdef THREAD_DEBUG
     std::cout << "[CTL] DLAS control thread exiting" << std::endl;
+    #endif
 }
 
 void DLAS::Start()
@@ -661,9 +960,13 @@ void DLAS::Stop()
 {
     m_running = false;
     if (m_context) {
-        std::unique_lock<std::mutex> lock(m_context->m_mutex);
+        // Avoid deadlock if UI holds the mutex; just mark finished and notify.
+        #ifdef THREAD_DEBUG
         std::cout << "[FIN] DLAS::Stop(): setting finished and notifying" << std::endl;
+        #endif
         CTX_MARK_FINISHED((*m_context), "dlas_stop");
+        // Best-effort wakeup for any waiters
+        m_context->m_condvar_update.notify_all();
     }
     // Join control thread if running
     if (m_control_thread.joinable()) {

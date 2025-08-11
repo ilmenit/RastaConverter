@@ -46,6 +46,11 @@ void Configuration::Process(int argc, char *argv[])
 {
 	parser.parse(argc, argv);
 
+    // unified help switches (do not treat "-h" as help to avoid conflict with height)
+    if (parser.switchExists("help") || parser.switchExists("?")) {
+        show_help = true;
+    }
+
 	if (parser.switchExists("continue"))
 	{
 		continue_processing=true;
@@ -56,8 +61,13 @@ void Configuration::Process(int argc, char *argv[])
 
     command_line=parser.mn_command_line;
 
-	input_file = parser.getValue("i","NoFileName");
-	output_file = parser.getValue("o","output.png");
+    input_file = parser.getValue("i","");
+    if (input_file.empty()) input_file = parser.getValue("input","");
+    output_file = parser.getValue("o","output.png");
+    {
+        std::string out2 = parser.getValue("output", "");
+        if (!out2.empty()) output_file = out2;
+    }
 	palette_file = parser.getValue("pal","Palettes/laoo.act");
 
 	if (parser.switchExists("palette"))
@@ -158,7 +168,8 @@ void Configuration::Process(int argc, char *argv[])
 	string details_val2 = parser.getValue("details_val","0.5");
 	details_strength=String2Value<double>(details_val2);
 
-	string solutions_value = parser.getValue("s","1");
+    // LAHC/DLAS history length (was /s). Kept backward compatible.
+    string solutions_value = parser.getValue("s","1");
 	solutions=String2Value<int>(solutions_value);
 	if (solutions<1)
 		solutions=1;
@@ -169,7 +180,7 @@ void Configuration::Process(int argc, char *argv[])
 		preprocess_only=false;
 
     // Quiet flag for headless/CLI operation
-    quiet = parser.switchExists("quiet");
+    quiet = parser.switchExists("quiet") || parser.switchExists("q");
 
 	string brightness_value = parser.getValue("brightness","0");
 	brightness=String2Value<int>(brightness_value);
@@ -192,16 +203,42 @@ void Configuration::Process(int argc, char *argv[])
 	if (gamma>8)
 		gamma=8;
 	
-	if (!parser.switchExists("i"))
-	{
-		string temp;
-		if (argc>1)
-		{
-			temp=argv[1];
-			if (temp.find("/")==string::npos)
-				input_file=temp;
-		}
-	}
+    // allow positional input file as first non-option arg when not provided via /i or -i
+    if (input_file.empty())
+    {
+        bool stop_options = false;
+        for (int ai = 1; ai < argc; ++ai)
+        {
+            std::string tok = argv[ai];
+            if (tok.empty()) continue;
+            if (tok == "--") { stop_options = true; continue; }
+            char c0 = tok[0];
+            if (stop_options || (c0 != '-' && c0 != '/')) { input_file = tok; break; }
+        }
+    }
+
+    // Accept value next to flag: -i <file>, /i <file>, --input <file>
+    if (input_file.empty())
+    {
+        for (int ai = 1; ai + 1 < argc; ++ai)
+        {
+            std::string key = argv[ai];
+            if (key == "--") break; // stop option parsing
+            if (key == "-i" || key == "/i" || key == "--input")
+            {
+                std::string val = argv[ai + 1];
+                if (!(val.size() && (val[0] == '-' || val[0] == '/'))) { input_file = val; break; }
+            }
+        }
+    }
+
+    // Validate required arguments for fresh run (not when continuing)
+    if (!continue_processing)
+    {
+        if (input_file.empty()) {
+            bad_arguments = true;
+        }
+    }
 
 	width=160; // constant in RastaConverter!
 
@@ -235,4 +272,72 @@ void Configuration::Process(int argc, char *argv[])
 
 	string max_evals_value = parser.getValue("max_evals","1000000000000000000");
 	max_evals=String2Value<unsigned long long>(max_evals_value);
+
+    // Dual-frame mode and parameters (non-intrusive when off)
+    {
+        const bool dual_switch = parser.switchExists("dual");
+        std::string dual_val = parser.getValue("dual", "");
+        for (auto &c : dual_val) c = (char)tolower(c);
+        // Rules:
+        // - If /dual is present as a bare switch, enable dual mode
+        // - Else if /dual has value on/true/1, enable
+        dual_mode = false;
+        if (dual_switch) {
+            dual_mode = true;
+        } else if (!dual_val.empty() && (dual_val == "on" || dual_val == "true" || dual_val == "1")) {
+            dual_mode = true;
+		}
+
+        // blend_space (only YUV is supported in current build)
+        blend_space = E_BLEND_YUV;
+
+        // blend_distance (only YUV is supported in current build)
+        blend_distance = E_DISTANCE_YUV;
+
+        // gamma for rgb-linear
+        blend_gamma = String2Value<double>(parser.getValue("blend_gamma", "2.2"));
+        if (blend_gamma < 1.0) blend_gamma = 1.0; if (blend_gamma > 4.0) blend_gamma = 4.0;
+
+        // flicker weights/thresholds/exponents (accept blink_* as aliases)
+        auto getF = [this](const char* key, const char* keyAlias, const char* def) {
+            std::string v = parser.getValue(key, "");
+            if (v.empty()) v = parser.getValue(keyAlias, def);
+            return String2Value<double>(v);
+        };
+        auto getI = [this](const char* key, const char* keyAlias, const char* def) {
+            std::string v = parser.getValue(key, "");
+            if (v.empty()) v = parser.getValue(keyAlias, def);
+            return String2Value<int>(v);
+        };
+        flicker_luma_weight  = getF("flicker_luma_weight",  "blink_luma_weight",  "1.0");
+        flicker_luma_thresh  = getF("flicker_luma_thresh",  "blink_luma_thresh",  "3");
+        flicker_exp_luma     = getI("flicker_exp_luma",     "blink_exp_luma",     "2");
+        flicker_chroma_weight= getF("flicker_chroma_weight","blink_chroma_weight","0.2");
+        flicker_chroma_thresh= getF("flicker_chroma_thresh","blink_chroma_thresh","8");
+        flicker_exp_chroma   = getI("flicker_exp_chroma",   "blink_exp_chroma",   "2");
+
+        // strategy: only 'alternate' supported
+        dual_strategy = E_DUAL_STRAT_ALTERNATE;
+
+        // init: only 'dup' supported
+        dual_init = E_DUAL_INIT_DUP;
+
+        dual_mutate_ratio = String2Value<double>(parser.getValue("dual_mutate_ratio", ""));
+        if (dual_mutate_ratio < 0.0) dual_mutate_ratio = 0.0; if (dual_mutate_ratio > 1.0) dual_mutate_ratio = 1.0;
+
+        // cross-frame ops probabilities (optional)
+        std::string cross_share_val = parser.getValue("dual_cross_share_prob", "");
+        if (!cross_share_val.empty()) dual_cross_share_prob = String2Value<double>(cross_share_val);
+        if (dual_cross_share_prob < 0.0) dual_cross_share_prob = 0.0; if (dual_cross_share_prob > 1.0) dual_cross_share_prob = 1.0;
+        std::string both_frames_val = parser.getValue("dual_both_frames_prob", "");
+        if (!both_frames_val.empty()) dual_both_frames_prob = String2Value<double>(both_frames_val);
+        if (dual_both_frames_prob < 0.0) dual_both_frames_prob = 0.0; if (dual_both_frames_prob > 1.0) dual_both_frames_prob = 1.0;
+
+        // flicker ramp config (aliases blink_* accepted)
+        std::string ramp_evals_val = parser.getValue("blink_ramp_evals", "0");
+        blink_ramp_evals = String2Value<unsigned long long>(ramp_evals_val);
+        std::string wl_init_val = parser.getValue("flicker_luma_weight_initial", "");
+        if (wl_init_val.empty()) wl_init_val = parser.getValue("blink_luma_weight_initial", "");
+        if (!wl_init_val.empty()) flicker_luma_weight_initial = String2Value<double>(wl_init_val);
+    }
 }

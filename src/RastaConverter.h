@@ -166,6 +166,8 @@ public:
     
     // Output bitmap for displaying results
     FIBITMAP* output_bitmap;
+    // Dual GUI view mode: 0=blended, 1=A, 2=B
+    int dual_view_mode = 0;
 };
 
 #endif // RASTA_CONVERTER_H

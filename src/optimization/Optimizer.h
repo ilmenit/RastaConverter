@@ -39,6 +39,9 @@ public:
     
     // Load previous state
     virtual bool LoadState(const std::string& filename) = 0;
+
+    // Optional: name of the optimizer
+    virtual const char* Name() const = 0;
 };
 
 #endif // OPTIMIZER_H

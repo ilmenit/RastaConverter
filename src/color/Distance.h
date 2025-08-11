@@ -1,7 +1,7 @@
 #ifndef DISTANCE_H
 #define DISTANCE_H
 
-struct rgb;
+#include "rgb.h"
 
 #define MAX_COLOR_DISTANCE (255*255*3)
 #define DISTANCE_MAX 0xffffffff
@@ -15,6 +15,9 @@ distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2);
 distance_t RGBCIEDE2000Distance(const rgb &col1, const rgb &col2);
 distance_t RGByuvDistance(const rgb &col1, const rgb &col2);
 distance_t RGBCIE94Distance(const rgb &col1, const rgb &col2);
+
+// Expose RGB -> Lab conversion for users of CIE distances and precomputations
+void RGB2LAB(const rgb &c, Lab &result);
 
 
 #endif

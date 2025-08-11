@@ -123,6 +123,12 @@ public:
      * Get the picture data
      */
     const std::vector<screen_line>& GetPicture() const { return m_picture; }
+
+    /**
+     * Get the original source picture (pre-quantization), if available.
+     * In current pipeline this is identical to GetPicture() until destination overwrite.
+     */
+    const std::vector<screen_line>& GetSourcePicture() const { return m_source_picture.empty() ? m_picture : m_source_picture; }
     
     /**
      * Get error map for all colors
@@ -163,6 +169,8 @@ private:
     
     // Picture data
     std::vector<screen_line> m_picture;
+    // Preserve a copy of the pre-quantized, pre-destination source picture for dual-mode targets
+    std::vector<screen_line> m_source_picture;
     std::vector<distance_t> m_picture_all_errors[128];
     std::vector<std::vector<unsigned char>> m_details_data;
     std::vector<std::vector<rgb_error>> m_error_map;

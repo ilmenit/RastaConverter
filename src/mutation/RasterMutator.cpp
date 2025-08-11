@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <iostream>
 #include <assert.h>
+#include <cmath>
 
 // Define mutation names array for display
 const char* mutation_names[E_MUTATION_MAX] = {
@@ -357,34 +358,51 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
             else
             {
                 temp.loose.instruction = (e_raster_instruction)(E_RASTER_LDA + Random(4));
-                if (Random(2))
-                    temp.loose.value = (Random(128) * 2);
-                else
-                {
-                    const std::vector<unsigned char>& possible_colors = m_gstate->m_possible_colors_for_each_line[m_currently_mutated_y];
-                    if (!possible_colors.empty()) {
-                        temp.loose.value = possible_colors[Random((int)possible_colors.size())];
+                // Seed value: prefer complementary pick in dual mode
+                bool seededByComplement = false;
+                if (m_gstate->m_dual_mode && m_currently_mutated_y >= 0 && m_currently_mutated_y < (int)m_height) {
+                    unsigned char compVal;
+                    int px = -1;
+                    // Estimate a pixel x similarly to change-to-color path
+                    if (!prog.instructions.empty()) {
+                        px = ComputePixelXForInstructionIndex(prog, i1);
                     }
-                    else {
+                    if (px < 0 || px >= (int)m_width) px = Random(m_width);
+                    if (TryComplementaryPick(m_currently_mutated_y, px, compVal)) {
+                        temp.loose.value = compVal;
+                        m_gstate->m_stat_dualSeedAdd++;
+                        seededByComplement = true;
+                        m_used_seed_add = true;
+                    }
+                }
+                if (!seededByComplement) {
+                    if (Random(2))
                         temp.loose.value = (Random(128) * 2);
+                    else {
+                        const std::vector<unsigned char>& possible_colors = m_gstate->m_possible_colors_for_each_line[m_currently_mutated_y];
+                        if (!possible_colors.empty()) {
+                            temp.loose.value = possible_colors[Random((int)possible_colors.size())];
+                        } else {
+                            temp.loose.value = (Random(128) * 2);
+                        }
                     }
                 }
 
                 temp.loose.target = (e_target)(Random(E_TARGET_MAX));
 
-                // Safe access to picture data
-                if (m_currently_mutated_y >= 0 && m_currently_mutated_y < m_height && m_picture != nullptr) {
-                    const screen_line& line = m_picture[m_currently_mutated_y];
-                    if (line.size() > 0) {
-                        c = Random((int)line.size());
-                        temp.loose.value = FindAtariColorIndex(line[c]) * 2;
-                    }
-                    else {
+                // Only sample target picture color if we didn't already seed from complementary logic
+                if (!seededByComplement) {
+                    if (m_currently_mutated_y >= 0 && m_currently_mutated_y < m_height && m_picture != nullptr) {
+                        const screen_line& line = m_picture[m_currently_mutated_y];
+                        if (line.size() > 0) {
+                            c = Random((int)line.size());
+                            temp.loose.value = FindAtariColorIndex(line[c]) * 2;
+                        } else {
+                            temp.loose.value = (Random(128) * 2);
+                        }
+                    } else {
                         temp.loose.value = (Random(128) * 2);
                     }
-                }
-                else {
-                    temp.loose.value = (Random(128) * 2);
                 }
 
                 // More efficient insert
@@ -475,18 +493,39 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         while (Random(5) == 0 && i2 + 1 < (int)m_height)
             ++i2;
 
-        // Safe access to picture data for selected position
-        if (i2 >= 0 && i2 < m_height && m_picture != nullptr) {
-            const screen_line& line = m_picture[i2];
-            if (x >= 0 && x < (int)line.size()) {
-                prog.instructions[i1].loose.value = FindAtariColorIndex(line[x]) * 2;
+        // Dual-aware complementary value selection
+        if (m_gstate->m_dual_mode) {
+            unsigned char compVal;
+            if (TryComplementaryPick(i2, x, compVal)) {
+                prog.instructions[i1].loose.value = compVal;
+                m_used_complementary_pick = true;
+            } else {
+                // Fallback to original behavior (use source picture color)
+                if (i2 >= 0 && i2 < m_height && m_picture != nullptr) {
+                    const screen_line& line = m_picture[i2];
+                    if (x >= 0 && x < (int)line.size()) {
+                        prog.instructions[i1].loose.value = FindAtariColorIndex(line[x]) * 2;
+                    } else {
+                        prog.instructions[i1].loose.value = (Random(128) * 2);
+                    }
+                } else {
+                    prog.instructions[i1].loose.value = (Random(128) * 2);
+                }
+            }
+        } else {
+            // Single-frame behavior (original)
+            if (i2 >= 0 && i2 < m_height && m_picture != nullptr) {
+                const screen_line& line = m_picture[i2];
+                if (x >= 0 && x < (int)line.size()) {
+                    prog.instructions[i1].loose.value = FindAtariColorIndex(line[x]) * 2;
+                }
+                else {
+                    prog.instructions[i1].loose.value = (Random(128) * 2);
+                }
             }
             else {
                 prog.instructions[i1].loose.value = (Random(128) * 2);
             }
-        }
-        else {
-            prog.instructions[i1].loose.value = (Random(128) * 2);
         }
 
         prog.cache_key = NULL;
@@ -494,7 +533,22 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         m_stats.success_count[mutation]++;
         break;
     case E_MUTATION_CHANGE_VALUE:
-        if (Random(10) == 0)
+        if (m_gstate->m_dual_mode && Random(2) == 0)
+        {
+            // 50%: complementary recompute for color targets
+            unsigned char compVal;
+            int px = ComputePixelXForInstructionIndex(prog, i1);
+            if (px < 0 || px >= (int)m_width) px = Random(m_width);
+            if (TryComplementaryPick(m_currently_mutated_y, px, compVal)) {
+                prog.instructions[i1].loose.value = compVal;
+                m_used_complementary_pick = true;
+            } else {
+                // fallback to small random change
+                int dc = (Random(2) ? 1 : -1) * (Random(2) ? 1 : 16);
+                prog.instructions[i1].loose.value += dc;
+            }
+        }
+        else if (Random(10) == 0)
         {
             if (Random(2))
                 prog.instructions[i1].loose.value = (Random(128) * 2);
@@ -526,6 +580,123 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         // Should not happen
         break;
     }
+}
+
+// Compute an approximate pixel x-position for a given instruction index on the line
+int RasterMutator::ComputePixelXForInstructionIndex(const raster_line& prog, int insnIndex)
+{
+    int cycles = 0;
+    for (int k = 0; k < insnIndex && k < (int)prog.instructions.size(); ++k) {
+        const auto& ins = prog.instructions[k];
+        cycles += (ins.loose.instruction <= E_RASTER_NOP) ? 2 : 4;
+    }
+    if (cycles < 0) cycles = 0;
+    if (cycles >= free_cycles) cycles = free_cycles - 1;
+    if (cycles >= CYCLES_MAX) cycles = CYCLES_MAX - 1;
+    int x = safe_screen_cycle_offset(cycles);
+    int len = safe_screen_cycle_length(cycles);
+    if (len < 0) len = 0;
+    if (len > 0) x += Random(len);
+    return x;
+}
+
+// Try to choose a complementary palette value (encoded as value*2) at (y,x) against the other frame
+bool RasterMutator::TryComplementaryPick(int y, int x, unsigned char& outValue)
+{
+    if (!m_gstate->m_dual_mode) return false;
+    if (y < 0 || y >= (int)m_height || x < 0 || x >= (int)m_width) return false;
+
+    // Access other-frame created picture safely (use snapshot in context; may be slightly stale but okay)
+    unsigned char a = 0;
+    bool haveOther = false;
+    {
+        std::unique_lock<std::mutex> lock(m_gstate->m_mutex);
+        if (m_is_mutating_B) {
+            if (y < (int)m_gstate->m_created_picture.size() && x < (int)m_gstate->m_created_picture[y].size()) {
+                a = m_gstate->m_created_picture[y][x];
+                haveOther = true;
+            }
+        } else {
+            if (y < (int)m_gstate->m_created_picture_B.size() && x < (int)m_gstate->m_created_picture_B[y].size()) {
+                a = m_gstate->m_created_picture_B[y][x];
+                haveOther = true;
+            }
+        }
+    }
+    if (!haveOther) return false;
+
+    const unsigned idx = (unsigned)y * m_width + (unsigned)x;
+    const float Ya = m_gstate->m_palette_y[a];
+    const float Ua = m_gstate->m_palette_u[a];
+    const float Va = m_gstate->m_palette_v[a];
+    const float ty = m_gstate->m_target_y[idx];
+    const float tu = m_gstate->m_target_u[idx];
+    const float tv = m_gstate->m_target_v[idx];
+    // Effective WL with ramp
+    float wl = (float)m_gstate->m_flicker_luma_weight;
+    if (m_gstate->m_blink_ramp_evals > 0) {
+        double t = std::min<double>(1.0, (double)m_gstate->m_evaluations / (double)m_gstate->m_blink_ramp_evals);
+        wl = (float)((1.0 - t) * m_gstate->m_flicker_luma_weight_initial + t * m_gstate->m_flicker_luma_weight);
+    }
+    const float wc = (float)m_gstate->m_flicker_chroma_weight;
+    const float Tl = (float)m_gstate->m_flicker_luma_thresh;
+    const float Tc = (float)m_gstate->m_flicker_chroma_thresh;
+    const int   pl = m_gstate->m_flicker_exp_luma;
+    const int   pc = m_gstate->m_flicker_exp_chroma;
+
+    const std::vector<unsigned char>& candidates = m_gstate->m_possible_colors_for_each_line[y];
+    double bestScore = 1e100;
+    int bestB = -1;
+
+    auto evalB = [&](int bIdx) {
+        const float Yb = m_gstate->m_palette_y[bIdx];
+        const float Ub = m_gstate->m_palette_u[bIdx];
+        const float Vb = m_gstate->m_palette_v[bIdx];
+        const float Ybl = 0.5f * (Ya + Yb);
+        const float Ubl = 0.5f * (Ua + Ub);
+        const float Vbl = 0.5f * (Va + Vb);
+        const float dy = Ybl - ty;
+        const float du = Ubl - tu;
+        const float dv = Vbl - tv;
+        double base = (double)(dy * dy + du * du + dv * dv);
+        const float dY = fabsf(Ya - Yb);
+        const float dC = sqrtf((Ua - Ub) * (Ua - Ub) + (Va - Vb) * (Va - Vb));
+        float yl = dY - Tl; if (yl < 0) yl = 0;
+        float yc = dC - Tc; if (yc < 0) yc = 0;
+        double flick = 0.0;
+        if (wl > 0) { double t = yl; if (pl == 2) t = t * t; else if (pl == 3) t = t * t * t; else t = pow(t, (double)pl); flick += wl * t; }
+        if (wc > 0) { double t = yc; if (pc == 2) t = t * t; else if (pc == 3) t = t * t * t; else t = pow(t, (double)pc); flick += wc * t; }
+        return base + flick;
+    };
+
+    // Dual mode: always include full-palette exploration in addition to any per-line candidates
+    // Sample from candidate set (if available)
+    if (!candidates.empty()) {
+        int limit = (int)std::min<size_t>(24, candidates.size());
+        for (int i = 0; i < limit; ++i) {
+            int idxC = candidates[Random((int)candidates.size())] / 2; // ensure 0..127
+            if (idxC < 0) idxC = 0; if (idxC > 127) idxC = 127;
+            double s = evalB(idxC);
+            if (s < bestScore) { bestScore = s; bestB = idxC; }
+        }
+    }
+    // Always sample a random subset from the full palette to escape per-line color traps
+    {
+        int trials = 16; // modest extra exploration
+        for (int t = 0; t < trials; ++t) {
+            int idxC = Random(128);
+            double s = evalB(idxC);
+            if (s < bestScore) { bestScore = s; bestB = idxC; }
+        }
+    }
+
+    if (bestB >= 0) {
+        outValue = (unsigned char)(bestB * 2);
+        // Stats: count dual complement value
+        m_gstate->m_stat_dualComplementValue++;
+        return true;
+    }
+    return false;
 }
 
 void RasterMutator::BatchMutateLine(raster_line& prog, raster_picture& pic, int count)

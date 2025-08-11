@@ -20,7 +20,9 @@ inline BOOL WINAPI RcConsoleCtrlHandler(DWORD ctrl_type)
     case CTRL_SHUTDOWN_EVENT: name = "CTRL_SHUTDOWN_EVENT"; break;
     default: name = "UNKNOWN_CTRL"; break;
     }
+    #ifdef THREAD_DEBUG
     std::cout << "[CTRL] " << name << std::endl;
+    #endif
     return FALSE; // allow normal processing
 }
 

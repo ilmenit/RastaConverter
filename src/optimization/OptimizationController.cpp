@@ -1,5 +1,7 @@
 #include "OptimizationController.h"
 #include "DLAS.h"
+#include "LAHC.h"
+#include "../config.h"
 #include "../mutation/RasterMutator.h"
 #include <algorithm>
 #include <iostream>
@@ -29,7 +31,8 @@ bool OptimizationController::Initialize(int threads, int width, int height,
     size_t cacheSize,
     unsigned long initialSeed,
     const OnOffMap* onoffMap,
-    bool useRegionalMutation)
+    bool useRegionalMutation,
+    e_optimizer_type optimizer_type)
 {
     // Initialize evaluation context
     m_evalContext.m_width = width;
@@ -48,6 +51,8 @@ bool OptimizationController::Initialize(int threads, int width, int height,
     m_evalContext.m_thread_count = threads;
     m_evalContext.m_time_start = time(nullptr);
     m_evalContext.m_use_regional_mutation = useRegionalMutation;
+    // Dual-frame configuration is wired via EvaluationContext in RastaConverter
+    // so we rely on RastaConverter to set these fields after Initialize(). Defaults remain off.
 
     // Pre-initialize created picture with empty data to avoid crashes
     m_evalContext.m_created_picture.resize(height);
@@ -86,9 +91,19 @@ bool OptimizationController::Initialize(int threads, int width, int height,
         0                     // Thread ID
     );
 
-    // Create optimizer (DLAS for now). Selection between DLAS/LAHC can be added here when LAHC exists.
+    // Create optimizer based on selection
     int solutionsParam = solutions;
-    m_optimizer = std::make_unique<DLAS>(&m_evalContext, m_executors[0].get(), m_mutators[0].get(), solutionsParam);
+    // Keep desired history length in context for algorithms that want to reference it
+    m_evalContext.m_history_length_config = solutionsParam;
+    switch (optimizer_type) {
+    case E_OPT_LAHC:
+        m_optimizer = std::make_unique<LAHC>(&m_evalContext, m_executors[0].get(), m_mutators[0].get(), solutionsParam);
+        break;
+    case E_OPT_DLASHC:
+    default:
+        m_optimizer = std::make_unique<DLAS>(&m_evalContext, m_executors[0].get(), m_mutators[0].get(), solutionsParam);
+        break;
+    }
 
     return true;
 }
@@ -126,13 +141,23 @@ void OptimizationController::Run()
     
     // Start the optimizer
     m_optimizer->Start();
+
+    // Initialize statistics tracking baseline
+    {
+        std::unique_lock<std::mutex> lock(m_evalContext.m_mutex);
+        m_evalContext.m_time_start = time(NULL);
+        m_evalContext.m_statistics.clear();
+        m_evalContext.m_last_statistics_seconds = 0;
+    }
 }
 
 void OptimizationController::Stop()
 {
     m_running = false;
     if (m_optimizer) {
+        #ifdef THREAD_DEBUG
         std::cout << "[CTL] OptimizationController::Stop()" << std::endl;
+        #endif
         m_optimizer->Stop();
     }
 }
@@ -144,11 +169,13 @@ bool OptimizationController::IsFinished() const
     static std::atomic<bool> reported{false};
     bool fin = m_evalContext.m_finished.load();
     if (fin && !reported.exchange(true)) {
+        #ifdef THREAD_DEBUG
         std::unique_lock<std::mutex> lock(const_cast<std::mutex&>(m_evalContext.m_mutex));
         std::cout << "[CTL] IsFinished=true; reason='" << m_evalContext.m_finish_reason
                   << "' at " << m_evalContext.m_finish_file << ":" << m_evalContext.m_finish_line
                   << ", evals_at=" << m_evalContext.m_finish_evals_at
                   << ", threads_active=" << m_evalContext.m_threads_active.load() << std::endl;
+        #endif
     }
     return fin;
 }
@@ -242,3 +269,6 @@ bool OptimizationController::CheckAutoSave()
     
     return auto_save_triggered;
 }
+
+// Periodically collect statistics (evals, seconds, best distance)
+// moved to EvaluationContext::CollectStatisticsTickUnsafe()

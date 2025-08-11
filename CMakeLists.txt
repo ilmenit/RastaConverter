@@ -108,6 +108,8 @@ set(OPTIMIZATION_SOURCES
     src/optimization/OptimizationController.h
     src/optimization/DLAS.cpp
     src/optimization/DLAS.h
+    src/optimization/LAHC.cpp
+    src/optimization/LAHC.h
     src/optimization/Optimizer.h
 )
 

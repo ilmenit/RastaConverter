@@ -47,6 +47,26 @@ enum e_optimizer_type {
     E_OPT_LAHC,
 };
 
+// Dual-frame blend mode enums
+enum e_blend_space {
+    E_BLEND_YUV,
+    E_BLEND_RGB_LINEAR,
+    E_BLEND_LAB,
+    E_BLEND_AUTO
+};
+
+enum e_dual_strategy {
+    E_DUAL_STRAT_ALTERNATE,
+    E_DUAL_STRAT_JOINT,
+    E_DUAL_STRAT_STAGED
+};
+
+enum e_dual_init {
+    E_DUAL_INIT_DUP,
+    E_DUAL_INIT_RANDOM,
+    E_DUAL_INIT_ANTI
+};
+
 struct Configuration {
 	std::string input_file;
 	std::string output_file;
@@ -83,11 +103,37 @@ struct Configuration {
 	e_init_type init_type;
     e_optimizer_type optimizer_type;
     bool quiet;
+    // CLI handling flags
+    bool show_help = false;
+    bool bad_arguments = false;
 
 	CommandLineParser parser; 
 
 	void ProcessCmdLine();
 	void Process(int argc, char *argv[]);
+
+    // Dual-frame blend configuration
+    bool dual_mode = false;                     // /dual=on|off
+    e_blend_space blend_space = E_BLEND_YUV;    // /blend_space=
+    e_distance_function blend_distance = E_DISTANCE_YUV; // /blend_distance=
+    double blend_gamma = 2.2;                   // /blend_gamma= (rgb-linear)
+
+    double flicker_luma_weight = 1.0;           // /flicker_luma_weight=
+    double flicker_luma_thresh = 3.0;           // /flicker_luma_thresh=
+    int    flicker_exp_luma = 2;                // /flicker_exp_luma=
+    double flicker_chroma_weight = 0.2;         // /flicker_chroma_weight=
+    double flicker_chroma_thresh = 8.0;         // /flicker_chroma_thresh=
+    int    flicker_exp_chroma = 2;              // /flicker_exp_chroma=
+
+    e_dual_strategy dual_strategy = E_DUAL_STRAT_ALTERNATE; // /dual_strategy=
+    e_dual_init dual_init = E_DUAL_INIT_DUP;                // /dual_init=
+    double dual_mutate_ratio = 0.5;           // probability to mutate B vs A
+    // Cross-frame structural ops probabilities
+    double dual_cross_share_prob = 0.05;      // probability of cross copy/swap
+    double dual_both_frames_prob = 0.0;       // reserved for future
+    // Flicker ramp configuration
+    unsigned long long blink_ramp_evals = 0;  // number of evals to ramp WL
+    double flicker_luma_weight_initial = 1.0; // starting WL if ramp enabled
 };
 
 #endif

@@ -1,0 +1,104 @@
+### Dual mode (A/B) implementation checklist
+
+- [ ] Guardrails and objective
+  - [ ] Keep current pair objective: YUV blend base error + soft flicker penalties (hinge on ΔY, ΔC) in `src/optimization/DLAS.cpp`.
+  - [ ] Verify per-pixel indexing uses `idx = y*W + x` consistently in all dual paths.
+  - [ ] Ensure `EvaluationContext::PrecomputeDualTransforms()` runs when `/dual` is enabled (wired in `RastaConverter.cpp`).
+  - [ ] With `/dual=off`, behavior and scores remain identical to baseline.
+
+### Core change 1: Dual‑aware value selection (complementary color)
+Goal: When changing/adding a color, choose the palette index that best complements the other frame at that pixel, minimizing blended error + flicker.
+
+- [ ] In `src/mutation/RasterMutator.cpp`, inside `case E_MUTATION_CHANGE_VALUE_TO_COLOR:` add dual path:
+  - [ ] If `m_gstate->m_dual_mode` and target is a color register, compute complementary value instead of sampling from target image.
+  - [ ] Determine `(x,y)` from instruction timing (existing logic), clamp to image bounds.
+  - [ ] Read other frame’s palette index at `(x,y)`:
+        - Mutating A → use `m_gstate->m_created_picture_B[y][x]`
+        - Mutating B → use `m_gstate->m_created_picture[y][x]`
+        - If not available (empty/stale line), fall back to single‑frame behavior.
+  - [ ] Candidate set `C`: use `m_gstate->m_possible_colors_for_each_line[y]` if non‑empty; else 0..127.
+  - [ ] For each `b ∈ C`, with context arrays `m_palette_y/u/v` and target `m_target_y/u/v[idx]`:
+        - Compute blend base: `Ybl=0.5*(Ya+Yb)`, `Ubl=0.5*(Ua+Ub)`, `Vbl=0.5*(Va+Vb)`; `base=(Ybl-ty)^2+(Ubl-tu)^2+(Vbl-tv)^2`.
+        - Flicker: `dY=|Ya-Yb|`, `dC=hypot(Ua-Ub, Va-Vb)`;
+          `flick = wl*hinge(dY-Tl)^pl + wc*hinge(dC-Tc)^pc` with params from context.
+        - Score = base + flick; pick argmin `b*`.
+  - [ ] Set `instr.loose.value = 2*b*` (palette index coding) and invalidate caches for that line.
+- [ ] Extract the above into a small private helper in `RasterMutator` so it can be reused by other mutations.
+
+Pseudocode for complementary pick (used in change‑to‑color and seeding):
+- Inputs: other index a, target (ty,tu,tv), candidate set C, context params (palette YUV and flicker weights/thresholds/exponents)
+- For b in C: compute base + flicker as above; return argmin b.
+
+### Core change 2: Seed add/change‑value with complementary picks
+- [ ] `E_MUTATION_ADD_INSTRUCTION` (only when target is a color register): if `/dual` is on, seed the new value using complementary pick at `(x,y)` instead of random/target sampling.
+- [ ] `E_MUTATION_CHANGE_VALUE` (color registers): with ~50% probability, recompute via complementary pick; otherwise keep +/- increments for exploration.
+- [ ] Optional luma‑preserving branch: restrict candidates to `|Yb-Ya| ≤ Tl` to reduce flicker while adjusting chroma.
+
+### Core change 3: Cross‑frame structural operations (low probability)
+Implement simple couple‑aware structure moves to escape local minima.
+
+- [ ] Add config knobs (see Config section):
+  - `dual_cross_share_prob` (default 0.05)
+  - `dual_both_frames_prob` (default 0.02)
+- [ ] In `src/optimization/DLAS.cpp` `RunWorker`, after `MutateProgram(...)` and before evaluation, when `/dual` is on:
+  - [ ] Determine current line `y` via `m_thread_mutators[threadId]->GetCurrentlyMutatedLine()`; guard bounds.
+  - [ ] With probability `dual_cross_share_prob`:
+        - Copy A→B line: `new_picB.raster_lines[y] = new_pic.raster_lines[y];` then `rehash()` and mark caches invalid for both lines; OR
+        - Swap A↔B lines with 50/50 chance.
+  - [ ] Call `recache_insns_if_needed` for both pictures after edits.
+
+### Core change 4: Optional both‑frames local tweak (very low probability)
+- [ ] Behind `dual_both_frames_prob`, at `(x,y)` try small neighborhoods around current `a` and `b` to pick `(a',b')` minimizing pair cost (restrict to allowed colors). Keep disabled by default until profiled.
+
+### Core change 5: Flicker weight ramp (exploration → refinement)
+- [ ] Add ramp config (see Config): `blink_ramp_evals`, `flicker_luma_weight_initial`.
+- [ ] Compute effective `wl_eff` each evaluation:
+      `wl_eff = (evals < blink_ramp_evals) ? lerp(initial, final, evals / blink_ramp_evals) : final`.
+- [ ] Use `wl_eff` in both initial and per‑iteration dual evaluations in `DLAS.cpp` (compute locally; do not mutate context fields).
+
+### Core change 6: Candidate set & performance
+- [ ] Prefer `m_possible_colors_for_each_line[y]` for candidate enumeration.
+- [ ] If set is large, evaluate a capped random subset (e.g., up to 32 candidates) to keep mutation latency low.
+- [ ] Keep complementary scoring numeric‑only (no allocations), reuse context arrays.
+
+### Core change 7: Diagnostics & UX
+- [ ] Add dedicated dual stats in `EvaluationContext` (do not reuse `E_MUTATION_MAX`):
+  - Counters: `DualComplementValue`, `DualSeedAdd`, `CrossCopyLine`, `CrossSwapLine`, `BothFramesTweak`.
+- [ ] Increment these counters from the respective code paths.
+- [ ] Display these in GUI stats panel (`ShowMutationStats`) beneath the existing mutation stats with clear labels.
+- [ ] Validate `SaveBestSolutionDual` still writes both frames and the blended preview; keep flicker heatmap generation.
+
+### Core change 8: Robustness & safety
+- [ ] Null/size checks when reading other‑frame buffers; gracefully fall back to single‑frame color pick.
+- [ ] Thread safety: operate only on thread‑local `new_pic/new_picB`. Do not mutate global best pics.
+- [ ] After any structural edit: `rehash()` affected lines, set `cache_key=null`, and ensure `recache_insns_if_needed` is called before evaluation.
+
+### Config plumbing & propagation
+- [ ] Add fields and CLI options in `src/config.h/.cpp`:
+  - `dual_cross_share_prob`, `dual_both_frames_prob`
+  - `blink_ramp_evals`, `flicker_luma_weight_initial`
+- [ ] Propagate these into `EvaluationContext` from `RastaConverter.cpp`.
+- [ ] Keep `/dual_mutate_ratio` behavior unchanged (mutate A vs B selection).
+
+### Files to modify
+- [ ] `src/mutation/RasterMutator.cpp` — dual‑aware complementary pick + seeding; add helper.
+- [ ] `src/mutation/RasterMutator.h` — declare helper; access to context for palette/targets.
+- [ ] `src/optimization/DLAS.cpp` — cross‑frame line copy/swap hook; wl ramp; recache after edits.
+- [ ] `src/optimization/EvaluationContext.h/.cpp` — add dual stats struct/counters and ramp config fields.
+- [ ] `src/config.h/.cpp` — new config fields & parsing.
+- [ ] `src/RastaConverter.cpp` — propagate new config to context.
+- [ ] `src/ui/RastaSDL.cpp` (optional) — display dual stats and/or ramp status.
+
+### Testing checklist
+- [ ] `/dual=off`: scores and outputs match baseline.
+- [ ] `/dual=on`: blended error improves vs single‑frame; ΔY heatmap acceptable.
+- [ ] Acceptance rate stable early (no collapse); complementary value ops frequently accepted.
+- [ ] Cross‑frame ops occasionally accepted; no cache/race crashes.
+- [ ] Performance impact of complementary selection < ~5% per evaluation.
+- [ ] GUI A/B/Blended toggles work correctly.
+
+### Rollout plan
+- [ ] Implement Core 1–2; test on small images.
+- [ ] Add flicker ramp; test convergence vs stall.
+- [ ] Introduce cross‑frame ops; test stability and performance.
+- [ ] Keep both‑frames local tweak behind low‑prob flag; enable only after profiling.

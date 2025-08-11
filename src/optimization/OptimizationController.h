@@ -5,12 +5,14 @@
 #include <string>
 #include <chrono>
 #include <memory>
+#include "../config.h"
 #include "../raster/Program.h"
 #include "EvaluationContext.h"
 #include "../execution/Executor.h"
 #include "../mutation/Mutator.h"
 #include "Optimizer.h"
 #include "DLAS.h"
+#include "LAHC.h"
 
 /**
  * Controls and manages the optimization process
@@ -43,7 +45,7 @@ public:
      * @param useRegionalMutation Whether to use region-based mutation
      * @return True if initialization succeeded
      */
-    bool Initialize(int threads, int width, int height, 
+     bool Initialize(int threads, int width, int height, 
                   const std::vector<screen_line>* picture,
                   const std::vector<distance_t>* pictureAllErrors[128],
                   unsigned long long maxEvals, 
@@ -51,7 +53,8 @@ public:
                   size_t cacheSize,
                   unsigned long initialSeed,
                   const OnOffMap* onoffMap = nullptr,
-                  bool useRegionalMutation = false);
+                   bool useRegionalMutation = false,
+                   e_optimizer_type optimizer_type = E_OPT_DLASHC);
     
     /**
      * Initialize the optimization with a starting raster program
