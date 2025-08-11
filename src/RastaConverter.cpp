@@ -515,33 +515,31 @@ void RastaConverter::ShowInputBitmap()
     // Label center panel depending on mode
     const auto& ctx = m_optimizer.GetEvaluationContext();
     if (ctx.m_dual_mode) {
-        const char* modeLabel = dual_view_mode == 0 ? "Blended output (A/B)"
-                              : dual_view_mode == 1 ? "Frame A output"
-                              : "Frame B output";
-        gui.DisplayText(width * 2, height + 10, modeLabel);
-        gui.DisplayText(width * 2, height + 30, "Toggle view: [A]=A  [Z]=B  [B]=Blended");
+        gui.DisplayText(width * 4, height + 10, "[A]=A  [Z]=B  [B]=Blended");
     } else {
         gui.DisplayText(width * 2, height + 10, "Current output");
+        gui.DisplayText(width * 4, height + 10, "Destination");
     }
-    gui.DisplayText(width * 4, height + 10, "Destination");
 }
 
 void RastaConverter::ShowDestinationLine(int y)
 {
-    if (!cfg.preprocess_only)
+    if (!cfg.preprocess_only && !cfg.dual_mode)
     {
         unsigned int width = FreeImage_GetWidth(m_imageProcessor.GetDestinationBitmap());
         unsigned int where_x = FreeImage_GetWidth(m_imageProcessor.GetInputBitmap());
-
         gui.DisplayBitmapLine(where_x, y, y, m_imageProcessor.GetDestinationBitmap());
     }
 }
 
 void RastaConverter::ShowDestinationBitmap()
 {
-    gui.DisplayBitmap(FreeImage_GetWidth(m_imageProcessor.GetDestinationBitmap()) * 2, 
-                     0, 
-                     m_imageProcessor.GetDestinationBitmap());
+    // show when not in dual mode, otherwise leave empty
+    if (!cfg.dual_mode) {
+        gui.DisplayBitmap(FreeImage_GetWidth(m_imageProcessor.GetDestinationBitmap()) * 2, 
+                      0, 
+                      m_imageProcessor.GetDestinationBitmap());
+    }
 }
 
 void RastaConverter::ShowLastCreatedPicture()
@@ -647,7 +645,7 @@ void RastaConverter::ShowMutationStats()
     if (ctx.m_dual_mode) {
         // Move dual-mode stats under the 'Destination' column to avoid cutting off
         unsigned destX = FreeImage_GetWidth(m_imageProcessor.GetDestinationBitmap()) * 2;
-        unsigned destY = FreeImage_GetHeight(m_imageProcessor.GetDestinationBitmap()) + 50; // below 'Destination' label
+        unsigned destY = FreeImage_GetHeight(m_imageProcessor.GetDestinationBitmap()) + 100;
         int ybase = (int)destY;
         gui.DisplayText(destX, ybase + 0,  std::string("DualComplementValue  ") + std::to_string((unsigned long long)ctx.m_stat_dualComplementValue.load()));
         gui.DisplayText(destX, ybase + 20, std::string("DualSeedAdd         ") + std::to_string((unsigned long long)ctx.m_stat_dualSeedAdd.load()));
