@@ -245,6 +245,18 @@ public:
     // Prepare YUV precomputations (call after m_picture and dimensions are set)
     void PrecomputeDualTransforms();
 
+    // Dual-mode generation counters: increment when frame A or B changes (for cache invalidation)
+    std::atomic<unsigned long long> m_dual_generation_A{0};
+    std::atomic<unsigned long long> m_dual_generation_B{0};
+
+    // Optional pair tables (128x128) for dual-mode fast path
+    bool m_have_pair_tables = false;
+    std::vector<float> m_pair_Ysum; // size 16384
+    std::vector<float> m_pair_Usum;
+    std::vector<float> m_pair_Vsum;
+    std::vector<float> m_pair_dY;
+    std::vector<float> m_pair_dC;
+
     // Report evaluation for dual pair (A,B)
     bool ReportEvaluationResultDual(double result,
                                         raster_picture* picA,

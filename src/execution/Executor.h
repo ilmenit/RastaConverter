@@ -207,6 +207,8 @@ private:
     linear_allocator* m_linear_allocator_ptr;
     insn_sequence_cache* m_insn_seq_cache_ptr;
     std::vector<line_cache> m_line_caches;
+    // Separate caches for dual-aware rendering keyed by 'other' generation snapshot
+    std::vector<line_cache> m_line_caches_dual;
     linear_allocator m_thread_local_allocator;
     insn_sequence_cache m_thread_local_cache;
     
@@ -246,6 +248,15 @@ private:
     float m_dual_wl = 0.0f, m_dual_wc = 0.0f;
     float m_dual_Tl = 0.0f, m_dual_Tc = 0.0f;
     int   m_dual_pl = 2, m_dual_pc = 2;
+    // Dual-frame: generation counters snapshot for early exit decisions
+    unsigned long long m_dual_gen_other_snapshot = 0ULL;
+    unsigned long long m_dual_last_other_generation = 0ULL;
+    // Fast-access pointers to context pair tables for this call (if available)
+    const float* m_pair_Ysum = nullptr;
+    const float* m_pair_Usum = nullptr;
+    const float* m_pair_Vsum = nullptr;
+    const float* m_pair_dY = nullptr;
+    const float* m_pair_dC = nullptr;
 };
 
 #endif // EXECUTOR_H

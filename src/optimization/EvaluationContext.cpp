@@ -107,6 +107,41 @@ void EvaluationContext::PrecomputeDualTransforms()
             }
         }
     }
+
+    // Optional pair tables precompute (YUV-only fast path)
+    try {
+        m_pair_Ysum.resize(128 * 128);
+        m_pair_Usum.resize(128 * 128);
+        m_pair_Vsum.resize(128 * 128);
+        m_pair_dY.resize(128 * 128);
+        m_pair_dC.resize(128 * 128);
+        for (int a = 0; a < 128; ++a) {
+            const float Ya = m_palette_y[a];
+            const float Ua = m_palette_u[a];
+            const float Va = m_palette_v[a];
+            for (int b = 0; b < 128; ++b) {
+                const float Yb = m_palette_y[b];
+                const float Ub = m_palette_u[b];
+                const float Vb = m_palette_v[b];
+                const int idx = (a << 7) | b; // a*128 + b
+                const float Ysum = (Ya + Yb) * 0.5f;
+                const float Usum = (Ua + Ub) * 0.5f;
+                const float Vsum = (Va + Vb) * 0.5f;
+                const float dY = fabsf(Ya - Yb);
+                const float dC = sqrtf((Ua - Ub)*(Ua - Ub) + (Va - Vb)*(Va - Vb));
+                m_pair_Ysum[idx] = Ysum;
+                m_pair_Usum[idx] = Usum;
+                m_pair_Vsum[idx] = Vsum;
+                m_pair_dY[idx] = dY;
+                m_pair_dC[idx] = dC;
+            }
+        }
+        m_have_pair_tables = true;
+    } catch (...) {
+        m_have_pair_tables = false;
+        m_pair_Ysum.clear(); m_pair_Usum.clear(); m_pair_Vsum.clear();
+        m_pair_dY.clear(); m_pair_dC.clear();
+    }
 }
 
 bool EvaluationContext::MarkFinished(const char* reason, const char* file, int line)
@@ -409,6 +444,10 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
         } catch (const std::exception& e) {
             std::cerr << "Error updating temporal visualization data: " << e.what() << std::endl;
         }
+
+        // Bump dual generations so executors know other-frame snapshots are stale
+        m_dual_generation_A.fetch_add(1, std::memory_order_relaxed);
+        m_dual_generation_B.fetch_add(1, std::memory_order_relaxed);
 
         if (mutator) {
             try {

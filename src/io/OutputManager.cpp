@@ -346,10 +346,17 @@ bool OutputManager::SaveScreenData(const std::string& filename,
         for (x = 0; x < m_width; x += 4)
         {
             unsigned char pix = 0;
-            a = ConvertColorRegisterToRawData((e_target)createdPictureTargets[y][x]);
-            b = ConvertColorRegisterToRawData((e_target)createdPictureTargets[y][x + 1]);
-            c = ConvertColorRegisterToRawData((e_target)createdPictureTargets[y][x + 2]);
-            d = ConvertColorRegisterToRawData((e_target)createdPictureTargets[y][x + 3]);
+            const auto& rowT = (y < (int)createdPictureTargets.size()) ? createdPictureTargets[y] : line_target();
+            auto getT = [&](int idx) -> unsigned char {
+                if (idx >= 0 && idx < (int)rowT.size()) {
+                    return ConvertColorRegisterToRawData((e_target)rowT[idx]);
+                }
+                return ConvertColorRegisterToRawData(E_COLBAK);
+            };
+            a = getT(x);
+            b = getT(x + 1);
+            c = getT(x + 2);
+            d = getT(x + 3);
             pix |= a << 6;
             pix |= b << 4;
             pix |= c << 2;

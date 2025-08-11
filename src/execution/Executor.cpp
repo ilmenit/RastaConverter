@@ -59,6 +59,7 @@ void Executor::Init(unsigned width, unsigned height,
 
     // Initialize caches
     m_line_caches.resize(m_height);
+    m_line_caches_dual.resize(m_height);
 
     // Initialize output storage
     m_created_picture.resize(m_height);
@@ -286,6 +287,24 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         m_dual_other_pixels.assign((size_t)m_width * (size_t)m_height, 0);
         m_dual_transient_results.clear();
         m_dual_transient_results.resize(m_height);
+        // Snapshot generation counter for the other frame (to avoid redundant copies within a call)
+        m_dual_gen_other_snapshot = (m_dual_render_role == DUAL_A) ? m_gstate->m_dual_generation_B.load(std::memory_order_relaxed)
+                                                                   : m_gstate->m_dual_generation_A.load(std::memory_order_relaxed);
+        // If 'other' generation changed since last call, clear dual caches
+        if (m_dual_last_other_generation != m_dual_gen_other_snapshot) {
+            for (int yy = 0; yy < (int)m_height; ++yy) m_line_caches_dual[yy].clear();
+            m_dual_last_other_generation = m_dual_gen_other_snapshot;
+        }
+        // Grab pair tables (if precomputed)
+        if (m_gstate->m_have_pair_tables && !m_gstate->m_pair_Ysum.empty()) {
+            m_pair_Ysum = m_gstate->m_pair_Ysum.data();
+            m_pair_Usum = m_gstate->m_pair_Usum.data();
+            m_pair_Vsum = m_gstate->m_pair_Vsum.data();
+            m_pair_dY = m_gstate->m_pair_dY.data();
+            m_pair_dC = m_gstate->m_pair_dC.data();
+        } else {
+            m_pair_Ysum = m_pair_Usum = m_pair_Vsum = m_pair_dY = m_pair_dC = nullptr;
+        }
         for (int yy = 0; yy < (int)m_height; ++yy) {
             const line_cache_result* lr = ((*other_results)[yy]);
             if (lr && lr->color_row) {
@@ -313,6 +332,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         m_dual_render_role = DUAL_NONE;
         m_dual_other_pixels.clear();
         m_dual_transient_results.clear();
+        m_pair_Ysum = m_pair_Usum = m_pair_Vsum = m_pair_dY = m_pair_dC = nullptr;
     }
 
     for (y = 0; y < (int)m_height; ++y)
@@ -343,6 +363,8 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         const line_cache_result* cached_line_result = nullptr;
         if (m_dual_render_role == DUAL_NONE) {
             cached_line_result = m_line_caches[y].find(lck, lck_hash);
+        } else {
+            cached_line_result = m_line_caches_dual[y].find(lck, lck_hash);
         }
         if (cached_line_result)
         {
@@ -453,14 +475,16 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
 
                 results_array[y] = &result_state;
             } else {
-                // In dual-aware path, do not cache globally; provide transient result referencing current rows
-                line_cache_result& temp_result = m_dual_transient_results[y];
-                temp_result.line_error = total_line_error;
-                CaptureRegisterState(temp_result.new_state);
-                temp_result.color_row = created_picture_row;        // points to m_created_picture[y]
-                temp_result.target_row = created_picture_targets_row; // points to m_created_picture_targets[y]
-                memcpy(temp_result.sprite_data, m_sprites_memory[y], sizeof temp_result.sprite_data);
-                results_array[y] = &temp_result;
+                // Add to dual cache keyed by code+regs; this is safe as long as 'other' snapshot is constant during call
+                line_cache_result& result_state = m_line_caches_dual[y].insert(lck, lck_hash, *m_linear_allocator_ptr);
+                result_state.line_error = total_line_error;
+                CaptureRegisterState(result_state.new_state);
+                result_state.color_row = (unsigned char*)m_linear_allocator_ptr->allocate(m_width);
+                memcpy(result_state.color_row, created_picture_row, m_width);
+                result_state.target_row = (unsigned char*)m_linear_allocator_ptr->allocate(m_width);
+                memcpy(result_state.target_row, created_picture_targets_row, m_width);
+                memcpy(result_state.sprite_data, m_sprites_memory[y], sizeof result_state.sprite_data);
+                results_array[y] = &result_state;
             }
         }
     }
@@ -813,8 +837,10 @@ void Executor::RestoreLineRegs()
 void Executor::ClearLineCaches()
 {
     m_insn_seq_cache_ptr->clear();
-    for (int y = 0; y < (int)m_height; ++y)
+    for (int y = 0; y < (int)m_height; ++y) {
         m_line_caches[y].clear();
+        if ((int)m_line_caches_dual.size() > y) m_line_caches_dual[y].clear();
+    }
     m_linear_allocator_ptr->clear();
     
     // Reset LRU tracking

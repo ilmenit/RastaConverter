@@ -586,6 +586,7 @@ void DLAS::RunWorker(int threadId)
                             (void)local_executor.ExecuteRasterProgram(&new_pic, line_results.data(), Executor::DUAL_A, &line_results_B);
                             memcpy(&memA, &local_executor.GetSpritesMemory(), sizeof(memA));
                         }
+                        // After an accepted improvement, generation counters are bumped in ReportEvaluationResultDual
                         const unsigned W = m_context->m_width;
                         const unsigned H = m_context->m_height;
                         double total = 0.0;
