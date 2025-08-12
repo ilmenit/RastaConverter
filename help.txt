@@ -55,7 +55,7 @@ Common options
   /details_val=FLOAT      Details strength (default 0.5)
 
 -- Optimizer:
-  /optimizer=dlashc|lahc  Select optimizer (default dlashc)
+  /optimizer=dlas|lahc  Select optimizer (default dlas)
     Internals: both optimizers now use a shared optimization runner and evaluator.
     Acceptance is pluggable via policies (DLAS/LAHC). LAHC supports dual mode.
   /threads=N              Number of threads (default 1)
@@ -134,7 +134,7 @@ See BUILD.md: “Optional debug logging categories”.
 
 Examples
 --------
-  RastaConverter.exe c64.png /threads=8 /optimizer=dlashc /s=5
+  RastaConverter.exe c64.png /threads=8 /optimizer=dlas /s=5
   RastaConverter.exe c64.png /optimizer=lahc /s=1000 /save=100000 /o=output_lahc.png
 
 Why these options (and how to choose)
@@ -161,7 +161,7 @@ Initialization (/init):
 
 Optimizer (/optimizer, /s):
 - Why: DLAS generally moves fast early; LAHC can sometimes improve more in long plateaus.
-- Choose: Keep /optimizer=dlashc for most runs. Try LAHC on marathon runs. /s controls history; 3..10 are reasonable for DLAS.
+- Choose: Keep /optimizer=dlas for most runs. Try LAHC on marathon runs. /s controls history; 3..10 are reasonable for DLAS.
 
 Cache and threads (/cache, /threads):
 - Why: Line caches reduce recomputation; memory and CPU scale with image height.

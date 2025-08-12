@@ -43,7 +43,7 @@ enum e_distance_function {
 };
 
 enum e_optimizer_type {
-    E_OPT_DLASHC,
+    E_OPT_DLAS,
     E_OPT_LAHC,
 };
 

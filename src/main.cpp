@@ -76,7 +76,7 @@ General options:
   -i, --input <FILE>          Input image path (alternative to positional)
   -o, --output <FILE>         Output base filename (default: output.png)
   -pal, --palette <FILE>      Atari palette .act file (default: Palettes/laoo.act)
-  --optimizer <dlashc|lahc>   Optimizer algorithm (default: dlashc)
+  --optimizer <dlas|lahc>   Optimizer algorithm (default: dlas)
   --mutation_strategy <global|regional>
                                Mutation strategy (default: global)
   -s <N>                      DLAS/LAHC history length (default: 1)

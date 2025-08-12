@@ -99,7 +99,7 @@ bool OptimizationController::Initialize(int threads, int width, int height,
     case E_OPT_LAHC:
         m_optimizer = std::make_unique<LAHC>(&m_evalContext, m_executors[0].get(), m_mutators[0].get(), solutionsParam);
         break;
-    case E_OPT_DLASHC:
+    case E_OPT_DLAS:
     default:
         m_optimizer = std::make_unique<DLAS>(&m_evalContext, m_executors[0].get(), m_mutators[0].get(), solutionsParam);
         break;

@@ -12,7 +12,7 @@ The converter supports two optimization algorithms which now share a common modu
 - Diversified Late Acceptance Search (DLAS)
 - Late Acceptance Hill Climbing (LAHC)
 
-You can select the algorithm with `/optimizer=dlashc` (default) or `/optimizer=lahc`.
+You can select the algorithm with `/optimizer=dlas` (default) or `/optimizer=lahc`.
 
 Architecture highlights (post-refactor):
 - A unified optimization loop orchestrated by `OptimizationRunner` manages worker threads and mutations.

@@ -54,7 +54,7 @@ public:
                   unsigned long initialSeed,
                   const OnOffMap* onoffMap = nullptr,
                    bool useRegionalMutation = false,
-                   e_optimizer_type optimizer_type = E_OPT_DLASHC);
+                   e_optimizer_type optimizer_type = E_OPT_DLAS);
     
     /**
      * Initialize the optimization with a starting raster program

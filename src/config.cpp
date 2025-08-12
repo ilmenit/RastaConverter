@@ -81,8 +81,8 @@ void Configuration::Process(int argc, char *argv[])
         mutation_strategy = E_MUTATION_GLOBAL;
 
     // Optimizer selection
-    string optimizer_value = parser.getValue("optimizer", "dlashc");
-    if (optimizer_value == "lahc") optimizer_type = E_OPT_LAHC; else optimizer_type = E_OPT_DLASHC;
+    string optimizer_value = parser.getValue("optimizer", "dlas");
+    if (optimizer_value == "lahc") optimizer_type = E_OPT_LAHC; else optimizer_type = E_OPT_DLAS;
 
 	string dst_name = parser.getValue("distance","yuv");
 	if (dst_name=="euclid")
@@ -276,7 +276,13 @@ void Configuration::Process(int argc, char *argv[])
     // Dual-frame mode and parameters (non-intrusive when off)
     {
         const bool dual_switch = parser.switchExists("dual");
-        std::string dual_val = parser.getValue("dual", "");
+        std::string dual_val = parser.getValue(
+			
+			
+			
+			
+			 
+			"dual", "");
         for (auto &c : dual_val) c = (char)tolower(c);
         // Rules:
         // - If /dual is present as a bare switch, enable dual mode
