@@ -80,6 +80,12 @@ enum e_mutation_type {
 	E_MUTATION_CHANGE_TARGET, 
 	E_MUTATION_CHANGE_VALUE, // -1,+1,-16,+16
 	E_MUTATION_CHANGE_VALUE_TO_COLOR, 
+    // New mutation operators focused on timing/sprites/structure
+    E_MUTATION_SHIFT_INSTRUCTION,          // swap an instruction with a neighbor to shift its timing
+    E_MUTATION_INSERT_TIMING_NOP,          // insert a NOP near a store to adjust pixel alignment
+    E_MUTATION_ADJUST_SPRITE_POS,          // tweak preceding load used by HPOSP store or insert one
+    E_MUTATION_COPY_BLOCK_FROM_PREV,       // copy a small block of instructions from previous line
+    E_MUTATION_LINE_OPTIMIZE,              // micro-optimization: remove redundant loads inside the line
 	E_MUTATION_MAX,
 };
 

@@ -515,7 +515,7 @@ void RastaConverter::ShowInputBitmap()
     // Label center panel depending on mode
     const auto& ctx = m_optimizer.GetEvaluationContext();
     if (ctx.m_dual_mode) {
-        gui.DisplayText(width * 4, height + 10, "[A]=A  [Z]=B  [B]=Blended");
+        gui.DisplayText(width * 4, height + 200, "[A]=A  [Z]=B  [B]=Blended");
     } else {
         gui.DisplayText(width * 2, height + 10, "Current output");
         gui.DisplayText(width * 4, height + 10, "Destination");

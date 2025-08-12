@@ -16,7 +16,13 @@ const char* mutation_names[E_MUTATION_MAX] = {
     "Swap instruction",
     "Change target",
     "Change value",
-    "Change value to color"
+    "Change value to color",
+    // New
+    "Shift instruction",
+    "Insert timing NOP",
+    "Adjust sprite pos",
+    "Copy block from prev",
+    "Line micro-optimize"
 };
 
 RasterMutator::RasterMutator(EvaluationContext* context, int thread_id)
@@ -575,6 +581,171 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         prog.cache_key = NULL;
         m_current_mutations[E_MUTATION_CHANGE_VALUE]++;
         m_stats.success_count[mutation]++;
+        break;
+    case E_MUTATION_SHIFT_INSTRUCTION:
+        if (prog.instructions.size() > 1)
+        {
+            int dir = (Random(2) ? 1 : -1);
+            int j = i1 + dir;
+            if (j >= 0 && j < (int)prog.instructions.size())
+            {
+                std::swap(prog.instructions[i1], prog.instructions[j]);
+                prog.cache_key = NULL;
+                m_current_mutations[E_MUTATION_SHIFT_INSTRUCTION]++;
+                m_stats.success_count[mutation]++;
+                break;
+            }
+        }
+        // fallthrough if not possible
+    case E_MUTATION_INSERT_TIMING_NOP:
+        if (prog.cycles + 2 < free_cycles)
+        {
+            SRasterInstruction nop;
+            nop.loose.instruction = E_RASTER_NOP;
+            nop.loose.target = E_COLBAK;
+            nop.loose.value = 0;
+            // Prefer to insert near a store to shift its effect; try to find any store nearby
+            int insert_at = i1;
+            for (int k = std::max(0, i1 - 2); k <= std::min((int)prog.instructions.size() - 1, i1 + 2); ++k)
+            {
+                unsigned char ins = prog.instructions[k].loose.instruction;
+                if (ins >= E_RASTER_STA) { insert_at = k; break; }
+            }
+            // Insert before or after randomly
+            if (Random(2) && insert_at < (int)prog.instructions.size()) insert_at++;
+            prog.instructions.push_back(nop);
+            for (int p = (int)prog.instructions.size() - 1; p > insert_at; --p) std::swap(prog.instructions[p], prog.instructions[p - 1]);
+            prog.cycles += 2;
+            prog.cache_key = NULL;
+            m_current_mutations[E_MUTATION_INSERT_TIMING_NOP]++;
+            m_stats.success_count[mutation]++;
+            break;
+        }
+        // fallthrough if not possible
+    case E_MUTATION_ADJUST_SPRITE_POS:
+        {
+            // Find a store to HPOSPx on this line
+            int store_idx = -1;
+            for (int k = 0; k < (int)prog.instructions.size(); ++k)
+            {
+                const auto &ins = prog.instructions[k];
+                if (ins.loose.instruction >= E_RASTER_STA && ins.loose.target >= E_HPOSP0 && ins.loose.target <= E_HPOSP3)
+                { store_idx = k; break; }
+            }
+            if (store_idx >= 0)
+            {
+                const auto &store = prog.instructions[store_idx];
+                int reg_idx = store.loose.instruction - E_RASTER_STA; // 0=A,1=X,2=Y
+                // search backwards for corresponding load
+                for (int k = store_idx - 1; k >= 0; --k)
+                {
+                    auto &cand = prog.instructions[k];
+                    if (cand.loose.instruction == (unsigned)E_RASTER_LDA + reg_idx)
+                    {
+                        // tweak by small delta (keep in 0..255)
+                        int delta = (Random(2) ? 1 : -1) * (1 + Random(3));
+                        int nv = (int)cand.loose.value + delta;
+                        if (nv < 0) nv = 0; if (nv > 255) nv = 255;
+                        cand.loose.value = (unsigned char)nv;
+                        prog.cache_key = NULL;
+                        m_current_mutations[E_MUTATION_ADJUST_SPRITE_POS]++;
+                        m_stats.success_count[mutation]++;
+                        goto adjust_sprite_done;
+                    }
+                }
+                // no load found; try to insert LDA/STA pair if space allows
+                if (prog.cycles + 6 < free_cycles)
+                {
+                    SRasterInstruction ld, st;
+                    int regPick = Random(3); // 0=A,1=X,2=Y
+                    ld.loose.instruction = (e_raster_instruction)(E_RASTER_LDA + regPick);
+                    // value: pick current mem init or random pos near screen
+                    int base = sprite_screen_color_cycle_start + Random(m_width);
+                    if (base < 0) base = 0; if (base > 255) base = 255;
+                    ld.loose.value = (unsigned char)base;
+                    ld.loose.target = E_COLBAK;
+                    st.loose.instruction = (e_raster_instruction)(E_RASTER_STA + regPick);
+                    st.loose.value = 0;
+                    st.loose.target = prog.instructions[store_idx].loose.target; // same sprite target
+                    // insert ld,st before existing store to avoid changing much
+                    int insert_at = store_idx;
+                    prog.instructions.push_back(st);
+                    prog.instructions.push_back(ld);
+                    // move them into place: first push ld then st in order
+                    int end = (int)prog.instructions.size();
+                    // move last-1 (ld) to position insert_at
+                    for (int p = end - 2; p > insert_at; --p) std::swap(prog.instructions[p], prog.instructions[p - 1]);
+                    // after ld moved, store is at insert_at+1, move last (st) to insert_at+1
+                    for (int p = end - 1; p > insert_at + 1; --p) std::swap(prog.instructions[p], prog.instructions[p - 1]);
+                    prog.cycles += 6;
+                    prog.cache_key = NULL;
+                    m_current_mutations[E_MUTATION_ADJUST_SPRITE_POS]++;
+                    m_stats.success_count[mutation]++;
+                }
+            }
+adjust_sprite_done:
+            break;
+        }
+    case E_MUTATION_COPY_BLOCK_FROM_PREV:
+        if (m_currently_mutated_y > 0)
+        {
+            raster_line &prev = pic.raster_lines[m_currently_mutated_y - 1];
+            if (!prev.instructions.empty())
+            {
+                int max_len = std::min(3, (int)prev.instructions.size());
+                int len = 1 + Random(max_len);
+                int start = Random((int)prev.instructions.size());
+                if (start + len > (int)prev.instructions.size()) start = std::max(0, (int)prev.instructions.size() - len);
+                // compute cycles
+                int add_cycles = 0;
+                for (int t = 0; t < len; ++t) add_cycles += GetInstructionCycles(prev.instructions[start + t]);
+                if (prog.cycles + add_cycles < free_cycles)
+                {
+                    int insert_at = (int)prog.instructions.size();
+                    if (!prog.instructions.empty()) insert_at = Random((int)prog.instructions.size());
+                    // append then swap into place in original order
+                    for (int t = 0; t < len; ++t) prog.instructions.push_back(prev.instructions[start + t]);
+                    for (int t = 0; t < len; ++t)
+                    {
+                        int from = (int)prog.instructions.size() - len + t;
+                        for (int p = from; p > insert_at + t; --p) std::swap(prog.instructions[p], prog.instructions[p - 1]);
+                    }
+                    prog.cycles += add_cycles;
+                    prog.cache_key = NULL;
+                    m_current_mutations[E_MUTATION_COPY_BLOCK_FROM_PREV]++;
+                    m_stats.success_count[mutation]++;
+                    break;
+                }
+            }
+        }
+        // fallthrough if not possible
+    case E_MUTATION_LINE_OPTIMIZE:
+        if (!prog.instructions.empty())
+        {
+            int last_load_idx[3] = { -1, -1, -1 };
+            for (int k = 0; k < (int)prog.instructions.size(); ++k)
+            {
+                unsigned char ins = prog.instructions[k].loose.instruction;
+                if (ins <= E_RASTER_LDY)
+                {
+                    int r = ins - E_RASTER_LDA; // 0=A,1=X,2=Y
+                    if (r >= 0 && r < 3 && last_load_idx[r] != -1)
+                    {
+                        // previous load to same register not used; neutralize it by NOP (keep timing)
+                        prog.instructions[last_load_idx[r]].loose.instruction = E_RASTER_NOP;
+                    }
+                    if (r >= 0 && r < 3) last_load_idx[r] = k;
+                }
+                else if (ins >= E_RASTER_STA)
+                {
+                    int r = ins - E_RASTER_STA; // 0=A,1=X,2=Y
+                    if (r >= 0 && r < 3) last_load_idx[r] = -1; // register was consumed
+                }
+            }
+            prog.cache_key = NULL;
+            m_current_mutations[E_MUTATION_LINE_OPTIMIZE]++;
+            m_stats.success_count[mutation]++;
+        }
         break;
     default:
         // Should not happen
