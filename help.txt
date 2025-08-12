@@ -5,6 +5,7 @@ RastaConverter by Jakub 'Ilmenit' Debski
 Overview
 --------
 RastaConverter converts modern images to 8-bit Atari (mode 15) using an optimizer that builds a raster/kernel program with mid-line color changes and sprites. It uses FreeImage and (for GUI builds) SDL2/SDL2_ttf.
+
 Usage:
   RastaConverter.exe InputFile [options]
 
@@ -80,7 +81,6 @@ Alternates two frames A/B each refresh; the eye perceives the average, increasin
 
 Enable:
   /dual[=on|off]         Enable dual-frame mode (default off). Bare /dual enables it.
-  Notes: LAHC also runs in dual mode via the shared evaluator.
 
 Flicker control (soft hinge penalties):
   /flicker_luma_weight=WL      (default 1.0)
@@ -95,8 +95,13 @@ Flicker control (soft hinge penalties):
   UNITS: Y is on roughly 0..255 scale; U/V magnitudes are smaller (scales derived from the YUV transform used in code).
 
 Search behavior:
-  The optimizer alternates updates between frames A and B. Initialization duplicates A to B.
+  The optimizer alternates updates between frames A and B by default. Initialization duplicates A to B.
   /dual_mutate_ratio=0.5                (default 0.5; chance to mutate B vs A)
+  /dual_strategy=alternate|staged       (default alternate)
+    - alternate: choose A/B each step using /dual_mutate_ratio
+    - staged: focus a block of iterations on one frame, then switch
+      /dual_stage_evals=N               (default 5000 per block)
+      /dual_stage_start=A|B             (default A)
      WHY: Balances effort between A and B; 0.5 mutates both equally often.
 
 GUI behavior in dual-frame mode:
