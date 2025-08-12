@@ -259,13 +259,14 @@ public:
 
     // Report evaluation for dual pair (A,B)
     bool ReportEvaluationResultDual(double result,
-                                        raster_picture* picA,
-                                        raster_picture* picB,
-                                        const std::vector<const line_cache_result*>& line_results_A,
-                                        const std::vector<const line_cache_result*>& line_results_B,
-                                        const sprites_memory_t& sprites_memory_A,
-                                        const sprites_memory_t& sprites_memory_B,
-                                        Mutator* mutator);
+                                    raster_picture* picA,
+                                    raster_picture* picB,
+                                    const std::vector<const line_cache_result*>& line_results_A,
+                                    const std::vector<const line_cache_result*>& line_results_B,
+                                    const sprites_memory_t& sprites_memory_A,
+                                    const sprites_memory_t& sprites_memory_B,
+                                    Mutator* mutator,
+                                    bool mutatedB);
 
     // Dual-specific statistics (displayed in GUI)
     std::atomic<unsigned long long> m_stat_dualComplementValue{0};

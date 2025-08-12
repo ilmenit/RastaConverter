@@ -296,7 +296,8 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
                                                        const std::vector<const line_cache_result*>& line_results_B,
                                                        const sprites_memory_t& sprites_memory_A,
                                                        const sprites_memory_t& sprites_memory_B,
-                                                       Mutator* mutator)
+                                                       Mutator* mutator,
+                                                       bool mutatedB)
 {
     // Only track global "best" and UI data for dual mode. Policies manage acceptance/history.
     if (!picA || !picB || !m_initialized) {
@@ -349,9 +350,12 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
             std::cerr << "Error updating temporal visualization data: " << e.what() << std::endl;
         }
 
-        // Bump dual generations so executors know other-frame snapshots are stale
-        m_dual_generation_A.fetch_add(1, std::memory_order_relaxed);
-        m_dual_generation_B.fetch_add(1, std::memory_order_relaxed);
+        // Bump only the generation of the frame that changed to avoid over-invalidating caches
+        if (mutatedB) {
+            m_dual_generation_B.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            m_dual_generation_A.fetch_add(1, std::memory_order_relaxed);
+        }
 
         if (mutator) {
             try {

@@ -255,7 +255,8 @@ void OptimizationRunner::worker(int threadId)
                     dual.lineResultsB,
                     dual.spritesMemoryA,
                     dual.spritesMemoryB,
-                    &mutator);
+                    &mutator,
+                    /*mutatedB=*/mutateB);
             }
 
             m_ctx->CollectStatisticsTickUnsafe();

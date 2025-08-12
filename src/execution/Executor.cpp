@@ -280,6 +280,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
     bool restart_line = false;
     bool shift_start_array_dirty = true;
     distance_accum_t total_error = 0;
+    distance_accum_t dual_total_error = 0; // accumulates blended base+flicker only in dual-aware mode
 
     // If dual-aware role is requested, prepare a flat other-frame pixel buffer and parameters
     m_dual_render_role = dual_role;
@@ -377,7 +378,10 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
             // Update LRU status for this line
             UpdateLRU(y);
 
-            total_error += cached_line_result->line_error;
+            total_error += cached_line_result->line_error; // maintained for backward compatibility; ignored in dual return
+            if (m_dual_render_role != DUAL_NONE) {
+                dual_total_error += cached_line_result->line_error; // in dual cache, line_error stores blended base+flicker only
+            }
             continue;
         }
 
@@ -405,6 +409,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         const int picture_row_index = m_width * y;
 
         distance_accum_t total_line_error = 0;
+        distance_accum_t dual_line_error = 0;
 
         sprites_row_memory_t& spriterow = m_sprites_memory[y];
 
@@ -444,6 +449,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
                 distance_t closest_dist;
                 e_target closest_register = FindClosestColorRegister(spriterow, picture_row_index + x, x, y, restart_line, closest_dist);
                 total_line_error += closest_dist;
+                if (m_dual_render_role != DUAL_NONE) dual_line_error += (distance_accum_t)closest_dist;
                 created_picture_row[x] = m_mem_regs[closest_register] >> 1;
                 created_picture_targets_row[x] = closest_register;
             }
@@ -456,6 +462,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         else
         {
             total_error += total_line_error;
+            if (m_dual_render_role != DUAL_NONE) dual_total_error += dual_line_error;
 
             if (m_dual_render_role == DUAL_NONE) {
                 // add this to line cache
@@ -477,7 +484,8 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
             } else {
                 // Add to dual cache keyed by code+regs; this is safe as long as 'other' snapshot is constant during call
                 line_cache_result& result_state = m_line_caches_dual[y].insert(lck, lck_hash, *m_linear_allocator_ptr);
-                result_state.line_error = total_line_error;
+                // In dual cache, store only the blended base+flicker for fast reuse
+                result_state.line_error = dual_line_error;
                 CaptureRegisterState(result_state.new_state);
                 result_state.color_row = (unsigned char*)m_linear_allocator_ptr->allocate(m_width);
                 memcpy(result_state.color_row, created_picture_row, m_width);
@@ -489,6 +497,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         }
     }
 
+    if (m_dual_render_role != DUAL_NONE) return dual_total_error;
     return total_error;
 }
 
@@ -500,6 +509,18 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
     e_target result = E_COLBAK;
     distance_t min_distance = DISTANCE_MAX;
     bool sprite_covers_colbak = false;
+
+    // Common invariants for this pixel
+    const unsigned idx_pix = (index >= 0) ? (unsigned)index : 0u;
+    unsigned char other_idx_for_pixel = 0;
+    const bool dual_active = (m_dual_render_role != DUAL_NONE && !m_dual_other_pixels.empty() && m_gstate && m_gstate->m_dual_mode);
+    if (dual_active) {
+        unsigned char oi = m_dual_other_pixels[idx_pix];
+        other_idx_for_pixel = (oi < 128) ? oi : 0;
+    }
+    const float Ty = (dual_active ? m_gstate->m_target_y[idx_pix] : 0.0f);
+    const float Tu = (dual_active ? m_gstate->m_target_u[idx_pix] : 0.0f);
+    const float Tv = (dual_active ? m_gstate->m_target_v[idx_pix] : 0.0f);
 
     // Additional input validation
     if (index < 0) {
@@ -546,27 +567,32 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
             unsigned char mem_reg_value = m_mem_regs[temp];
             unsigned char color_index = mem_reg_value / 2;
 
-            if (m_dual_render_role != DUAL_NONE && !m_dual_other_pixels.empty() && m_gstate && m_gstate->m_dual_mode) {
+            if (dual_active) {
                 if (color_index < 128) {
-                    const float Yc = m_gstate->m_palette_y[color_index];
-                    const float Uc = m_gstate->m_palette_u[color_index];
-                    const float Vc = m_gstate->m_palette_v[color_index];
-                    const unsigned idx_pix = (unsigned)y * m_width + (unsigned)x;
-                    unsigned char other_idx = m_dual_other_pixels[idx_pix];
-                    if (other_idx > 127) other_idx = 0;
-                    const float Yo = m_gstate->m_palette_y[other_idx];
-                    const float Uo = m_gstate->m_palette_u[other_idx];
-                    const float Vo = m_gstate->m_palette_v[other_idx];
-                    const float Ty = m_gstate->m_target_y[idx_pix];
-                    const float Tu = m_gstate->m_target_u[idx_pix];
-                    const float Tv = m_gstate->m_target_v[idx_pix];
-                    const float Ey = 2.0f * Ty - Yo;
-                    const float Eu = 2.0f * Tu - Uo;
-                    const float Ev = 2.0f * Tv - Vo;
-                    const float dy = Yc - Ey; const float du = Uc - Eu; const float dv = Vc - Ev;
+                    // Use precomputed pair tables when available to avoid sqrt/extra ops
+                    const unsigned pairIdx = ((unsigned)color_index << 7) | (unsigned)other_idx_for_pixel;
+                    float Ysum, Usum, Vsum, dY, dC;
+                    if (m_pair_Ysum && m_pair_Usum && m_pair_Vsum && m_pair_dY && m_pair_dC) {
+                        Ysum = m_pair_Ysum[pairIdx];
+                        Usum = m_pair_Usum[pairIdx];
+                        Vsum = m_pair_Vsum[pairIdx];
+                        dY   = m_pair_dY[pairIdx];
+                        dC   = m_pair_dC[pairIdx];
+                    } else {
+                        const float Yc = m_gstate->m_palette_y[color_index];
+                        const float Uc = m_gstate->m_palette_u[color_index];
+                        const float Vc = m_gstate->m_palette_v[color_index];
+                        const float Yo = m_gstate->m_palette_y[other_idx_for_pixel];
+                        const float Uo = m_gstate->m_palette_u[other_idx_for_pixel];
+                        const float Vo = m_gstate->m_palette_v[other_idx_for_pixel];
+                        Ysum = 0.5f * (Yc + Yo);
+                        Usum = 0.5f * (Uc + Uo);
+                        Vsum = 0.5f * (Vc + Vo);
+                        dY   = fabsf(Yc - Yo);
+                        dC   = sqrtf((Uc - Uo)*(Uc - Uo) + (Vc - Vo)*(Vc - Vo));
+                    }
+                    const float dy = Ysum - Ty; const float du = Usum - Tu; const float dv = Vsum - Tv;
                     double base = (double)(dy*dy + du*du + dv*dv);
-                    const float dY = fabsf(Yc - Yo);
-                    const float dC = sqrtf((Uc - Uo)*(Uc - Uo) + (Vc - Vo)*(Vc - Vo));
                     float yl = dY - m_dual_Tl; if (yl < 0) yl = 0;
                     float yc = dC - m_dual_Tc; if (yc < 0) yc = 0;
                     double flick = 0.0;
@@ -618,37 +644,36 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
         unsigned char mem_reg_value = m_mem_regs[temp];
         unsigned char color_index = mem_reg_value / 2; // 0..127
 
-        if (m_dual_render_role != DUAL_NONE && !m_dual_other_pixels.empty() && m_gstate && m_gstate->m_dual_mode) {
+        if (dual_active) {
             // Pair-aware selection against other frame pixel and source target
-            // Get candidate color YUV
             if (color_index < 128) {
-                const float Yc = m_gstate->m_palette_y[color_index];
-                const float Uc = m_gstate->m_palette_u[color_index];
-                const float Vc = m_gstate->m_palette_v[color_index];
-                // Get other frame pixel index at (y,x)
-                const unsigned idx_pix = (unsigned)y * m_width + (unsigned)x;
-                unsigned char other_idx = m_dual_other_pixels[idx_pix];
-                if (other_idx > 127) other_idx = 0;
-                const float Yo = m_gstate->m_palette_y[other_idx];
-                const float Uo = m_gstate->m_palette_u[other_idx];
-                const float Vo = m_gstate->m_palette_v[other_idx];
-                // Target (source image) YUV
-                const float Ty = m_gstate->m_target_y[idx_pix];
-                const float Tu = m_gstate->m_target_u[idx_pix];
-                const float Tv = m_gstate->m_target_v[idx_pix];
-                // Effective target for this frame in YUV
-                const float Ey = 2.0f * Ty - Yo;
-                const float Eu = 2.0f * Tu - Uo;
-                const float Ev = 2.0f * Tv - Vo;
-                const float dy = Yc - Ey;
-                const float du = Uc - Eu;
-                const float dv = Vc - Ev;
+                const unsigned pairIdx = ((unsigned)color_index << 7) | (unsigned)other_idx_for_pixel;
+                float Ysum, Usum, Vsum, dY, dC;
+                if (m_pair_Ysum && m_pair_Usum && m_pair_Vsum && m_pair_dY && m_pair_dC) {
+                    Ysum = m_pair_Ysum[pairIdx];
+                    Usum = m_pair_Usum[pairIdx];
+                    Vsum = m_pair_Vsum[pairIdx];
+                    dY   = m_pair_dY[pairIdx];
+                    dC   = m_pair_dC[pairIdx];
+                } else {
+                    const float Yc = m_gstate->m_palette_y[color_index];
+                    const float Uc = m_gstate->m_palette_u[color_index];
+                    const float Vc = m_gstate->m_palette_v[color_index];
+                    const float Yo = m_gstate->m_palette_y[other_idx_for_pixel];
+                    const float Uo = m_gstate->m_palette_u[other_idx_for_pixel];
+                    const float Vo = m_gstate->m_palette_v[other_idx_for_pixel];
+                    Ysum = 0.5f * (Yc + Yo);
+                    Usum = 0.5f * (Uc + Uo);
+                    Vsum = 0.5f * (Vc + Vo);
+                    dY   = fabsf(Yc - Yo);
+                    dC   = sqrtf((Uc - Uo)*(Uc - Uo) + (Vc - Vo)*(Vc - Vo));
+                }
+                const float dy = Ysum - Ty; const float du = Usum - Tu; const float dv = Vsum - Tv;
                 double base = (double)(dy*dy + du*du + dv*dv);
-                // Flicker penalties relative to other frame
-                const float dY = fabsf(Yc - Yo);
-                const float dC = sqrtf((Uc - Uo)*(Uc - Uo) + (Vc - Vo)*(Vc - Vo));
-                float yl = dY - m_dual_Tl; if (yl < 0) yl = 0;
-                float yc = dC - m_dual_Tc; if (yc < 0) yc = 0;
+                const float yl_base = dY - m_dual_Tl;
+                const float yc_base = dC - m_dual_Tc;
+                float yl = yl_base; if (yl < 0) yl = 0;
+                float yc = yc_base; if (yc < 0) yc = 0;
                 double flick = 0.0;
                 if (m_dual_wl > 0.0f) {
                     double t = yl; if (m_dual_pl == 2) t = t*t; else if (m_dual_pl == 3) t = t*t*t; else t = pow(t, (double)m_dual_pl);
