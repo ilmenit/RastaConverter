@@ -218,10 +218,8 @@ void OptimizationRunner::worker(int threadId)
                 }
             }
         }
-        if (m_ctx->m_dual_mode && didCrossShare) {
-            candA.recache_insns_if_needed(m_ctx->m_insn_seq_cache, m_ctx->m_linear_allocator);
-            candB.recache_insns_if_needed(m_ctx->m_insn_seq_cache, m_ctx->m_linear_allocator);
-        }
+        // Do not recache into the shared context. Let each executor recache lazily
+        // in its own per-thread cache when executing the candidates.
 
         // Evaluate
         double candCost = 0.0;

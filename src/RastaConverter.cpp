@@ -175,15 +175,13 @@ bool RastaConverter::ProcessInit()
         }
         // Precompute dual transforms using source image, not destination
         const std::vector<screen_line>* dualTarget = &m_imageProcessor.GetSourcePicture();
-        // Temporarily reroute the picture pointer for dual target precompute
         if (cfg.dual_mode) {
-            const screen_line* prevPtr = ctx.m_picture;
+            // In dual mode, keep the context picture pointing to the source so any
+            // sampling (e.g., in the mutator) uses the original rescaled image.
             ctx.m_picture = dualTarget->data();
             lock.unlock();
             m_optimizer.GetEvaluationContext().PrecomputeDualTransforms();
             lock.lock();
-            // Restore pointer to destination picture for single-frame data paths
-            ctx.m_picture = prevPtr ? prevPtr : m_imageProcessor.GetPicture().data();
             // If history is still the minimal default (1), increase it for dual mode to help acceptance
             if (m_optimizer.GetEvaluationContext().m_history_length_config <= 1) {
                 m_optimizer.GetEvaluationContext().m_history_length_config = 16;
@@ -561,54 +559,58 @@ void RastaConverter::ShowLastCreatedPicture()
             created_picture_copy_B = ctx.m_created_picture_B;
         }
     }
-    int x, y;
-
     // Check if the created picture exists and has the right dimensions
-    if (created_picture_copy.empty() ||
-        created_picture_copy.size() < snap_height) {
-        // Just fill with black if not initialized yet
+    if (created_picture_copy.empty() || created_picture_copy.size() < snap_height) {
+        // Fill with black if not initialized yet (fast path)
         RGBQUAD black = { 0, 0, 0, 0 };
-        for (y = 0; y < (int)snap_height; ++y) {
-            for (x = 0; x < (int)snap_width; ++x) {
-                FreeImage_SetPixelColor(output_bitmap, x, y, &black);
-            }
-        }
-    }
-    else {
-        // Draw the created picture (blend A/B in dual mode)
-        for (y = 0; y < (int)snap_height; ++y) {
+        FreeImage_FillBackground(output_bitmap, &black, 0);
+    } else {
+        // Draw the created picture (blend A/B in dual mode) using direct scanline writes
+        const unsigned pitch = FreeImage_GetPitch(output_bitmap);
+        for (int y = 0; y < (int)snap_height; ++y) {
             if (created_picture_copy[y].size() < snap_width) continue;
-            for (x = 0; x < (int)snap_width; ++x) {
-                if (temporal && y < (int)created_picture_copy_B.size() && created_picture_copy_B[y].size() >= snap_width) {
-                    if (dual_view_mode == 1) {
-                        rgb ca = atari_palette[created_picture_copy[y][x]];
-                        RGBQUAD c; c.rgbRed = ca.r; c.rgbGreen = ca.g; c.rgbBlue = ca.b;
-                        FreeImage_SetPixelColor(output_bitmap, x, y, &c);
-                    } else if (dual_view_mode == 2) {
-                        rgb cb = atari_palette[created_picture_copy_B[y][x]];
-                        RGBQUAD c; c.rgbRed = cb.r; c.rgbGreen = cb.g; c.rgbBlue = cb.b;
-                        FreeImage_SetPixelColor(output_bitmap, x, y, &c);
-                    } else {
-                        unsigned char a = created_picture_copy[y][x];
-                        unsigned char b = created_picture_copy_B[y][x];
-                        rgb ca = atari_palette[a];
-                        rgb cb = atari_palette[b];
-                        // Simple average in RGB for preview; runtime objective uses YUV fast path
-                        RGBQUAD c;
-                        c.rgbRed = (unsigned char)(((int)ca.r + (int)cb.r) >> 1);
-                        c.rgbGreen = (unsigned char)(((int)ca.g + (int)cb.g) >> 1);
-                        c.rgbBlue = (unsigned char)(((int)ca.b + (int)cb.b) >> 1);
-                        FreeImage_SetPixelColor(output_bitmap, x, y, &c);
+            // Write directly to scanline for this y; keep same orientation as previous per-pixel path
+            BYTE* row = FreeImage_GetScanLine(output_bitmap, y);
+            BYTE* p = row;
+            if (temporal && y < (int)created_picture_copy_B.size() && created_picture_copy_B[y].size() >= snap_width) {
+                if (dual_view_mode == 1) {
+                    // Show A only
+                    const unsigned char* src = created_picture_copy[y].data();
+                    for (unsigned x = 0; x < snap_width; ++x) {
+                        const rgb c = atari_palette[src[x]];
+                        // 24-bit BGR
+                        *p++ = c.b; *p++ = c.g; *p++ = c.r;
+                    }
+                } else if (dual_view_mode == 2) {
+                    // Show B only
+                    const unsigned char* srcB = created_picture_copy_B[y].data();
+                    for (unsigned x = 0; x < snap_width; ++x) {
+                        const rgb c = atari_palette[srcB[x]];
+                        *p++ = c.b; *p++ = c.g; *p++ = c.r;
                     }
                 } else {
-                    rgb atari_color = atari_palette[created_picture_copy[y][x]];
-                    RGBQUAD color;
-                    color.rgbRed = atari_color.r;
-                    color.rgbGreen = atari_color.g;
-                    color.rgbBlue = atari_color.b;
-                    FreeImage_SetPixelColor(output_bitmap, x, y, &color);
+                    // Blended A/B (simple RGB average for preview)
+                    const unsigned char* srcA = created_picture_copy[y].data();
+                    const unsigned char* srcB = created_picture_copy_B[y].data();
+                    for (unsigned x = 0; x < snap_width; ++x) {
+                        const rgb ca = atari_palette[srcA[x]];
+                        const rgb cb = atari_palette[srcB[x]];
+                        const unsigned char r = (unsigned char)(((int)ca.r + (int)cb.r) >> 1);
+                        const unsigned char g = (unsigned char)(((int)ca.g + (int)cb.g) >> 1);
+                        const unsigned char b = (unsigned char)(((int)ca.b + (int)cb.b) >> 1);
+                        *p++ = b; *p++ = g; *p++ = r;
+                    }
+                }
+            } else {
+                // Single frame path
+                const unsigned char* src = created_picture_copy[y].data();
+                for (unsigned x = 0; x < snap_width; ++x) {
+                    const rgb c = atari_palette[src[x]];
+                    *p++ = c.b; *p++ = c.g; *p++ = c.r;
                 }
             }
+            // Ensure we advance to next scanline start
+            (void)pitch; // pitch may exceed 3*width; FreeImage_GetScanLine already gives correct row start
         }
     }
 

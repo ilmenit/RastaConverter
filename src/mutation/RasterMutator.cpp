@@ -271,13 +271,9 @@ void RasterMutator::MutateProgram(raster_picture* pic)
         }
     }
 
-    // recache any lines that have changed (serialize access to shared cache/allocator)
-    try {
-        std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);
-        pic->recache_insns_if_needed(m_gstate->m_insn_seq_cache, m_gstate->m_linear_allocator);
-    } catch (const std::exception& e) {
-        std::cerr << "[CACHE] recache_insns_if_needed failed: " << e.what() << std::endl;
-    }
+    // Do not recache into the shared context here. Leave cache_key == NULL
+    // so the executor can safely recache into its per-thread allocator/cache
+    // inside ExecuteRasterProgram(). This avoids double work and global mutex contention.
 }
 
 void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)

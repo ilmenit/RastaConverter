@@ -301,18 +301,22 @@ void ImageProcessor::PrepareDestinationPicture()
         }
     }
 
-    // Copy the processed image back to the picture array for later use
-    int w = static_cast<int>(FreeImage_GetWidth(m_input_bitmap));
-    int h = static_cast<int>(FreeImage_GetHeight(m_input_bitmap));
-
-    for (int y = 0; y < h; ++y)
-    {
-        for (int x = 0; x < w; ++x)
+    // Only copy destination back to m_picture in single-frame mode.
+    // In dual mode, we want m_picture to remain the original source image so
+    // that any sampling (mutator seeding/fallbacks) uses the source, not the
+    // dithered/quantized destination.
+    if (!m_config.dual_mode) {
+        int w = static_cast<int>(FreeImage_GetWidth(m_input_bitmap));
+        int h = static_cast<int>(FreeImage_GetHeight(m_input_bitmap));
+        for (int y = 0; y < h; ++y)
         {
-            RGBQUAD color;
-            FreeImage_GetPixelColor(m_destination_bitmap, x, y, &color);
-            rgb out_pixel = PIXEL2RGB(color);
-            m_picture[y][x] = out_pixel; // used by the color distance cache
+            for (int x = 0; x < w; ++x)
+            {
+                RGBQUAD color;
+                FreeImage_GetPixelColor(m_destination_bitmap, x, y, &color);
+                rgb out_pixel = PIXEL2RGB(color);
+                m_picture[y][x] = out_pixel; // used by the color distance cache
+            }
         }
     }
 }
@@ -490,25 +494,37 @@ void* ImageProcessor::KnollDitheringParallelHelper(void* arg)
 
 void ImageProcessor::ParallelFor(int from, int to, void* (*start_routine)(void*))
 {
+    const int range = std::abs(to - from);
+    if (range <= 0) {
+        return; // nothing to do
+    }
+
+    const int max_threads = std::max(1, m_config.threads);
+    const int num_threads = std::min(max_threads, range);
+
     std::vector<std::thread> threads;
     std::vector<parallel_for_arg_t> threads_arg;
 
-    threads.reserve(m_config.threads);
-    threads_arg.resize(m_config.threads);
+    threads.reserve(num_threads);
+    threads_arg.resize(num_threads);
 
-    int step = abs(to - from) / m_config.threads;
-    for (int t = 0; t < m_config.threads; ++t)
+    const int base_step = range / num_threads;           // at least 1
+    int remainder = range % num_threads;                 // distribute extras
+
+    int cur_from = from;
+    for (int t = 0; t < num_threads; ++t)
     {
+        const int step = base_step + (remainder > 0 ? 1 : 0);
+        if (remainder > 0) remainder--;
+
         threads_arg[t].this_ptr = this;
-        threads_arg[t].from = from;
-        if (t == m_config.threads - 1) // last one
-            threads_arg[t].to = to;
-        else
-            threads_arg[t].to = from + step;
+        threads_arg[t].from = cur_from;
+        threads_arg[t].to = cur_from + step;
+
         threads.emplace_back(std::bind(start_routine, (void*)&threads_arg[t]));
-        from += step;
+        cur_from += step;
     }
-    for (int t = 0; t < m_config.threads; ++t)
+    for (int t = 0; t < num_threads; ++t)
     {
         threads[t].join();
     }
