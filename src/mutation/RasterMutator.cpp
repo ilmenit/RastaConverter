@@ -105,6 +105,9 @@ int RasterMutator::SelectMutation()
 void RasterMutator::MutateProgram(raster_picture* pic)
 {
     memset(m_current_mutations, 0, sizeof(m_current_mutations));
+    // Reset per-mutation instrumentation flags at the start of each program mutation
+    m_used_complementary_pick = false;
+    m_used_seed_add = false;
 
     // Determine mutation strategy - regional or global
     bool use_regional = m_gstate->m_use_regional_mutation;
@@ -372,7 +375,6 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
                     if (px < 0 || px >= (int)m_width) px = Random(m_width);
                     if (TryComplementaryPick(m_currently_mutated_y, px, compVal)) {
                         temp.loose.value = compVal;
-                        m_gstate->m_stat_dualSeedAdd++;
                         seededByComplement = true;
                         m_used_seed_add = true;
                     }
@@ -859,8 +861,6 @@ bool RasterMutator::TryComplementaryPick(int y, int x, unsigned char& outValue)
 
     if (bestB >= 0) {
         outValue = (unsigned char)(bestB * 2);
-        // Stats: count dual complement value
-        m_gstate->m_stat_dualComplementValue++;
         return true;
     }
     return false;

@@ -131,6 +131,9 @@ struct Configuration {
     // Cross-frame structural ops probabilities
     double dual_cross_share_prob = 0.05;      // probability of cross copy/swap
     double dual_both_frames_prob = 0.0;       // reserved for future
+    // Staged dual strategy parameters
+    unsigned long long dual_stage_evals = 5000; // per-thread iterations per stage when /dual_strategy=staged
+    bool dual_stage_start_B = false;            // start staged focus on B (default A)
     // Flicker ramp configuration
     unsigned long long blink_ramp_evals = 0;  // number of evals to ramp WL
     double flicker_luma_weight_initial = 1.0; // starting WL if ramp enabled

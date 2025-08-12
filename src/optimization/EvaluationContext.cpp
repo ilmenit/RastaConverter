@@ -297,7 +297,9 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
                                                        const sprites_memory_t& sprites_memory_A,
                                                        const sprites_memory_t& sprites_memory_B,
                                                        Mutator* mutator,
-                                                       bool mutatedB)
+                                                       bool mutatedB,
+                                                       bool didCrossShare,
+                                                       bool didCrossSwap)
 {
     // Only track global "best" and UI data for dual mode. Policies manage acceptance/history.
     if (!picA || !picB || !m_initialized) {
@@ -362,6 +364,22 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
                 const int* current_mutations = mutator->GetCurrentMutations();
                 for (int i = 0; i < E_MUTATION_MAX; ++i) {
                     if (current_mutations[i]) m_mutation_stats[i] += current_mutations[i];
+                }
+                // Dual-mode fine-grained stats: increment only on improvement
+                // Cross-share ops were decided in the runner, count them here upon improvement
+                if (didCrossShare) {
+                    if (didCrossSwap) {
+                        m_stat_crossSwapLine++;
+                    } else {
+                        m_stat_crossCopyLine++;
+                    }
+                }
+                // Instrumentation flags from the mutator: count only if they contributed to an improvement
+                if (mutator->GetAndResetUsedComplementaryPick()) {
+                    m_stat_dualComplementValue++;
+                }
+                if (mutator->GetAndResetUsedSeedAdd()) {
+                    m_stat_dualSeedAdd++;
                 }
             } catch (...) {}
         }

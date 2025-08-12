@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <mutex>
 #include "FreeImage.h"
 #include "color/rgb.h"
 #include "color/distance.h"
@@ -175,6 +176,7 @@ private:
     std::vector<std::vector<unsigned char>> m_details_data;
     std::vector<std::vector<rgb_error>> m_error_map;
     std::set<unsigned char> m_color_indexes_on_dst_picture;
+    std::mutex m_color_indexes_mutex;
     
     // Possible colors
     std::vector<std::vector<unsigned char>> m_possible_colors_for_each_line;

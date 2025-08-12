@@ -273,6 +273,12 @@ void ImageProcessor::PrepareDestinationPicture()
     // Fill the new bitmap with black color
     FreeImage_FillBackground(m_destination_bitmap, &black, 0);
 
+    // Reset destination-used color set (fresh run)
+    {
+        std::lock_guard<std::mutex> lock(m_color_indexes_mutex);
+        m_color_indexes_on_dst_picture.clear();
+    }
+
     // Process the image based on dithering method
     if (m_config.dither != E_DITHER_NONE)
     {
@@ -293,7 +299,10 @@ void ImageProcessor::PrepareDestinationPicture()
             {
                 rgb out_pixel = m_picture[y][x];
                 unsigned char color_index = FindAtariColorIndex(out_pixel);
-                m_color_indexes_on_dst_picture.insert(color_index);
+                {
+                    std::lock_guard<std::mutex> lock(m_color_indexes_mutex);
+                    m_color_indexes_on_dst_picture.insert(color_index);
+                }
                 out_pixel = atari_palette[color_index];
                 RGBQUAD color = RGB2PIXEL(out_pixel);
                 FreeImage_SetPixelColor(m_destination_bitmap, x, y, &color);
@@ -544,19 +553,27 @@ void ImageProcessor::KnollDithering()
 
 void ImageProcessor::KnollDitheringParallel(int from, int to)
 {
+    // Write rows using scanline pointers for thread safety and speed.
+    // FreeImage scanlines are independent per y, so per-row parallelism is safe.
     for (int y = from; y < to; ++y)
     {
+        BYTE* row = FreeImage_GetScanLine(m_destination_bitmap, y);
+        if (!row) continue;
         for (unsigned x = 0; x < (unsigned)m_width; ++x)
         {
-            rgb r_color = m_picture[y][x];
-            unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
-            MixingPlan plan = DeviseBestMixingPlan(r_color);
-            unsigned char color_index = plan.colors[map_value];
-            m_color_indexes_on_dst_picture.insert(color_index);
-            rgb out_pixel = atari_palette[color_index];
-
-            RGBQUAD color = RGB2PIXEL(out_pixel);
-            FreeImage_SetPixelColor(m_destination_bitmap, x, y, &color);
+            const rgb src_color = m_picture[y][x];
+            const unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
+            const MixingPlan plan = DeviseBestMixingPlan(src_color);
+            const unsigned char color_index = plan.colors[map_value];
+            {
+                std::lock_guard<std::mutex> lock(m_color_indexes_mutex);
+                m_color_indexes_on_dst_picture.insert(color_index);
+            }
+            const rgb out_pixel = atari_palette[color_index];
+            BYTE* p = row + x * 3; // 24-bit BGR
+            p[0] = out_pixel.b;
+            p[1] = out_pixel.g;
+            p[2] = out_pixel.r;
         }
     }
 }

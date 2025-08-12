@@ -220,6 +220,9 @@ public:
     // Cross-frame structural ops probabilities
     double m_dual_cross_share_prob = 0.05;  // copy/swap line A<->B probability
     double m_dual_both_frames_prob = 0.0;   // reserved for future small pair tweak
+    // Staged dual params
+    unsigned long long m_dual_stage_evals = 5000; // per-thread iterations per stage
+    bool m_dual_stage_start_B = false;            // start focusing B first
 
     // Flicker weight ramp
     unsigned long long m_blink_ramp_evals = 0; // 0 disables ramp
@@ -267,7 +270,9 @@ public:
                                     const sprites_memory_t& sprites_memory_A,
                                     const sprites_memory_t& sprites_memory_B,
                                     Mutator* mutator,
-                                    bool mutatedB);
+                                    bool mutatedB,
+                                    bool didCrossShare,
+                                    bool didCrossSwap);
 
     // Dual-specific statistics (displayed in GUI)
     std::atomic<unsigned long long> m_stat_dualComplementValue{0};

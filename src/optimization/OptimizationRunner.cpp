@@ -175,14 +175,28 @@ void OptimizationRunner::worker(int threadId)
     std::vector<const line_cache_result*> lastLineResultsA(m_ctx->m_height);
     std::vector<const line_cache_result*> lastLineResultsB(m_ctx->m_height);
 
+    // Per-thread staged dual state
+    bool stage_focus_B = m_ctx->m_dual_stage_start_B;
+    unsigned long long stage_counter = 0ULL;
+    const unsigned long long stage_len = std::max(1ULL, m_ctx->m_dual_stage_evals);
+
     while (m_running.load() && !m_ctx->m_finished.load()) {
         // Mutation choice
         raster_picture candA = currentA;
         raster_picture candB = currentB;
         bool mutateB = false;
         if (m_ctx->m_dual_mode) {
-            int r = exec.Random(1000);
-            mutateB = (r < (int)(m_ctx->m_dual_mutate_ratio * 1000.0));
+            if (m_ctx->m_dual_strategy == E_DUAL_STRAT_STAGED) {
+                // Focus one frame for a block of iterations, then switch
+                mutateB = stage_focus_B;
+                if (++stage_counter >= stage_len) {
+                    stage_focus_B = !stage_focus_B;
+                    stage_counter = 0ULL;
+                }
+            } else {
+                int r = exec.Random(1000);
+                mutateB = (r < (int)(m_ctx->m_dual_mutate_ratio * 1000.0));
+            }
         }
         try {
             if (m_ctx->m_dual_mode && mutateB) {
@@ -198,6 +212,7 @@ void OptimizationRunner::worker(int threadId)
 
         // Optional cross-share ops
         bool didCrossShare = false;
+        bool didCrossSwap = false;
         if (m_ctx->m_dual_mode && m_ctx->m_dual_cross_share_prob > 0.0) {
             int rshare = exec.Random(1000000);
             if ((double)rshare / 1000000.0 < m_ctx->m_dual_cross_share_prob) {
@@ -208,11 +223,11 @@ void OptimizationRunner::worker(int threadId)
                         candA.raster_lines[y].swap(candB.raster_lines[y]);
                         candA.raster_lines[y].cache_key = NULL;
                         candB.raster_lines[y].cache_key = NULL;
-                        m_ctx->m_stat_crossSwapLine++;
+                        didCrossSwap = true;
                     } else {
                         candB.raster_lines[y] = candA.raster_lines[y];
                         candB.raster_lines[y].cache_key = NULL;
-                        m_ctx->m_stat_crossCopyLine++;
+                        didCrossSwap = false;
                     }
                     didCrossShare = true;
                 }
@@ -254,7 +269,9 @@ void OptimizationRunner::worker(int threadId)
                     dual.spritesMemoryA,
                     dual.spritesMemoryB,
                     &mutator,
-                    /*mutatedB=*/mutateB);
+                    /*mutatedB=*/mutateB,
+                    /*didCrossShare=*/didCrossShare,
+                    /*didCrossSwap=*/didCrossSwap);
             }
 
             m_ctx->CollectStatisticsTickUnsafe();

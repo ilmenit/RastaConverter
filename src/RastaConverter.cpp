@@ -159,12 +159,14 @@ bool RastaConverter::ProcessInit()
         ctx.m_flicker_chroma_weight = cfg.flicker_chroma_weight;
         ctx.m_flicker_chroma_thresh = cfg.flicker_chroma_thresh;
         ctx.m_flicker_exp_chroma = cfg.flicker_exp_chroma;
-        // Only 'alternate' strategy and 'dup' init supported
-        ctx.m_dual_strategy = E_DUAL_STRAT_ALTERNATE;
-        ctx.m_dual_init = E_DUAL_INIT_DUP;
+        // Strategy and init from config
+        ctx.m_dual_strategy = cfg.dual_strategy;
+        ctx.m_dual_init = cfg.dual_init;
         ctx.m_dual_mutate_ratio = cfg.dual_mutate_ratio;
         ctx.m_dual_cross_share_prob = cfg.dual_cross_share_prob;
         ctx.m_dual_both_frames_prob = cfg.dual_both_frames_prob;
+        ctx.m_dual_stage_evals = cfg.dual_stage_evals;
+        ctx.m_dual_stage_start_B = cfg.dual_stage_start_B;
         // Sensible defaults for dual mode if user did not provide a ramp
         ctx.m_blink_ramp_evals = (cfg.blink_ramp_evals > 0) ? cfg.blink_ramp_evals : 250000ULL;
         ctx.m_flicker_luma_weight_initial = cfg.flicker_luma_weight_initial > 0.0 ? cfg.flicker_luma_weight_initial : 0.6;

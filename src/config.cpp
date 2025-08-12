@@ -331,11 +331,25 @@ void Configuration::Process(int argc, char *argv[])
         flicker_chroma_thresh= getF("flicker_chroma_thresh","blink_chroma_thresh","8");
         flicker_exp_chroma   = getI("flicker_exp_chroma",   "blink_exp_chroma",   "2");
 
-        // strategy: only 'alternate' supported
-        dual_strategy = E_DUAL_STRAT_ALTERNATE;
+        // strategy
+        {
+            std::string strat = parser.getValue("dual_strategy", "alternate");
+            for (auto &c : strat) c = (char)tolower(c);
+            if (strat == "alternate" || strat == "alt") dual_strategy = E_DUAL_STRAT_ALTERNATE;
+            else if (strat == "joint") dual_strategy = E_DUAL_STRAT_JOINT; // reserved; behaves as alternate currently
+            else if (strat == "staged" || strat == "stage") dual_strategy = E_DUAL_STRAT_STAGED;
+            else dual_strategy = E_DUAL_STRAT_ALTERNATE;
+        }
 
-        // init: only 'dup' supported
-        dual_init = E_DUAL_INIT_DUP;
+        // init
+        {
+            std::string initv = parser.getValue("dual_init", "dup");
+            for (auto &c : initv) c = (char)tolower(c);
+            if (initv == "dup" || initv == "copy") dual_init = E_DUAL_INIT_DUP;
+            else if (initv == "random") dual_init = E_DUAL_INIT_RANDOM;
+            else if (initv == "anti") dual_init = E_DUAL_INIT_ANTI;
+            else dual_init = E_DUAL_INIT_DUP;
+        }
 
         dual_mutate_ratio = String2Value<double>(parser.getValue("dual_mutate_ratio", ""));
         if (dual_mutate_ratio < 0.0) {
@@ -358,6 +372,16 @@ void Configuration::Process(int argc, char *argv[])
             dual_both_frames_prob = 0.0;
         } else if (dual_both_frames_prob > 1.0) {
             dual_both_frames_prob = 1.0;
+        }
+
+        // staged dual params
+        {
+            std::string stage_len = parser.getValue("dual_stage_evals", "5000");
+            if (!stage_len.empty()) dual_stage_evals = String2Value<unsigned long long>(stage_len);
+            if (dual_stage_evals < 1ULL) dual_stage_evals = 1ULL;
+            std::string stage_start = parser.getValue("dual_stage_start", "A");
+            for (auto &c : stage_start) c = (char)tolower(c);
+            dual_stage_start_B = (stage_start == "b" || stage_start == "1" || stage_start == "true" || stage_start == "on");
         }
 
         // flicker ramp config (aliases blink_* accepted)

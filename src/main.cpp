@@ -117,6 +117,10 @@ Dual-frame mode (A/B frame optimization):
   --flicker_exp_chroma <INT>  Chroma exponent (default: 2)
   --dual_mutate_ratio <0..1>
                               Chance to mutate B vs A (default: 0.5)
+  --dual_strategy <alternate|staged>
+                              Mutation scheduling between A/B (default: alternate)
+  --dual_stage_evals <N>      If staged, iterations per focus block (default: 5000)
+  --dual_stage_start <A|B>    If staged, which frame to focus first (default: A)
 
 Notes:
   - Options accept "/" or "-"/"--" prefixes. Examples: /threads=4, -threads 4, --threads 4
