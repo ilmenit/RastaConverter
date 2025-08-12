@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.21)
 project(RastaConverter VERSION 1.0.0 LANGUAGES CXX)
 
 # Set C++ standard
@@ -12,24 +12,28 @@ option(THREAD_DEBUG "Enable detailed thread/synchronization debug logs" OFF)
 option(SUPPRESS_IMPROVEMENT_LOGS "Suppress 'New best solution' improvement logging" OFF)
 option(UI_DEBUG "Enable SDL UI event debug logging" OFF)
 option(IGNORE_SDL_QUIT "Ignore SDL_QUIT and ESC (for diagnosing unexpected exits)" OFF)
+option(ENABLE_LTO "Enable interprocedural optimization (IPO/LTO) for Release builds" ON)
+option(ENABLE_FAST_MATH "Enable fast-math on Release builds for GCC/Clang" ON)
+option(ENABLE_DEAD_STRIP "Enable dead code/data elimination in Release (function/data sections + linker GC)" ON)
+option(ENABLE_MSVC_FAST_MATH "Use /fp:fast for MSVC/clang-cl in Release" OFF)
+option(ENABLE_AVX2 "Enable AVX2 instructions where supported (MSVC only; use at your own risk)" OFF)
+option(ENABLE_LLD_LINKER "Use lld linker for faster links (Clang/GCC on ELF); optional" OFF)
+option(ENABLE_UNITY_BUILD "Enable unity build for the executable (can improve inlining and compile times)" OFF)
 
-# Add optimization flags for Release builds
-if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    if(MSVC)
-        # MSVC optimization flags
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /Oi /Ot /GL /Zi")
-        set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG /DEBUG:FULL")
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        if(WIN32)
-            # Clang-cl on Windows
-            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /Oi")
-        else()
-            # Clang on Unix-like systems
-            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffast-math")
-        endif()
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-        # GCC optimization flags
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffast-math")
+# Profile-Guided Optimization (PGO)
+set(PGO_MODE "OFF" CACHE STRING "PGO mode: OFF, GENERATE, or USE")
+set_property(CACHE PGO_MODE PROPERTY STRINGS OFF GENERATE USE)
+set(PGO_PROFILE_PATH "" CACHE PATH "Path to PGO profile data directory or file (toolchain-specific)")
+
+# Enable IPO/LTO using CMake property where supported
+if(ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT ipo_supported OUTPUT ipo_msg)
+    if(ipo_supported)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
+    else()
+        message(STATUS "IPO/LTO not supported: ${ipo_msg}")
     endif()
 endif()
 
@@ -49,11 +53,23 @@ if(NOT DEFINED SDL2_TTF_DIR AND DEFINED ENV{SDL2_TTF_DIR})
     set(SDL2_TTF_DIR $ENV{SDL2_TTF_DIR} CACHE PATH "Path to SDL2_ttf library")
 endif()
 
-# Find dependencies
-find_package(FreeImage REQUIRED)
+# Find dependencies: prefer config packages (vcpkg/homebrew/conan), then fall back to custom Find modules
+# FreeImage
+find_package(FreeImage CONFIG QUIET)
+if(NOT TARGET FreeImage::FreeImage)
+    find_package(FreeImage REQUIRED)
+endif()
+
+# SDL2 and SDL2_ttf
 if(NOT NO_GUI)
-    find_package(SDL2 REQUIRED)
-    find_package(SDL2_ttf REQUIRED)
+    find_package(SDL2 CONFIG QUIET)
+    find_package(SDL2_ttf CONFIG QUIET)
+    if(NOT TARGET SDL2::SDL2)
+        find_package(SDL2 REQUIRED)
+    endif()
+    if(NOT TARGET SDL2_ttf::SDL2_ttf)
+        find_package(SDL2_ttf REQUIRED)
+    endif()
 endif()
 
 # Group source files by directory with correct src/ prefix
@@ -179,14 +195,23 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
     target_precompile_headers(rasta PRIVATE src/pch.h)
 endif()
 
-# Include directories
+# Optional unity build (merges sources to improve inlining and compile time)
+if(ENABLE_UNITY_BUILD)
+    set_target_properties(rasta PROPERTIES UNITY_BUILD ON)
+endif()
+
+# Include directories always include project src
 target_include_directories(rasta PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${FREEIMAGE_INCLUDE_DIRS}
 )
 
-# Link libraries
-target_link_libraries(rasta PRIVATE ${FREEIMAGE_LIBRARIES})
+# Link FreeImage using imported target if available, otherwise variables from Find module
+if(TARGET FreeImage::FreeImage)
+    target_link_libraries(rasta PRIVATE FreeImage::FreeImage)
+else()
+    target_include_directories(rasta PRIVATE ${FREEIMAGE_INCLUDE_DIRS})
+    target_link_libraries(rasta PRIVATE ${FREEIMAGE_LIBRARIES})
+endif()
 
 # Compile-time debug controls
 if(THREAD_DEBUG)
@@ -204,14 +229,111 @@ endif()
 
 # Add SDL dependencies if GUI is enabled
 if(NOT NO_GUI)
-    target_include_directories(rasta PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${SDL2_TTF_INCLUDE_DIRS}
+    if(TARGET SDL2::SDL2)
+        target_link_libraries(rasta PRIVATE SDL2::SDL2)
+        if(TARGET SDL2::SDL2main)
+            target_link_libraries(rasta PRIVATE SDL2::SDL2main)
+        endif()
+    else()
+        target_include_directories(rasta PRIVATE ${SDL2_INCLUDE_DIRS})
+        target_link_libraries(rasta PRIVATE ${SDL2_LIBRARIES})
+    endif()
+
+    if(TARGET SDL2_ttf::SDL2_ttf)
+        target_link_libraries(rasta PRIVATE SDL2_ttf::SDL2_ttf)
+    else()
+        target_include_directories(rasta PRIVATE ${SDL2_TTF_INCLUDE_DIRS})
+        target_link_libraries(rasta PRIVATE ${SDL2_TTF_LIBRARIES})
+    endif()
+endif()
+
+# Compiler warnings and optimization options applied per-compiler via target properties
+if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    # MSVC cl.exe
+    target_compile_options(rasta PRIVATE
+        /W4 /permissive-
+        $<$<CONFIG:Release,RelWithDebInfo>:/O2 /Ob2 /Oi /Ot /Gy /Gw>
+        $<$<AND:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,$<CONFIG:Release,RelWithDebInfo>>:/fp:fast>
+        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<CONFIG:Release,RelWithDebInfo>>:/arch:AVX2>
     )
-    target_link_libraries(rasta PRIVATE
-        ${SDL2_LIBRARIES}
-        ${SDL2_TTF_LIBRARIES}
+    target_link_options(rasta PRIVATE
+        $<$<CONFIG:Release,RelWithDebInfo>:/OPT:REF /OPT:ICF>
     )
+elseif(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # clang-cl on Windows (MSVC frontend)
+    target_compile_options(rasta PRIVATE
+        /W4
+        $<$<CONFIG:Release,RelWithDebInfo>:/O2 /Ob2 /Oi /Ot /Gy>
+        $<$<AND:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,$<CONFIG:Release,RelWithDebInfo>>:/fp:fast>
+        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<CONFIG:Release,RelWithDebInfo>>:/arch:AVX2>
+    )
+    target_link_options(rasta PRIVATE
+        $<$<CONFIG:Release,RelWithDebInfo>:/OPT:REF /OPT:ICF>
+    )
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # Clang on Unix-like systems
+    target_compile_options(rasta PRIVATE
+        -Wall -Wextra -Wpedantic
+        $<$<CONFIG:Release,RelWithDebInfo>:-O3 -march=native>
+        $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<CONFIG:Release,RelWithDebInfo>>:-ffast-math>
+        $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<CONFIG:Release,RelWithDebInfo>>:-ffunction-sections -fdata-sections>
+    )
+    if(ENABLE_LTO)
+        # Prefer ThinLTO for faster links with near-equal perf
+        target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-flto=thin>)
+    endif()
+    if(ENABLE_DEAD_STRIP)
+        if(APPLE)
+            target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-Wl,-dead_strip>)
+        else()
+            target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-Wl,--gc-sections -Wl,-O1>)
+        endif()
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(rasta PRIVATE
+        -Wall -Wextra -Wpedantic
+        $<$<CONFIG:Release,RelWithDebInfo>:-O3 -march=native>
+        $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<CONFIG:Release,RelWithDebInfo>>:-ffast-math>
+        $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<CONFIG:Release,RelWithDebInfo>>:-ffunction-sections -fdata-sections>
+    )
+    if(ENABLE_DEAD_STRIP)
+        target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-Wl,--gc-sections -Wl,-O1>)
+    endif()
+endif()
+
+# PGO flags
+if(PGO_MODE STREQUAL "GENERATE")
+    if(MSVC)
+        # Instrumented binary for MSVC PGO (requires running workload and re-link with USE)
+        target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:/LTCG:PGINSTRUMENT>)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fprofile-generate>)
+        target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fprofile-generate>)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fprofile-instr-generate>)
+        target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fprofile-instr-generate>)
+    endif()
+elseif(PGO_MODE STREQUAL "USE")
+    if(MSVC)
+        target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:/LTCG:PGOPTIMIZE>)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fprofile-use -fprofile-correction>)
+        target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fprofile-use>)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        if(PGO_PROFILE_PATH)
+            target_compile_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fprofile-instr-use=${PGO_PROFILE_PATH}>)
+            target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fprofile-instr-use=${PGO_PROFILE_PATH}>)
+        else()
+            message(WARNING "PGO_MODE=USE set but PGO_PROFILE_PATH not provided for Clang")
+        endif()
+    endif()
+endif()
+
+# Linker selection (lld) for faster links on ELF platforms
+if(ENABLE_LLD_LINKER AND NOT WIN32 AND NOT APPLE)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_link_options(rasta PRIVATE $<$<CONFIG:Release,RelWithDebInfo>:-fuse-ld=lld>)
+    endif()
 endif()
 
 # Platform-specific settings
@@ -245,15 +367,18 @@ if(WIN32)
             )
         endif()
     endif()
+
+    # Additionally, copy runtime DLLs discovered via target dependencies (e.g., vcpkg)
+    add_custom_command(TARGET rasta POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:rasta>
+            $<TARGET_FILE_DIR:rasta>
+        COMMAND_EXPAND_LISTS
+    )
 else()
     # Linux-specific settings
     find_package(Threads REQUIRED)
     target_link_libraries(rasta PRIVATE Threads::Threads)
-    
-    # Add optimization flags
-    if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-        target_link_options(rasta PRIVATE -flto)
-    endif()
 endif()
 
 # Copy font file
@@ -267,8 +392,8 @@ endif()
 
 # Installation rules
 install(TARGETS rasta DESTINATION bin)
-install(FILES README.md LICENSE DESTINATION share/doc/rasta)
-install(DIRECTORY palettes DESTINATION share/rasta)
+install(FILES README.md ChangeLog.md help.txt DESTINATION share/doc/rasta)
+install(DIRECTORY Palettes DESTINATION share/rasta)
 if(NOT NO_GUI)
     install(FILES assets/clacon2.ttf DESTINATION bin)
 endif()

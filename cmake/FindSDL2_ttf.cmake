@@ -24,6 +24,8 @@ else()
     set(SDL2_TTF_INCLUDE_PATHS
         "/usr/local/include/SDL2"
         "/usr/include/SDL2"
+        "/opt/local/include/SDL2"
+        "/opt/homebrew/include/SDL2"
     )
 endif()
 
@@ -67,6 +69,8 @@ else()
         "/usr/local/lib"
         "/usr/lib64"
         "/usr/lib"
+        "/opt/local/lib"
+        "/opt/homebrew/lib"
         DOC "Path to SDL2_ttf library"
     )
 endif()
@@ -79,3 +83,12 @@ find_package_handle_standard_args(SDL2_ttf
 
 # Hide these variables in cmake GUIs
 mark_as_advanced(SDL2_TTF_INCLUDE_DIRS SDL2_TTF_LIBRARIES SDL2_TTF_DLL)
+
+# Provide an imported target for consistency with config packages
+if(SDL2_TTF_LIBRARIES AND SDL2_TTF_INCLUDE_DIRS AND NOT TARGET SDL2_ttf::SDL2_ttf)
+    add_library(SDL2_ttf::SDL2_ttf UNKNOWN IMPORTED)
+    set_target_properties(SDL2_ttf::SDL2_ttf PROPERTIES
+        IMPORTED_LOCATION "${SDL2_TTF_LIBRARIES}"
+        INTERFACE_INCLUDE_DIRECTORIES "${SDL2_TTF_INCLUDE_DIRS}"
+    )
+endif()

@@ -287,7 +287,7 @@ void RasterProgramGenerator::OptimizeRasterProgram(raster_picture* pic)
     };
 
     // Scan through the program
-    for (int y = 0; y < (int)pic->raster_lines.size(); ++y)
+    for (int y = 0; y < static_cast<int>(pic->raster_lines.size()); ++y)
     {
         size_t size = pic->raster_lines[y].instructions.size();
         if (size == 0) {
@@ -297,7 +297,7 @@ void RasterProgramGenerator::OptimizeRasterProgram(raster_picture* pic)
         
         for (size_t i = 0; i < size; ++i)
         {
-            unsigned char ins = rastinsns[i].loose.instruction;
+            unsigned char ins = static_cast<unsigned char>(rastinsns[i].loose.instruction);
             
             // Check LDA/LDX/LDY instructions
             if (ins <= E_RASTER_LDY)

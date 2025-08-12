@@ -51,7 +51,7 @@ bool PaletteCompareLuma(unsigned index1, unsigned index2)
 double random_plus_minus(double val)
 {
     double result;
-    int val2 = 100.0 * val;
+    int val2 = static_cast<int>(std::round(100.0 * val));
     result = random(val2);
     if (random(2))
         result *= -1;
@@ -97,12 +97,12 @@ bool ImageProcessor::LoadInputBitmap()
 
     if (m_config.height == -1) // set height automatic to keep screen proportions
     {
-        double iw = (double)input_width;
-        double ih = (double)input_height;
+        double iw = static_cast<double>(input_width);
+        double ih = static_cast<double>(input_height);
         if (iw / ih > (320.0 / 240.0)) // 4:3 = 320:240
         {
-            ih = input_height / (input_width / 320.0);
-            m_config.height = (int)ih;
+            ih = static_cast<double>(input_height) / (static_cast<double>(input_width) / 320.0);
+            m_config.height = static_cast<int>(ih);
         }
         else
             m_config.height = 240;
@@ -167,9 +167,9 @@ void ImageProcessor::InitLocalStructure()
             atari_color = PIXEL2RGB(fpixel);
             m_picture[y][x] = atari_color;
             m_source_picture[y][x] = atari_color;
-            fpixel.rgbRed = atari_color.r;
-            fpixel.rgbGreen = atari_color.g;
-            fpixel.rgbBlue = atari_color.b;
+            fpixel.rgbRed = static_cast<BYTE>(atari_color.r);
+            fpixel.rgbGreen = static_cast<BYTE>(atari_color.g);
+            fpixel.rgbBlue = static_cast<BYTE>(atari_color.b);
             FreeImage_SetPixelColor(m_input_bitmap, x, y, &fpixel);
         }
     }
@@ -242,7 +242,9 @@ void ImageProcessor::GeneratePictureErrorMap()
             {
                 for (int x = 0; x < w; ++x)
                 {
-                    details_multiplier = 255 + (unsigned int)(((double)m_details_data[y][x]) * m_config.details_strength);
+                    details_multiplier = 255u + static_cast<unsigned int>(
+                        std::lround(static_cast<double>(m_details_data[y][x]) * m_config.details_strength)
+                    );
                     *dst++ = (details_multiplier * distance_function(srcrow[x], ref)) / 255;
                 }
             }
@@ -259,8 +261,8 @@ void ImageProcessor::GeneratePictureErrorMap()
 
 void ImageProcessor::PrepareDestinationPicture()
 {
-    int width = FreeImage_GetWidth(m_input_bitmap);
-    int height = FreeImage_GetHeight(m_input_bitmap);
+    int width = static_cast<int>(FreeImage_GetWidth(m_input_bitmap));
+    int height = static_cast<int>(FreeImage_GetHeight(m_input_bitmap));
     int bpp = FreeImage_GetBPP(m_input_bitmap); // Bits per pixel
 
     // Allocate a new bitmap with the same dimensions and bpp
@@ -300,8 +302,8 @@ void ImageProcessor::PrepareDestinationPicture()
     }
 
     // Copy the processed image back to the picture array for later use
-    int w = FreeImage_GetWidth(m_input_bitmap);
-    int h = FreeImage_GetHeight(m_input_bitmap);
+    int w = static_cast<int>(FreeImage_GetWidth(m_input_bitmap));
+    int h = static_cast<int>(FreeImage_GetHeight(m_input_bitmap));
 
     for (int y = 0; y < h; ++y)
     {
@@ -355,17 +357,17 @@ void ImageProcessor::OtherDithering()
                 else if (p.b < 0)
                     p.b = 0;
 
-                out_pixel.r = (unsigned char)(p.r + 0.5);
-                out_pixel.g = (unsigned char)(p.g + 0.5);
-                out_pixel.b = (unsigned char)(p.b + 0.5);
+                out_pixel.r = static_cast<unsigned char>(p.r + 0.5);
+                out_pixel.g = static_cast<unsigned char>(p.g + 0.5);
+                out_pixel.b = static_cast<unsigned char>(p.b + 0.5);
 
                 out_pixel = atari_palette[FindAtariColorIndex(out_pixel)];
 
                 rgb in_pixel = m_picture[y][x];
                 rgb_error qe;
-                qe.r = (int)in_pixel.r - (int)out_pixel.r;
-                qe.g = (int)in_pixel.g - (int)out_pixel.g;
-                qe.b = (int)in_pixel.b - (int)out_pixel.b;
+                qe.r = static_cast<double>(in_pixel.r) - static_cast<double>(out_pixel.r);
+                qe.g = static_cast<double>(in_pixel.g) - static_cast<double>(out_pixel.g);
+                qe.b = static_cast<double>(in_pixel.b) - static_cast<double>(out_pixel.b);
 
                 if (m_config.dither == E_DITHER_FLOYD)
                 {
@@ -570,9 +572,9 @@ ImageProcessor::MixingPlan ImageProcessor::DeviseBestMixingPlan(rgb color)
         for (unsigned index = 0; index < 128; ++index)
         {
             rgb color2;
-            color2.r = temp.r;
-            color2.g = temp.g;
-            color2.b = temp.b;
+            color2.r = static_cast<unsigned char>(temp.r);
+            color2.g = static_cast<unsigned char>(temp.g);
+            color2.b = static_cast<unsigned char>(temp.b);
 
             double penalty = distance_function(atari_palette[index], color2);
             if (penalty < least_penalty)
@@ -585,9 +587,9 @@ ImageProcessor::MixingPlan ImageProcessor::DeviseBestMixingPlan(rgb color)
         // Add it to candidates and update the error
         result.colors[c] = chosen;
         rgb color = atari_palette[chosen];
-        e.r += src.r - color.r;
-        e.g += src.g - color.g;
-        e.b += src.b - color.b;
+        e.r += (double)src.r - (double)color.r;
+        e.g += (double)src.g - (double)color.g;
+        e.b += (double)src.b - (double)color.b;
     }
     
     // Sort the colors according to luminance

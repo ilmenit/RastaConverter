@@ -137,7 +137,7 @@ void EvaluationContext::PrecomputeDualTransforms()
             }
         }
         m_have_pair_tables = true;
-    } catch (...) {
+    } catch (const std::exception& /*e*/ ) {
         m_have_pair_tables = false;
         m_pair_Ysum.clear(); m_pair_Usum.clear(); m_pair_Vsum.clear();
         m_pair_dY.clear(); m_pair_dC.clear();

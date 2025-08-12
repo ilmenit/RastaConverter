@@ -12,6 +12,7 @@
 #include <functional>
 #include <thread>
 #include <atomic>  // Add this for atomic operations
+#include <cfloat>   // For DBL_MAX
 #include <algorithm> // For std::find
 #include "../raster/Program.h"
 #include "../color/Distance.h"

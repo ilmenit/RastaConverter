@@ -1,0 +1,110 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21
+  },
+  "configurePresets": [
+    {
+      "name": "base-ninja-multi",
+      "hidden": true,
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
+      }
+    },
+    
+
+    { "name": "win-msvc",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "NO_GUI": "OFF"
+      }
+    },
+    { "name": "win-msvc-ninja", "inherits": "base-ninja-multi",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "NO_GUI": "OFF"
+      }
+    },
+    { "name": "win-clangcl",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_GENERATOR_TOOLSET": "ClangCL",
+        "NO_GUI": "OFF"
+      }
+    },
+    { "name": "win-mingw-gcc",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_SH": "CMAKE_SH-NOTFOUND",
+        "NO_GUI": "OFF"
+      }
+    },
+
+    { "name": "linux-gcc", "inherits": "base-ninja-multi",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "NO_GUI": "OFF"
+      }
+    },
+    { "name": "linux-clang", "inherits": "base-ninja-multi",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "NO_GUI": "OFF"
+      }
+    },
+
+    { "name": "macos-clang", "inherits": "base-ninja-multi",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "NO_GUI": "OFF"
+      }
+    },
+
+    { "name": "win-msvc-nogui", "inherits": "win-msvc",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "win-msvc-ninja-nogui", "inherits": "win-msvc-ninja",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "win-clangcl-nogui", "inherits": "win-clangcl",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "win-mingw-gcc-nogui", "inherits": "win-mingw-gcc",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "linux-gcc-nogui", "inherits": "linux-gcc",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "linux-clang-nogui", "inherits": "linux-clang",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "macos-clang-nogui", "inherits": "macos-clang",
+      "cacheVariables": { "NO_GUI": "ON" } }
+
+    
+  ],
+
+  "buildPresets": [
+    { "name": "win-msvc-debug", "configurePreset": "win-msvc", "configuration": "Debug" },
+    { "name": "win-msvc-release", "configurePreset": "win-msvc", "configuration": "Release" },
+    { "name": "win-clangcl-debug", "configurePreset": "win-clangcl", "configuration": "Debug" },
+    { "name": "win-clangcl-release", "configurePreset": "win-clangcl", "configuration": "Release" },
+    { "name": "win-mingw-gcc-debug", "configurePreset": "win-mingw-gcc", "configuration": "Debug" },
+    { "name": "win-mingw-gcc-release", "configurePreset": "win-mingw-gcc", "configuration": "Release" },
+
+    { "name": "linux-gcc-debug", "configurePreset": "linux-gcc", "configuration": "Debug" },
+    { "name": "linux-gcc-release", "configurePreset": "linux-gcc", "configuration": "Release" },
+    { "name": "linux-clang-debug", "configurePreset": "linux-clang", "configuration": "Debug" },
+    { "name": "linux-clang-release", "configurePreset": "linux-clang", "configuration": "Release" },
+
+    { "name": "macos-clang-debug", "configurePreset": "macos-clang", "configuration": "Debug" },
+    { "name": "macos-clang-release", "configurePreset": "macos-clang", "configuration": "Release" }
+  ]
+}
+
+

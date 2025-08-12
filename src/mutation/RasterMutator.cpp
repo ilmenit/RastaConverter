@@ -45,7 +45,7 @@ void RasterMutator::Init(unsigned long long seed)
 
 void RasterMutator::ResetStats()
 {
-    memset(&m_stats, 0, sizeof(m_stats));
+    m_stats = MutationStats{};
     memset(m_current_mutations, 0, sizeof(m_current_mutations));
 }
 
@@ -141,11 +141,11 @@ void RasterMutator::MutateProgram(raster_picture* pic)
         // Need to lock when modifying global state
         lock.lock();
 
-        if (new_line >= (int)pic->raster_lines.size()) {
+        if (new_line >= static_cast<int>(pic->raster_lines.size())) {
             new_line = 0;
         }
         else if (new_line < 0) {
-            new_line = pic->raster_lines.size() - 1;
+            new_line = static_cast<int>(pic->raster_lines.size()) - 1;
         }
 
         // Random line changes
@@ -155,7 +155,7 @@ void RasterMutator::MutateProgram(raster_picture* pic)
     }
 
     // Ensure new_line is within valid bounds
-    if (new_line < 0 || new_line >= m_height) {
+    if (new_line < 0 || new_line >= static_cast<int>(m_height)) {
         new_line = Random(m_height);
     }
 
@@ -188,7 +188,7 @@ void RasterMutator::MutateProgram(raster_picture* pic)
     }
 
     // Ensure current line is in bounds
-    if (m_currently_mutated_y >= 0 && m_currently_mutated_y < (int)pic->raster_lines.size()) {
+    if (m_currently_mutated_y >= 0 && m_currently_mutated_y < static_cast<int>(pic->raster_lines.size())) {
         raster_line& current_line = pic->raster_lines[m_currently_mutated_y];
         MutateLine(current_line, *pic);
     }
@@ -240,8 +240,8 @@ void RasterMutator::MutateProgram(raster_picture* pic)
 
                 // Ensure within bounds
                 if (new_line < 0)
-                    new_line = m_height - 1;
-                if (new_line >= m_height)
+                    new_line = static_cast<int>(m_height) - 1;
+                if (new_line >= static_cast<int>(m_height))
                     new_line = 0;
             }
 
@@ -252,7 +252,7 @@ void RasterMutator::MutateProgram(raster_picture* pic)
             }
 
             // Ensure new_line is within valid bounds
-            if (new_line < 0 || new_line >= m_height) {
+            if (new_line < 0 || new_line >= static_cast<int>(m_height)) {
                 new_line = Random(m_height);
             }
 
@@ -264,7 +264,7 @@ void RasterMutator::MutateProgram(raster_picture* pic)
             }
 
             // Ensure current line is in bounds
-            if (m_currently_mutated_y >= 0 && m_currently_mutated_y < (int)pic->raster_lines.size()) {
+            if (m_currently_mutated_y >= 0 && m_currently_mutated_y < static_cast<int>(pic->raster_lines.size())) {
                 raster_line& current_line = pic->raster_lines[m_currently_mutated_y];
                 MutateLine(current_line, *pic);
             }
@@ -287,11 +287,11 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
     if (prog.instructions.empty())
         return;
 
-    i1 = Random((int)prog.instructions.size());
+    i1 = Random(static_cast<int>(prog.instructions.size()));
     i2 = i1;
     if (prog.instructions.size() > 2) {
         do {
-            i2 = Random((int)prog.instructions.size());
+            i2 = Random(static_cast<int>(prog.instructions.size()));
         } while (i1 == i2);
     }
 
@@ -354,7 +354,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
 
                 // More efficient insert - add at end then swap to position
                 prog.instructions.push_back(temp);
-                for (int i = (int)prog.instructions.size() - 1; i > i1; --i) {
+                for (int i = static_cast<int>(prog.instructions.size()) - 1; i > i1; --i) {
                     std::swap(prog.instructions[i], prog.instructions[i - 1]);
                 }
 
@@ -398,7 +398,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
 
                 // Only sample target picture color if we didn't already seed from complementary logic
                 if (!seededByComplement) {
-                    if (m_currently_mutated_y >= 0 && m_currently_mutated_y < m_height && m_picture != nullptr) {
+                    if (m_currently_mutated_y >= 0 && m_currently_mutated_y < static_cast<int>(m_height) && m_picture != nullptr) {
                         const screen_line& line = m_picture[m_currently_mutated_y];
                         if (line.size() > 0) {
                             c = Random((int)line.size());
@@ -413,7 +413,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
 
                 // More efficient insert
                 prog.instructions.push_back(temp);
-                for (int i = (int)prog.instructions.size() - 1; i > i1; --i) {
+                for (int i = static_cast<int>(prog.instructions.size()) - 1; i > i1; --i) {
                     std::swap(prog.instructions[i], prog.instructions[i - 1]);
                 }
 
@@ -445,7 +445,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         }
         // fallthrough if not possible
     case E_MUTATION_SWAP_INSTRUCTION:
-        if (prog.instructions.size() > 2)
+            if (prog.instructions.size() > 2)
         {
             temp = prog.instructions[i1];
             prog.instructions[i1] = prog.instructions[i2];
@@ -507,7 +507,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
                 m_used_complementary_pick = true;
             } else {
                 // Fallback to original behavior (use source picture color)
-                if (i2 >= 0 && i2 < m_height && m_picture != nullptr) {
+                if (i2 >= 0 && i2 < static_cast<int>(m_height) && m_picture != nullptr) {
                     const screen_line& line = m_picture[i2];
                     if (x >= 0 && x < (int)line.size()) {
                         prog.instructions[i1].loose.value = FindAtariColorIndex(line[x]) * 2;
@@ -520,7 +520,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
             }
         } else {
             // Single-frame behavior (original)
-            if (i2 >= 0 && i2 < m_height && m_picture != nullptr) {
+            if (i2 >= 0 && i2 < static_cast<int>(m_height) && m_picture != nullptr) {
                 const screen_line& line = m_picture[i2];
                 if (x >= 0 && x < (int)line.size()) {
                     prog.instructions[i1].loose.value = FindAtariColorIndex(line[x]) * 2;
@@ -587,7 +587,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         {
             int dir = (Random(2) ? 1 : -1);
             int j = i1 + dir;
-            if (j >= 0 && j < (int)prog.instructions.size())
+            if (j >= 0 && j < static_cast<int>(prog.instructions.size()))
             {
                 std::swap(prog.instructions[i1], prog.instructions[j]);
                 prog.cache_key = NULL;
@@ -606,9 +606,9 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
             nop.loose.value = 0;
             // Prefer to insert near a store to shift its effect; try to find any store nearby
             int insert_at = i1;
-            for (int k = std::max(0, i1 - 2); k <= std::min((int)prog.instructions.size() - 1, i1 + 2); ++k)
+            for (int k = std::max(0, i1 - 2); k <= std::min(static_cast<int>(prog.instructions.size()) - 1, i1 + 2); ++k)
             {
-                unsigned char ins = prog.instructions[k].loose.instruction;
+                unsigned char ins = static_cast<unsigned char>(prog.instructions[k].loose.instruction);
                 if (ins >= E_RASTER_STA) { insert_at = k; break; }
             }
             // Insert before or after randomly
@@ -626,7 +626,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
         {
             // Find a store to HPOSPx on this line
             int store_idx = -1;
-            for (int k = 0; k < (int)prog.instructions.size(); ++k)
+            for (int k = 0; k < static_cast<int>(prog.instructions.size()); ++k)
             {
                 const auto &ins = prog.instructions[k];
                 if (ins.loose.instruction >= E_RASTER_STA && ins.loose.target >= E_HPOSP0 && ins.loose.target <= E_HPOSP3)
@@ -640,7 +640,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
                 for (int k = store_idx - 1; k >= 0; --k)
                 {
                     auto &cand = prog.instructions[k];
-                    if (cand.loose.instruction == (unsigned)E_RASTER_LDA + reg_idx)
+                    if (cand.loose.instruction == static_cast<unsigned>(E_RASTER_LDA + reg_idx))
                     {
                         // tweak by small delta (keep in 0..255)
                         int delta = (Random(2) ? 1 : -1) * (1 + Random(3));
@@ -672,7 +672,7 @@ void RasterMutator::MutateOnce(raster_line& prog, raster_picture& pic)
                     prog.instructions.push_back(st);
                     prog.instructions.push_back(ld);
                     // move them into place: first push ld then st in order
-                    int end = (int)prog.instructions.size();
+                    int end = static_cast<int>(prog.instructions.size());
                     // move last-1 (ld) to position insert_at
                     for (int p = end - 2; p > insert_at; --p) std::swap(prog.instructions[p], prog.instructions[p - 1]);
                     // after ld moved, store is at insert_at+1, move last (st) to insert_at+1
@@ -692,22 +692,22 @@ adjust_sprite_done:
             raster_line &prev = pic.raster_lines[m_currently_mutated_y - 1];
             if (!prev.instructions.empty())
             {
-                int max_len = std::min(3, (int)prev.instructions.size());
+            int max_len = std::min(3, static_cast<int>(prev.instructions.size()));
                 int len = 1 + Random(max_len);
-                int start = Random((int)prev.instructions.size());
-                if (start + len > (int)prev.instructions.size()) start = std::max(0, (int)prev.instructions.size() - len);
+            int start = Random(static_cast<int>(prev.instructions.size()));
+            if (start + len > static_cast<int>(prev.instructions.size())) start = std::max(0, static_cast<int>(prev.instructions.size()) - len);
                 // compute cycles
                 int add_cycles = 0;
                 for (int t = 0; t < len; ++t) add_cycles += GetInstructionCycles(prev.instructions[start + t]);
                 if (prog.cycles + add_cycles < free_cycles)
                 {
-                    int insert_at = (int)prog.instructions.size();
-                    if (!prog.instructions.empty()) insert_at = Random((int)prog.instructions.size());
+                    int insert_at = static_cast<int>(prog.instructions.size());
+                    if (!prog.instructions.empty()) insert_at = Random(static_cast<int>(prog.instructions.size()));
                     // append then swap into place in original order
                     for (int t = 0; t < len; ++t) prog.instructions.push_back(prev.instructions[start + t]);
                     for (int t = 0; t < len; ++t)
                     {
-                        int from = (int)prog.instructions.size() - len + t;
+                        int from = static_cast<int>(prog.instructions.size()) - len + t;
                         for (int p = from; p > insert_at + t; --p) std::swap(prog.instructions[p], prog.instructions[p - 1]);
                     }
                     prog.cycles += add_cycles;
@@ -723,9 +723,9 @@ adjust_sprite_done:
         if (!prog.instructions.empty())
         {
             int last_load_idx[3] = { -1, -1, -1 };
-            for (int k = 0; k < (int)prog.instructions.size(); ++k)
+            for (int k = 0; k < static_cast<int>(prog.instructions.size()); ++k)
             {
-                unsigned char ins = prog.instructions[k].loose.instruction;
+                unsigned char ins = static_cast<unsigned char>(prog.instructions[k].loose.instruction);
                 if (ins <= E_RASTER_LDY)
                 {
                     int r = ins - E_RASTER_LDA; // 0=A,1=X,2=Y

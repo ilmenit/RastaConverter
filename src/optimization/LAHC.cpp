@@ -36,7 +36,7 @@ double LAHC::EvaluateInitialSolution()
     if (!m_context || !m_executor) return DBL_MAX;
     raster_picture pic = m_context->m_best_pic;
     std::vector<const line_cache_result*> line_results(m_context->m_height);
-    double result = m_executor->ExecuteRasterProgram(&pic, line_results.data());
+    double result = static_cast<double>(m_executor->ExecuteRasterProgram(&pic, line_results.data()));
     {
         std::unique_lock<std::mutex> lock(m_context->m_mutex);
         m_context->m_best_result = result;

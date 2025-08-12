@@ -1,208 +1,238 @@
 # Building RastaConverter
 
-RastaConverter supports multiple build configurations:
-- GUI and No-GUI versions
-- x64 and x86 architectures
-- Debug and Release builds
+RastaConverter builds on Windows, Linux and macOS using CMake. You can use either:
+- CMake directly with Presets 
+- The provided helper scripts: `build.bat` (Windows) and `build.sh` (Linux/macOS)
+
+The project supports:
+- GUI and No-GUI variants
+- Debug and Release configurations
+- Multiple compilers (MSVC, clang-cl, GCC/Clang)
 
 ## Prerequisites
 
 ### Windows
-1. Visual Studio 2022 with C++ workload
-2. CMake 3.14 or higher
-3. FreeImage library
-4. SDL2 and SDL2_ttf libraries (for GUI version)
+- Visual Studio 2022 (Desktop C++ workload) or Build Tools
+- CMake 3.21+
+- Ninja (recommended; used by presets)
+- Dependencies: FreeImage; SDL2 + SDL2_ttf for GUI builds
 
 ### Linux
-1. GCC or Clang compiler
-2. CMake 3.14 or higher
-3. FreeImage development packages
-4. SDL2 and SDL2_ttf development packages (for GUI version)
+- GCC or Clang
+- CMake 3.21+
+- Ninja (recommended; used by presets)
+- Dependencies: `freeimage`, `sdl2`, `sdl2-ttf` (package names vary by distro)
 
-## Environment Setup
+### macOS
+- Xcode command line tools (Apple Clang)
+- CMake 3.21+
+- Ninja (recommended; used by presets)
+- Dependencies via Homebrew: `freeimage`, `sdl2`, `sdl2_ttf`
 
-Before building, you need to set up your environment variables for library paths.
+## Quick start (Presets)
 
-### Windows
-1. Run `setup-env.bat` script:
-   ```
-   setup-env.bat
-   ```
-2. The script will prompt you for paths to FreeImage, SDL2, and SDL2_ttf libraries.
-3. It will save these paths to environment variables and a `config.env` file.
-
-### Linux
-1. Run `setup-env.sh` script:
-   ```
-   chmod +x setup-env.sh
-   ./setup-env.sh
-   ```
-2. The script will try to detect libraries using pkg-config and prompt for paths.
-3. It can add the variables to your `.bashrc` file for persistence.
-
-## Building on Windows
-
-### Using Visual Studio
-1. First run the environment setup as described above.
-2. Open the project folder in Visual Studio.
-3. Visual Studio should automatically detect the CMake project.
-4. Select your desired configuration from the dropdown in the toolbar:
-   - x64-Debug-GUI: 64-bit debug build with GUI
-   - x64-Debug-NoGUI: 64-bit debug build without GUI
-   - x64-Release-GUI: 64-bit optimized release build with GUI
-   - x64-Release-NoGUI: 64-bit optimized release build without GUI
-   - x86-Debug-GUI: 32-bit debug build with GUI
-   - x86-Debug-NoGUI: 32-bit debug build without GUI
-   - x86-Release-GUI: 32-bit optimized release build with GUI
-   - x86-Release-NoGUI: 32-bit optimized release build without GUI
-   - x64-Clang-Debug-GUI: 64-bit debug build with GUI using Clang
-   - x64-Clang-Release-GUI: 64-bit release build with GUI using Clang
-   - x64-Clang-Debug-NoGUI: 64-bit debug build without GUI using Clang
-   - x64-Clang-Release-NoGUI: 64-bit release build without GUI using Clang
-5. Click on Build → Build All to compile the project.
-
-### Using Command Prompt
-Use the provided build.bat script:
+List available presets:
 
 ```
-build.bat [DEBUG|RELEASE] [GUI|NOGUI] [x64|x86]
+cmake --list-presets
 ```
+
+On Windows you can choose between Visual Studio and Ninja:
+
+```
+# Visual Studio generator (no Ninja required)
+cmake --preset win-msvc
+cmake --build out/build/win-msvc --config Release
+
+# Ninja Multi-Config (requires Ninja)
+cmake --preset win-msvc-ninja
+cmake --build out/build/win-msvc-ninja --config Release
+```
+
+Typical builds:
+
+```
+# Windows (clang-cl)
+cmake --preset win-clangcl
+cmake --build out/build/win-clangcl --config Release
+
+# Linux (GCC)
+cmake --preset linux-gcc
+cmake --build out/build/linux-gcc --config Release
+
+# macOS (Apple Clang)
+cmake --preset macos-clang
+cmake --build out/build/macos-clang --config Release
+
+# No-GUI variants (presets with -nogui)
+cmake --preset linux-gcc-nogui
+cmake --build out/build/linux-gcc-nogui --config Release
+```
+
+Artifacts are placed in `out/build/<preset>/<config>/`.
+
+## Quick start (helper scripts)
+
+The scripts are thin wrappers around presets and accept extra `-D` options:
+
+```
+# Windows
+build.bat win-clangcl Release -DTHREAD_DEBUG=ON -DUI_DEBUG=ON
+build.bat win-msvc Release CLEAN   # removes old cache if generator mismatch
+
+# Linux/macOS
+./build.sh linux-gcc Release -DNO_GUI=ON
+```
+
+Run without arguments to see usage and the preset list.
+
+## Passing compile-time options (logging, GUI)
+
+You can toggle features at configure time with `-D...=ON/OFF` (works with both presets and scripts):
+
+- `NO_GUI` (OFF by default): build console-only version
+- `THREAD_DEBUG`: verbose optimization/control thread logs
+- `UI_DEBUG`: SDL UI event and heartbeat logs
+- `SUPPRESS_IMPROVEMENT_LOGS`: hides frequent “New best solution” logs
+- `IGNORE_SDL_QUIT`: ignore SDL_QUIT and ESC (diagnose unexpected exits)
 
 Examples:
-```
-build.bat RELEASE GUI x64     # Build 64-bit Release with GUI
-build.bat DEBUG NOGUI x86     # Build 32-bit Debug without GUI
-```
-
-## Building on Linux
-
-Use the provided build.sh script:
 
 ```
-./build.sh [DEBUG|RELEASE] [GUI|NOGUI] [x64|x86]
+cmake --preset linux-clang -DTHREAD_DEBUG=ON -DUI_DEBUG=ON
+cmake --build out/build/linux-clang --config Debug
+
+build.bat win-msvc Debug -DNO_GUI=ON
 ```
 
-Examples:
+## Dependency management options
+
+### Option A (recommended): vcpkg manifest mode
+
+If you use vcpkg, set `VCPKG_ROOT` and pick a `*-vcpkg` preset. Dependencies are auto-installed in the correct ABI for your compiler.
+
 ```
-./build.sh RELEASE GUI x64    # Build 64-bit Release with GUI
-./build.sh DEBUG NOGUI x86    # Build 32-bit Debug without GUI
+cmake --preset win-msvc-vcpkg
+cmake --build out/build/win-msvc-vcpkg --config Release
 ```
 
-### Installing Dependencies on Ubuntu/Debian
+### Option B: System packages
 
+Install dev packages via your package manager.
+
+Debian/Ubuntu:
 ```bash
 sudo apt update
-sudo apt install build-essential cmake libfreeimage-dev
-# For GUI version
-sudo apt install libsdl2-dev libsdl2-ttf-dev
+sudo apt install build-essential cmake ninja-build libfreeimage-dev libsdl2-dev libsdl2-ttf-dev
 ```
 
-### Installing Dependencies on Fedora/RHEL
-
+Fedora/RHEL:
 ```bash
-sudo dnf install gcc-c++ cmake freeimage-devel
-# For GUI version
-sudo dnf install SDL2-devel SDL2_ttf-devel
+sudo dnf install gcc-c++ cmake ninja-build freeimage-devel SDL2-devel SDL2_ttf-devel
 ```
 
-## Customizing Library Paths
-
-There are several ways to set the paths to your libraries:
-
-1. **Environment Variables**: The simplest approach is to set these environment variables:
-   ```
-   FREEIMAGE_DIR=/path/to/freeimage
-   SDL2_DIR=/path/to/sdl2
-   SDL2_TTF_DIR=/path/to/sdl2_ttf
-   ```
-
-2. **Setup Scripts**: Use the provided setup scripts:
-   - Windows: `setup-env.bat`
-   - Linux: `setup-env.sh`
-
-3. **config.env File**: The build scripts will read from a `config.env` file in the project root:
-   ```
-   FREEIMAGE_DIR=/path/to/freeimage
-   SDL2_DIR=/path/to/sdl2
-   SDL2_TTF_DIR=/path/to/sdl2_ttf
-   ```
-
-4. **Interactive Mode**: If no environment variables or config file exists, the build scripts will prompt you for the paths.
-
-5. **CMake Cache**: For permanent settings, you can set these as CMake cache variables:
-   ```bash
-   cmake -DFREEIMAGE_DIR=/path/to/freeimage -DSDL2_DIR=/path/to/sdl2 -DSDL2_TTF_DIR=/path/to/sdl2_ttf ..
-   ```
-
-## Release Build Optimizations
-
-The Release build configurations include the following optimizations based on compiler:
-
-### Windows (MSVC)
-- /O2: Maximize speed
-- /Ob2: Inline function expansion
-- /Oi: Generate intrinsic functions
-- /Ot: Favor fast code
-- /GL: Whole program optimization
-- /LTCG: Link-time code generation
-
-### Windows (Clang-cl)
-- /O2: Maximize speed
-- /Ob2: Inline function expansion
-- /Oi: Generate intrinsic functions
-
-### Linux (GCC)
-- -O3: Maximum optimization
-- -march=native: Optimize for the local machine
-- -ffast-math: Enable fast floating point optimizations
-- -flto: Link-time optimization
-
-### Linux (Clang)
-- -O3: Maximum optimization
-- -march=native: Optimize for the local machine
-- -ffast-math: Enable fast floating point optimizations
-
-These optimizations ensure the best performance for the release builds while being compatible with each compiler's supported flags.
-
-## Optional debug logging categories
-
-By default, console logging is minimal. You can opt-in to verbose logs by defining these CMake options:
-
-- THREAD_DEBUG: Enables detailed logs from optimization/control threads and executor.
-- UI_DEBUG: Enables SDL UI event and heartbeat logs.
-
-Example:
-
+macOS (Homebrew):
 ```bash
-cmake -B build -S . -DTHREAD_DEBUG=ON -DUI_DEBUG=ON
+brew install cmake ninja freeimage sdl2 sdl2_ttf
+```
+
+### Option C: Manual paths
+
+If you have local installs, point CMake to them:
+
+```
+cmake -S . -B build \
+  -DFREEIMAGE_DIR=/path/to/freeimage \
+  -DSDL2_DIR=/path/to/sdl2 \
+  -DSDL2_TTF_DIR=/path/to/sdl2_ttf
 cmake --build build --config Release
 ```
 
-Or in Visual Studio CMake Settings, add to CMake command arguments:
+## Choosing a compiler
 
-```
--DTHREAD_DEBUG=ON -DUI_DEBUG=ON
-```
+- Windows:
+  - `win-msvc`: MSVC (cl.exe)
+  - `win-clangcl`: LLVM clang-cl with MSVC STL/CRT
+  - `win-mingw-gcc`: MinGW-w64 GCC (ensure MinGW is on PATH or use MSYS2 MinGW shell)
+- Linux: `linux-gcc`, `linux-clang`
+- macOS: `macos-clang`
+
+Tip: For performance experiments on CPU-heavy code, try `win-clangcl` (thin LTO) or run PGO on your critical workloads.
+
+## Release optimizations
+
+- IPO/LTO is enabled by default where supported. Disable with `-DENABLE_LTO=OFF` if needed.
+- Fast-math for GCC/Clang is ON by default in Release/RelWithDebInfo. Disable with `-DENABLE_FAST_MATH=OFF`.
+- Dead code/data elimination is ON by default: function/data sections + linker GC. Disable with `-DENABLE_DEAD_STRIP=OFF`.
+- MSVC/clang-cl fast-math is OFF by default (use `-DENABLE_MSVC_FAST_MATH=ON` if acceptable for your workload).
+- Optional AVX2 for MSVC/clang-cl: `-DENABLE_AVX2=ON` (ensure target CPUs support it).
+- PGO workflow: `-DPGO_MODE=GENERATE` to record, run representative workloads, then `-DPGO_MODE=USE` (and `-DPGO_PROFILE_PATH=` for Clang).
+
+### Fast and safe defaults
+
+These are enabled by default and safe for correctness:
+- LTO/IPO (where supported)
+- Dead-stripping (function/data sections + linker GC)
+- O2/O3 equivalents and inlining per-compiler
+
+### Optional toggles (opt-in)
+
+Use these to squeeze more performance when acceptable for your use-case:
+- MSVC/clang-cl fast-math: `-DENABLE_MSVC_FAST_MATH=ON`
+- AVX2 (Windows MSVC/clang-cl): `-DENABLE_AVX2=ON` (only if all target CPUs support AVX2)
+- Unity build: `-DENABLE_UNITY_BUILD=ON` (can improve inlining and compile time)
+- lld linker (Linux): `-DENABLE_LLD_LINKER=ON` (faster links)
+- PGO: see workflow above
+
+### Max performance recipes
+
+- Windows (MSVC), fast-math + AVX2:
+  ```
+  build.bat win-msvc Release -DENABLE_MSVC_FAST_MATH=ON -DENABLE_AVX2=ON -DENABLE_UNITY_BUILD=ON
+  ```
+
+- Windows (clang-cl), ThinLTO + fast-math + AVX2:
+  ```
+  build.bat win-clangcl Release -DENABLE_MSVC_FAST_MATH=ON -DENABLE_AVX2=ON -DENABLE_UNITY_BUILD=ON
+  ```
+
+- Linux (Clang), ThinLTO + dead strip + lld:
+  ```
+  cmake --preset linux-clang -DENABLE_LLD_LINKER=ON -DENABLE_UNITY_BUILD=ON
+  cmake --build out/build/linux-clang --config Release
+  ```
+
+- PGO (Linux GCC) example:
+  ```
+  cmake --preset linux-gcc -DPGO_MODE=GENERATE
+  cmake --build out/build/linux-gcc --config Release
+  # run representative workloads here to generate .gcda profiles
+  cmake --preset linux-gcc -DPGO_MODE=USE
+  cmake --build out/build/linux-gcc --config Release
+  ```
 
 ## Troubleshooting
 
-### CMake can't find the libraries
-- Make sure the environment variables are set correctly
-- Try using absolute paths instead of relative paths
-- Check if the library files exist in the specified directories
-- Use the interactive mode of the build scripts to verify paths
+- List presets:
+  ```
+  cmake --list-presets
+  ```
+- CMake can’t find libraries:
+  - Prefer vcpkg presets (set `VCPKG_ROOT`)
+  - Or provide `FREEIMAGE_DIR`, `SDL2_DIR`, `SDL2_TTF_DIR`
+- Windows runtime DLLs:
+  - DLLs are copied to the output dir automatically when discoverable
+- MinGW on Windows:
+  - Run from the MSYS2 MinGW 64-bit shell or ensure `C:/msys64/mingw64/bin` is on PATH before configuring
 
-### Missing DLL errors on Windows
-- The build system tries to copy DLLs automatically
-- Make sure the DLLs are in the expected locations within the library directories
-- Try manually copying the DLLs to the output directory
+## Where is the binary?
 
-### Build errors on Linux
-- Make sure you have the required development packages installed
-- Use the system package manager to install missing dependencies
-- Check if you need to specify additional include/library paths
+After a successful build, the binary is placed under:
 
-### Compiler-specific issues
-- Different compilers may need different flags
-- The build system tries to handle common compilers automatically
-- If using a specialized compiler setup, you may need to customize the CMake flags
+```
+out/build/<preset>/<config>/
+```
+
+Windows executable: `rasta.exe`
+
+Linux/macOS executable: `rasta`

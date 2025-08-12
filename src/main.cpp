@@ -15,7 +15,6 @@
 
 bool quiet = false;
 
-bool LoadAtariPalette(string filename);
 void create_cycles_table();
 
 int main(int argc, char *argv[])

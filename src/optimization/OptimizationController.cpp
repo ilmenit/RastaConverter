@@ -253,7 +253,7 @@ bool OptimizationController::CheckAutoSave()
     bool auto_save_triggered = false;
     
     // Check if automatic time-based saving is enabled (save_period == -1)
-    if (m_evalContext.m_save_period == -1) {
+    if ((long long)m_evalContext.m_save_period == -1) {
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_lastAutoSaveTime).count();
         

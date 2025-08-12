@@ -92,7 +92,7 @@ struct Configuration {
 	unsigned long initial_seed;
     unsigned long resume_seed; // seed extracted from saved program (for /continue)
     bool have_resume_seed = false;
-	int cache_size;
+    size_t cache_size;
 
 	bool preprocess_only;
 	int threads;

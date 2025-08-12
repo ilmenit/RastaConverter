@@ -134,8 +134,13 @@ void Configuration::Process(int argc, char *argv[])
 	dither_val2 = parser.getValue("dither_rand","0");
 	dither_randomness=String2Value<double>(dither_val2);
 
-	string cache_string = parser.getValue("cache", "16");
-	cache_size = 1024*1024*String2Value<double>(cache_string);
+    string cache_string = parser.getValue("cache", "16");
+    {
+        double cache_mb = String2Value<double>(cache_string);
+        if (cache_mb < 1.0) cache_mb = 1.0; // minimum 1 MB to avoid thrashing
+        const double bytes = cache_mb * 1024.0 * 1024.0;
+        cache_size = static_cast<size_t>(bytes + 0.5); // round to nearest
+    }
 
 	string seed_val;
 	seed_val = parser.getValue("seed","random");
@@ -302,7 +307,11 @@ void Configuration::Process(int argc, char *argv[])
 
         // gamma for rgb-linear
         blend_gamma = String2Value<double>(parser.getValue("blend_gamma", "2.2"));
-        if (blend_gamma < 1.0) blend_gamma = 1.0; if (blend_gamma > 4.0) blend_gamma = 4.0;
+        if (blend_gamma < 1.0) {
+            blend_gamma = 1.0;
+        } else if (blend_gamma > 4.0) {
+            blend_gamma = 4.0;
+        }
 
         // flicker weights/thresholds/exponents (accept blink_* as aliases)
         auto getF = [this](const char* key, const char* keyAlias, const char* def) {
@@ -329,15 +338,27 @@ void Configuration::Process(int argc, char *argv[])
         dual_init = E_DUAL_INIT_DUP;
 
         dual_mutate_ratio = String2Value<double>(parser.getValue("dual_mutate_ratio", ""));
-        if (dual_mutate_ratio < 0.0) dual_mutate_ratio = 0.0; if (dual_mutate_ratio > 1.0) dual_mutate_ratio = 1.0;
+        if (dual_mutate_ratio < 0.0) {
+            dual_mutate_ratio = 0.0;
+        } else if (dual_mutate_ratio > 1.0) {
+            dual_mutate_ratio = 1.0;
+        }
 
         // cross-frame ops probabilities (optional)
         std::string cross_share_val = parser.getValue("dual_cross_share_prob", "");
         if (!cross_share_val.empty()) dual_cross_share_prob = String2Value<double>(cross_share_val);
-        if (dual_cross_share_prob < 0.0) dual_cross_share_prob = 0.0; if (dual_cross_share_prob > 1.0) dual_cross_share_prob = 1.0;
+        if (dual_cross_share_prob < 0.0) {
+            dual_cross_share_prob = 0.0;
+        } else if (dual_cross_share_prob > 1.0) {
+            dual_cross_share_prob = 1.0;
+        }
         std::string both_frames_val = parser.getValue("dual_both_frames_prob", "");
         if (!both_frames_val.empty()) dual_both_frames_prob = String2Value<double>(both_frames_val);
-        if (dual_both_frames_prob < 0.0) dual_both_frames_prob = 0.0; if (dual_both_frames_prob > 1.0) dual_both_frames_prob = 1.0;
+        if (dual_both_frames_prob < 0.0) {
+            dual_both_frames_prob = 0.0;
+        } else if (dual_both_frames_prob > 1.0) {
+            dual_both_frames_prob = 1.0;
+        }
 
         // flicker ramp config (aliases blink_* accepted)
         std::string ramp_evals_val = parser.getValue("blink_ramp_evals", "0");

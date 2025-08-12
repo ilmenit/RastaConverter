@@ -55,6 +55,7 @@ else()
         "/usr/local/include"
         "/usr/include"
         "/opt/local/include"
+        "/opt/homebrew/include" # macOS (Apple Silicon)
         DOC "Path to FreeImage.h"
     )
 
@@ -65,6 +66,7 @@ else()
         "/usr/lib64"
         "/usr/lib"
         "/opt/local/lib"
+        "/opt/homebrew/lib" # macOS (Apple Silicon)
         DOC "Path to FreeImage library"
     )
 endif()
@@ -74,3 +76,12 @@ find_package_handle_standard_args(FreeImage
                                   REQUIRED_VARS FREEIMAGE_LIBRARIES FREEIMAGE_INCLUDE_DIRS)
 
 mark_as_advanced(FREEIMAGE_LIBRARIES FREEIMAGE_INCLUDE_DIRS FREEIMAGE_DLL)
+
+# Provide an imported target for consistency with config packages
+if(FREEIMAGE_LIBRARIES AND FREEIMAGE_INCLUDE_DIRS AND NOT TARGET FreeImage::FreeImage)
+    add_library(FreeImage::FreeImage UNKNOWN IMPORTED)
+    set_target_properties(FreeImage::FreeImage PROPERTIES
+        IMPORTED_LOCATION "${FREEIMAGE_LIBRARIES}"
+        INTERFACE_INCLUDE_DIRECTORIES "${FREEIMAGE_INCLUDE_DIRS}"
+    )
+endif()

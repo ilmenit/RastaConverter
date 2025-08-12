@@ -230,7 +230,7 @@ distance_t RGBCIEDE2000Distance(const rgb &col1, const rgb &col2)
 
 distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2)
 {
-	int distance=0;
+    int distance=0; (void)distance; // avoid unused warning
 
 	// euclidian distance
 	int dr = col1.r - col2.r;
@@ -239,7 +239,7 @@ distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2)
 
 	int d = dr*dr + dg*dg + db*db;
 
-	if (d > DISTANCE_MAX)
+    if ((unsigned int)d > DISTANCE_MAX)
 		d = DISTANCE_MAX;
 
 	return (distance_t)d;

@@ -11,6 +11,8 @@
 
 inline BOOL WINAPI RcConsoleCtrlHandler(DWORD ctrl_type)
 {
+    (void)ctrl_type; // silence unused variable warning when THREAD_DEBUG is off
+#ifdef THREAD_DEBUG
     const char* name = "";
     switch (ctrl_type) {
     case CTRL_C_EVENT: name = "CTRL_C_EVENT"; break;
@@ -20,9 +22,8 @@ inline BOOL WINAPI RcConsoleCtrlHandler(DWORD ctrl_type)
     case CTRL_SHUTDOWN_EVENT: name = "CTRL_SHUTDOWN_EVENT"; break;
     default: name = "UNKNOWN_CTRL"; break;
     }
-    #ifdef THREAD_DEBUG
     std::cout << "[CTRL] " << name << std::endl;
-    #endif
+#endif
     return FALSE; // allow normal processing
 }
 
@@ -45,7 +46,7 @@ inline LONG WINAPI RcUnhandledExceptionFilter(EXCEPTION_POINTERS* ep)
         CONTEXT* ctx = ep->ContextRecord;
         SymInitialize(process, NULL, TRUE);
 
-        STACKFRAME64 frame = {0};
+        STACKFRAME64 frame = {};
 #ifdef _M_X64
         DWORD machine = IMAGE_FILE_MACHINE_AMD64;
         frame.AddrPC.Offset = ctx->Rip;

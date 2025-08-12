@@ -38,8 +38,8 @@ bool RastaSDL::Init(std::string command_line)
 
 void RastaSDL::DisplayText(int x, int y, const std::string& text)
 {
-	static SDL_Color textColor = { 255, 255, 255 };
-	static SDL_Color backgroundColor = { 0, 0, 0 }; // Black background color
+        static SDL_Color textColor = { 255, 255, 255, 255 };
+        static SDL_Color backgroundColor = { 0, 0, 0, 255 }; // Black background color
 
 	// Create a surface from the string with a solid background
 	SDL_Surface* textSurface = TTF_RenderText_Shaded(font, text.c_str(), textColor, backgroundColor);

@@ -10,6 +10,7 @@
 #include <sstream>
 #include <vector>
 #include <climits>
+#include <cmath>
 #include "optimization/EvaluationContext.h"
 
 // External const array for mutation names
@@ -526,7 +527,6 @@ void RastaConverter::ShowDestinationLine(int y)
 {
     if (!cfg.preprocess_only && !cfg.dual_mode)
     {
-        unsigned int width = FreeImage_GetWidth(m_imageProcessor.GetDestinationBitmap());
         unsigned int where_x = FreeImage_GetWidth(m_imageProcessor.GetInputBitmap());
         gui.DisplayBitmapLine(where_x, y, y, m_imageProcessor.GetDestinationBitmap());
     }
@@ -613,7 +613,6 @@ void RastaConverter::ShowLastCreatedPicture()
     }
 
     // Display the picture
-    int w = FreeImage_GetWidth(output_bitmap);
     gui.DisplayBitmap(FreeImage_GetWidth(m_imageProcessor.GetInputBitmap()), 0, output_bitmap);
 }
 
