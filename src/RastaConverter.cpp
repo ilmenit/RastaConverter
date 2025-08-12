@@ -633,29 +633,41 @@ void RastaConverter::ShowMutationStats()
         for (int i = 0; i < E_MUTATION_MAX; ++i) stats[i] = ctx.m_mutation_stats[i];
     }
 
-    for (int i = 0; i < E_MUTATION_MAX; ++i)
-    {
-        gui.DisplayText(0, 250 + 20 * i, std::string(mutation_names[i]) +
-                                        std::string("  ") +
-                                        std::to_string(stats[i]));
+    // Layout params
+    const int paneW = (int)FreeImage_GetWidth(m_imageProcessor.GetInputBitmap());
+    const int baseY = 250;
+    const int rowH = 20;
+    const int colA_X = 0;          // center pane left edge
+    const int colB_X = paneW * 2;      // right pane left edge
+    const int summaryX = paneW * 4;    // far right area
+
+    // Two-column list of mutation stats
+    const int per_col = (E_MUTATION_MAX + 1) / 2;
+    for (int i = 0; i < E_MUTATION_MAX; ++i) {
+        int col = (i < per_col) ? 0 : 1;
+        int row = (i < per_col) ? i : (i - per_col);
+        int x = (col == 0) ? colA_X : colB_X;
+        int y = baseY + rowH * row;
+        gui.DisplayText(x, y, std::string(mutation_names[i]) +
+                               std::string("  ") +
+                               std::to_string(stats[i]));
     }
 
-    // Dual-mode additional stats
+    // Dual-mode additional stats below the second column
     const auto& ctx = m_optimizer.GetEvaluationContext();
     if (ctx.m_dual_mode) {
-        // Move dual-mode stats under the 'Destination' column to avoid cutting off
-        unsigned destX = FreeImage_GetWidth(m_imageProcessor.GetDestinationBitmap()) * 2;
-        unsigned destY = FreeImage_GetHeight(m_imageProcessor.GetDestinationBitmap()) + 100;
-        int ybase = (int)destY;
-        gui.DisplayText(destX, ybase + 0,  std::string("DualComplementValue  ") + std::to_string((unsigned long long)ctx.m_stat_dualComplementValue.load()));
-        gui.DisplayText(destX, ybase + 20, std::string("DualSeedAdd         ") + std::to_string((unsigned long long)ctx.m_stat_dualSeedAdd.load()));
-        gui.DisplayText(destX, ybase + 40, std::string("CrossCopyLine       ") + std::to_string((unsigned long long)ctx.m_stat_crossCopyLine.load()));
-        gui.DisplayText(destX, ybase + 60, std::string("CrossSwapLine       ") + std::to_string((unsigned long long)ctx.m_stat_crossSwapLine.load()));
+        int dualBaseY = baseY + rowH * per_col + 10;
+        int x = colB_X;
+        gui.DisplayText(x, dualBaseY + 0,  std::string("DualComplementValue  ") + std::to_string((unsigned long long)ctx.m_stat_dualComplementValue.load()));
+        gui.DisplayText(x, dualBaseY + 20, std::string("DualSeedAdd         ") + std::to_string((unsigned long long)ctx.m_stat_dualSeedAdd.load()));
+        gui.DisplayText(x, dualBaseY + 40, std::string("CrossCopyLine       ") + std::to_string((unsigned long long)ctx.m_stat_crossCopyLine.load()));
+        gui.DisplayText(x, dualBaseY + 60, std::string("CrossSwapLine       ") + std::to_string((unsigned long long)ctx.m_stat_crossSwapLine.load()));
     }
 
-    gui.DisplayText(320, 250, std::string("Evaluations: ") + std::to_string(evaluations));
-    gui.DisplayText(320, 270, std::string("LastBest: ") + std::to_string(last_best_eval) + std::string("                "));
-    gui.DisplayText(320, 290, std::string("Rate: ") + std::to_string((unsigned long long)m_optimizer.GetRate()) + std::string("                "));
+    // Move general summary far to the right to free space for mutation lists
+    gui.DisplayText(summaryX, baseY + 0,  std::string("Evaluations: ") + std::to_string(evaluations));
+    gui.DisplayText(summaryX, baseY + 20, std::string("LastBest: ") + std::to_string(last_best_eval) + std::string("                "));
+    gui.DisplayText(summaryX, baseY + 40, std::string("Rate: ") + std::to_string((unsigned long long)m_optimizer.GetRate()) + std::string("                "));
     {
         double norm = m_outputManager.NormalizeScore(best_result);
         std::string normText;
@@ -667,7 +679,7 @@ void RastaConverter::ShowMutationStats()
         } else {
             normText = "-"; // hide unreasonable values (e.g., uninitialized)
         }
-        gui.DisplayText(320, 310, std::string("Norm. Dist: ") + normText + std::string("                "));
+        gui.DisplayText(summaryX, baseY + 60, std::string("Norm. Dist: ") + normText + std::string("                "));
     }
 }
 
