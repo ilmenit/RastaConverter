@@ -23,6 +23,15 @@
         "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
       }
     },
+    {
+      "name": "base-vcpkg",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_FEATURE_FLAGS": "manifests"
+      }
+    },
     
 
     { "name": "win-msvc",
@@ -64,12 +73,18 @@
         "NO_GUI": "OFF"
       }
     },
+    { "name": "linux-gcc-vcpkg", "inherits": ["linux-gcc", "base-vcpkg"],
+      "cacheVariables": { }
+    },
     { "name": "linux-gcc-make", "inherits": "base-unix-make",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
         "NO_GUI": "OFF"
       }
+    },
+    { "name": "linux-gcc-make-vcpkg", "inherits": ["linux-gcc-make", "base-vcpkg"],
+      "cacheVariables": { }
     },
     { "name": "linux-clang", "inherits": "base-ninja-multi",
       "cacheVariables": {
@@ -78,12 +93,18 @@
         "NO_GUI": "OFF"
       }
     },
+    { "name": "linux-clang-vcpkg", "inherits": ["linux-clang", "base-vcpkg"],
+      "cacheVariables": { }
+    },
     { "name": "linux-clang-make", "inherits": "base-unix-make",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "NO_GUI": "OFF"
       }
+    },
+    { "name": "linux-clang-make-vcpkg", "inherits": ["linux-clang-make", "base-vcpkg"],
+      "cacheVariables": { }
     },
 
     { "name": "macos-clang", "inherits": "base-ninja-multi",
@@ -93,6 +114,9 @@
         "NO_GUI": "OFF"
       }
     },
+    { "name": "macos-clang-vcpkg", "inherits": ["macos-clang", "base-vcpkg"],
+      "cacheVariables": { }
+    },
     { "name": "macos-clang-make", "inherits": "base-unix-make",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
@@ -100,22 +124,40 @@
         "NO_GUI": "OFF"
       }
     },
-
+    { "name": "macos-clang-make-vcpkg", "inherits": ["macos-clang-make", "base-vcpkg"],
+      "cacheVariables": { }
+    },
     { "name": "win-msvc-nogui", "inherits": "win-msvc",
       "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "win-msvc-vcpkg", "inherits": ["win-msvc", "base-vcpkg"],
+      "cacheVariables": { } },
     { "name": "win-msvc-ninja-nogui", "inherits": "win-msvc-ninja",
       "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "win-msvc-ninja-vcpkg", "inherits": ["win-msvc-ninja", "base-vcpkg"],
+      "cacheVariables": { } },
     { "name": "win-clangcl-nogui", "inherits": "win-clangcl",
       "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "win-clangcl-vcpkg", "inherits": ["win-clangcl", "base-vcpkg"],
+      "cacheVariables": { } },
     { "name": "win-mingw-gcc-nogui", "inherits": "win-mingw-gcc",
       "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "win-mingw-gcc-vcpkg", "inherits": ["win-mingw-gcc", "base-vcpkg"],
+      "cacheVariables": { } },
     { "name": "linux-gcc-nogui", "inherits": "linux-gcc",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "linux-gcc-vcpkg-nogui", "inherits": ["linux-gcc-vcpkg", "linux-gcc"],
       "cacheVariables": { "NO_GUI": "ON" } },
     { "name": "linux-gcc-make-nogui", "inherits": "linux-gcc-make",
       "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "linux-gcc-make-vcpkg-nogui", "inherits": ["linux-gcc-make-vcpkg", "linux-gcc-make"],
+      "cacheVariables": { "NO_GUI": "ON" } },
     { "name": "linux-clang-nogui", "inherits": "linux-clang",
       "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "linux-clang-vcpkg-nogui", "inherits": ["linux-clang-vcpkg", "linux-clang"],
+      "cacheVariables": { "NO_GUI": "ON" } },
     { "name": "linux-clang-make-nogui", "inherits": "linux-clang-make",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "linux-clang-make-vcpkg-nogui", "inherits": ["linux-clang-make-vcpkg", "linux-clang-make"],
       "cacheVariables": { "NO_GUI": "ON" } },
     { "name": "macos-clang-nogui", "inherits": "macos-clang",
       "cacheVariables": { "NO_GUI": "ON" } }

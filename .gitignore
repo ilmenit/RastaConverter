@@ -16,6 +16,9 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 
+# Packages
+.vcpkg/
+
 # User-specific files
 *.suo
 *.user

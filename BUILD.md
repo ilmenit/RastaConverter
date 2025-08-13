@@ -61,7 +61,7 @@ cmake --preset linux-gcc              # Ninja Multi-Config
 cmake --build out/build/linux-gcc --config Release
 
 # Linux (GCC, Unix Makefiles)
-cmake --preset linux-gcc-make         # Unix Makefiles (single-config)
+cmake --preset linux-gcc-make         # Unix Makefiles (single-config; use -DCMAKE_BUILD_TYPE=Release on first configure)
 cmake --build out/build/linux-gcc-make --config Release
 
 # macOS (Apple Clang)
@@ -117,13 +117,23 @@ build.bat win-msvc Debug -DNO_GUI=ON
 
 ## Dependency management options
 
-### Option A (recommended): vcpkg manifest mode
+### Option A (recommended): vcpkg manifest mode (auto)
 
-If you use vcpkg, set `VCPKG_ROOT` and pick a `*-vcpkg` preset. Dependencies are auto-installed in the correct ABI for your compiler.
+This repo supports vcpkg manifest mode. If a `vcpkg.json` file is present, the helper scripts will automatically enable vcpkg when `VCPKG_ROOT` is available. On Linux/macOS the script attempts to bootstrap a local vcpkg checkout under `.vcpkg` if `VCPKG_ROOT` is not set.
+
+- Set `DISABLE_VCPKG=1` to opt-out.
+- Set `VCPKG_ROOT` to your vcpkg path to use a shared install. Otherwise the script will try `.vcpkg` (Linux/macOS).
+- Pick any normal preset (e.g., `linux-gcc`); the script will switch to the corresponding `*-vcpkg` preset.
+
+Examples:
 
 ```
-cmake --preset win-msvc-vcpkg
-cmake --build out/build/win-msvc-vcpkg --config Release
+# Windows (shared vcpkg)
+set VCPKG_ROOT=C:\vcpkg
+build.bat win-msvc Release
+
+# Linux/macOS (auto-bootstrap local vcpkg under .vcpkg if missing)
+./build.sh linux-gcc Release
 ```
 
 ### Option B: System packages
@@ -230,6 +240,7 @@ Use these to squeeze more performance when acceptable for your use-case:
 - CMake can’t find libraries:
   - Prefer vcpkg presets (set `VCPKG_ROOT`)
   - Or provide `FREEIMAGE_DIR`, `SDL2_DIR`, `SDL2_TTF_DIR`
+  - Or install system dev packages (see above) and ensure `pkg-config` is installed
 - Windows runtime DLLs:
   - DLLs are copied to the output dir automatically when discoverable
 - MinGW on Windows:

@@ -14,6 +14,7 @@ set CLEAN=0
 set CLEANONLY=0
 set EXTRA_CMAKE_ARGS=
 set SINGLE_CONFIG_GEN=0
+set USE_VCPKG=0
 
 where cmake >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
@@ -75,6 +76,33 @@ REM Criteria: preset contains "-make" or is MinGW Makefiles presets
 echo %PRESET% | findstr /I /C:"-make" >nul && set SINGLE_CONFIG_GEN=1
 if /I "%PRESET%"=="win-mingw-gcc" set SINGLE_CONFIG_GEN=1
 if /I "%PRESET%"=="win-mingw-gcc-nogui" set SINGLE_CONFIG_GEN=1
+
+REM Auto-enable vcpkg manifest mode if vcpkg.json is present and VCPKG_ROOT resolves
+if exist vcpkg.json (
+  if not defined VCPKG_ROOT (
+    if exist .vcpkg\scripts\buildsystems\vcpkg.cmake (
+      set VCPKG_ROOT=%CD%\.vcpkg
+    ) else (
+      where git >nul 2>&1 && (
+        echo Bootstrapping local vcpkg under .vcpkg ...
+        git clone --depth 1 https://github.com/microsoft/vcpkg.git .vcpkg
+        if exist .vcpkg\bootstrap-vcpkg.bat (
+          call .vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          set VCPKG_ROOT=%CD%\.vcpkg
+        )
+      )
+    )
+  )
+  if defined VCPKG_ROOT (
+    set USE_VCPKG=1
+    if /I "%PRESET%"=="win-msvc" set PRESET=win-msvc-vcpkg
+    if /I "%PRESET%"=="win-msvc-ninja" set PRESET=win-msvc-ninja-vcpkg
+    if /I "%PRESET%"=="win-clangcl" set PRESET=win-clangcl-vcpkg
+    if /I "%PRESET%"=="win-mingw-gcc" set PRESET=win-mingw-gcc-vcpkg
+  ) else (
+    echo vcpkg manifest detected but VCPKG_ROOT not available; proceeding without vcpkg.
+  )
+)
 
 if %SINGLE_CONFIG_GEN% EQU 1 (
   set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_BUILD_TYPE=%CONFIG%"

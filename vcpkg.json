@@ -1,0 +1,11 @@
+{
+  "name": "rastaconverter",
+  "version-string": "1.0.0",
+  "description": "Cross-platform Atari 8-bit raster image converter",
+  "dependencies": [
+    "freeimage",
+    "sdl2",
+    "sdl2-ttf"
+  ]
+}
+
