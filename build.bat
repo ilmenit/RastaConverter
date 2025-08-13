@@ -13,6 +13,7 @@ set CONFIG=Release
 set CLEAN=0
 set CLEANONLY=0
 set EXTRA_CMAKE_ARGS=
+set SINGLE_CONFIG_GEN=0
 
 where cmake >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
@@ -68,6 +69,16 @@ goto :parse_args
 :args_done
 
 set BINARY_DIR=out\build\%PRESET%
+
+REM Detect single-config generators to pass CMAKE_BUILD_TYPE
+REM Criteria: preset contains "-make" or is MinGW Makefiles presets
+echo %PRESET% | findstr /I /C:"-make" >nul && set SINGLE_CONFIG_GEN=1
+if /I "%PRESET%"=="win-mingw-gcc" set SINGLE_CONFIG_GEN=1
+if /I "%PRESET%"=="win-mingw-gcc-nogui" set SINGLE_CONFIG_GEN=1
+
+if %SINGLE_CONFIG_GEN% EQU 1 (
+  set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_BUILD_TYPE=%CONFIG%"
+)
 
 echo Configuring with CMake preset %PRESET% ...
 if not "%EXTRA_CMAKE_ARGS%"=="" (

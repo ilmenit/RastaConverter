@@ -14,6 +14,15 @@
         "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
       }
     },
+    {
+      "name": "base-unix-make",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
+      }
+    },
     
 
     { "name": "win-msvc",
@@ -55,7 +64,21 @@
         "NO_GUI": "OFF"
       }
     },
+    { "name": "linux-gcc-make", "inherits": "base-unix-make",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "NO_GUI": "OFF"
+      }
+    },
     { "name": "linux-clang", "inherits": "base-ninja-multi",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "NO_GUI": "OFF"
+      }
+    },
+    { "name": "linux-clang-make", "inherits": "base-unix-make",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
@@ -64,6 +87,13 @@
     },
 
     { "name": "macos-clang", "inherits": "base-ninja-multi",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "NO_GUI": "OFF"
+      }
+    },
+    { "name": "macos-clang-make", "inherits": "base-unix-make",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
@@ -81,7 +111,11 @@
       "cacheVariables": { "NO_GUI": "ON" } },
     { "name": "linux-gcc-nogui", "inherits": "linux-gcc",
       "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "linux-gcc-make-nogui", "inherits": "linux-gcc-make",
+      "cacheVariables": { "NO_GUI": "ON" } },
     { "name": "linux-clang-nogui", "inherits": "linux-clang",
+      "cacheVariables": { "NO_GUI": "ON" } },
+    { "name": "linux-clang-make-nogui", "inherits": "linux-clang-make",
       "cacheVariables": { "NO_GUI": "ON" } },
     { "name": "macos-clang-nogui", "inherits": "macos-clang",
       "cacheVariables": { "NO_GUI": "ON" } }

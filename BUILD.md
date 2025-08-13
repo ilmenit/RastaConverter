@@ -20,13 +20,13 @@ The project supports:
 ### Linux
 - GCC or Clang
 - CMake 3.21+
-- Ninja (recommended; used by presets)
+- Ninja (recommended; used by presets). If Ninja is not available, presets with `-make` suffix use Unix Makefiles automatically in the helper script.
 - Dependencies: `freeimage`, `sdl2`, `sdl2-ttf` (package names vary by distro)
 
 ### macOS
 - Xcode command line tools (Apple Clang)
 - CMake 3.21+
-- Ninja (recommended; used by presets)
+- Ninja (recommended; used by presets). If Ninja is not available, presets with `-make` suffix use Unix Makefiles automatically in the helper script.
 - Dependencies via Homebrew: `freeimage`, `sdl2`, `sdl2_ttf`
 
 ## Quick start (Presets)
@@ -57,23 +57,33 @@ cmake --preset win-clangcl
 cmake --build out/build/win-clangcl --config Release
 
 # Linux (GCC)
-cmake --preset linux-gcc
+cmake --preset linux-gcc              # Ninja Multi-Config
 cmake --build out/build/linux-gcc --config Release
 
+# Linux (GCC, Unix Makefiles)
+cmake --preset linux-gcc-make         # Unix Makefiles (single-config)
+cmake --build out/build/linux-gcc-make --config Release
+
 # macOS (Apple Clang)
-cmake --preset macos-clang
+cmake --preset macos-clang            # Ninja Multi-Config
 cmake --build out/build/macos-clang --config Release
+
+# macOS (Apple Clang, Unix Makefiles)
+cmake --preset macos-clang-make       # Unix Makefiles (single-config)
+cmake --build out/build/macos-clang-make --config Release
 
 # No-GUI variants (presets with -nogui)
 cmake --preset linux-gcc-nogui
 cmake --build out/build/linux-gcc-nogui --config Release
+cmake --preset linux-gcc-make-nogui
+cmake --build out/build/linux-gcc-make-nogui --config Release
 ```
 
 Artifacts are placed in `out/build/<preset>/<config>/`.
 
 ## Quick start (helper scripts)
 
-The scripts are thin wrappers around presets and accept extra `-D` options:
+The scripts are thin wrappers around presets and accept extra `-D` options. On Linux/macOS, if Ninja is not found, the script will automatically fall back to the corresponding `-make` preset (Unix Makefiles) and set `CMAKE_BUILD_TYPE` appropriately for single-config generators:
 
 ```
 # Windows
@@ -81,7 +91,7 @@ build.bat win-clangcl Release -DTHREAD_DEBUG=ON -DUI_DEBUG=ON
 build.bat win-msvc Release CLEAN   # removes old cache if generator mismatch
 
 # Linux/macOS
-./build.sh linux-gcc Release -DNO_GUI=ON
+./build.sh linux-gcc Release -DNO_GUI=ON   # falls back to linux-gcc-make if Ninja not installed
 ```
 
 Run without arguments to see usage and the preset list.
@@ -223,6 +233,7 @@ Use these to squeeze more performance when acceptable for your use-case:
 - Windows runtime DLLs:
   - DLLs are copied to the output dir automatically when discoverable
 - MinGW on Windows:
+  - When using single-config generators (MinGW Makefiles or Unix Makefiles), the helper scripts set `CMAKE_BUILD_TYPE` based on the selected configuration.
   - Run from the MSYS2 MinGW 64-bit shell or ensure `C:/msys64/mingw64/bin` is on PATH before configuring
 
 ## Where is the binary?
