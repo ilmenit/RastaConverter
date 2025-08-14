@@ -7,7 +7,7 @@
 #include <mutex>
 #include "FreeImage.h"
 #include "color/rgb.h"
-#include "color/distance.h"
+#include "color/Distance.h"
 #include "raster/Program.h"
 #include "config.h"
 

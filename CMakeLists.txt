@@ -76,10 +76,16 @@ endif()
 set(CORE_SOURCES
     src/main.cpp
     src/main.h
-    src/RastaConverter.cpp
     src/RastaConverter.h
+    src/app/RastaConverter.h
+    src/app/RastaConverter.ProcessInit.cpp
+    src/app/RastaConverter.Init.cpp
+    src/app/RastaConverter.MainLoop.cpp
+    src/app/RastaConverter.UI.cpp
+    src/app/RastaConverter.IO.cpp
+    src/app/RastaConverter.OnOff.cpp
+    src/app/RastaConverter.Save.cpp
     src/config.cpp
-    src/config.h
     src/string_conv.h
     src/mt19937int.cpp
     src/mt19937int.h
@@ -90,8 +96,7 @@ set(CORE_SOURCES
     src/gui.h
     src/pch.cpp
     src/pch.h
-    src/CommandLineParser.cpp
-    src/CommandLineParser.h
+    src/config/CommandLineParser.cpp
 )
 
 set(COLOR_SOURCES
