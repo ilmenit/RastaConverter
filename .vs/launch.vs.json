@@ -5,8 +5,8 @@
     {
       "type": "default",
       "project": "CMakeLists.txt",
-      "projectTarget": "rasta.exe",
-      "name": "rasta.exe",
+      "projectTarget": "RastaConverter.exe",
+      "name": "RastaConverter.exe",
       "args": [
         "test.png","/threads=8"
       ]

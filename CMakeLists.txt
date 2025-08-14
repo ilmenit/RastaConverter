@@ -348,6 +348,9 @@ endif()
 
 # Platform-specific settings
 if(WIN32)
+    # Use Windows executable name 'RastaConverter.exe'
+    set_target_properties(rasta PROPERTIES OUTPUT_NAME RastaConverter)
+
     # Add Windows-specific libraries
     target_link_libraries(rasta PRIVATE ws2_32 dbghelp)
 

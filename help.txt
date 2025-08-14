@@ -171,6 +171,28 @@ Cache and threads (/cache, /threads):
 - Why: Line caches reduce recomputation; memory and CPU scale with image height.
 - Choose: /cache=16 is a good starting point per thread; increase if you observe frequent cache clears. Set /threads to the number of physical cores (or 1–2 less) to keep system responsive.
 
+Mutation Strategy (/mutation_strategy):
+Global Strategy (default):
+- All threads can mutate any line in the image
+- Requires more frequent mutex locking for thread safety
+- Provides broader exploration of the search space
+Choose:
+- Better for most cases as it allows any thread to improve any part of the image
+
+Regional Strategy:
+- Each thread focuses on a specific region of lines (height/thread_count lines per thread)
+- Reduces mutex contention by keeping threads in their assigned regions
+- 80% of mutations stay within the thread's region, 20% can go global
+- May be better in specific scenarios:
+Choose: 
+- May be better with high thread counts (8+ threads) where mutex contention becomes significant
+
+Why Global is usually better:
+- Better exploration of the entire image
+- Threads can immediately jump to improving any promising area
+- More balanced optimization across the entire image
+- Less likely to get stuck in local optima
+
 Dual-frame mode: deeper dive
 --------------------------------------
 Why dual mode (/dual=on):

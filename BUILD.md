@@ -263,13 +263,13 @@ After a successful build, the binary is placed under:
 out/build/<preset>/<config>/
 ```
 
-Windows executable: `rasta.exe`
+Windows executable: `RastaConverter.exe`
 
 Linux/macOS executable: `rasta`
 
 ## Runtime deployment and assets
 
-- On Windows, the build copies only the primary runtime DLLs by default: `SDL2.dll`, `SDL2_ttf.dll`, and `FreeImage.dll`, along with the executable `rasta.exe`.
+- On Windows, the build copies only the primary runtime DLLs by default: `SDL2.dll`, `SDL2_ttf.dll`, and `FreeImage.dll`, along with the executable `RastaConverter.exe`.
 - To copy all dependency DLLs resolved by the linker (for example when using vcpkg and you want a self-contained folder), pass:
 
 ```
