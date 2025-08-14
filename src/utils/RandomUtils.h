@@ -1,7 +1,7 @@
 #ifndef RANDOM_UTILS_H
 #define RANDOM_UTILS_H
 
-#include "../mt19937int.h"
+#include "mt19937int.h"
 
 /**
  * Generate a random integer in a range

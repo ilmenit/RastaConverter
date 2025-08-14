@@ -10,7 +10,7 @@
 #include "../color/Distance.h"
 #include "../cache/LineCache.h"
 #include "SpriteManager.h"
-#include "../OnOffMap.h"
+#include "../raster/OnOffMap.h"
 
 // Forward declarations
 class EvaluationContext;

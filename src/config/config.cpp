@@ -1,8 +1,8 @@
 #include <time.h>
 #include <list>
-#include "../config.h"
-#include "../string_conv.h"
-#include "../mt19937int.h"
+#include "../config/config.h"
+#include "../utils/string_conv.h"
+#include "../utils/mt19937int.h"
 
 using namespace std;
 
@@ -335,7 +335,7 @@ void Configuration::Process(int argc, char *argv[])
 
         // strategy
         {
-            std::string strat = parser.getValue("dual_strategy", "alternate");
+            std::string strat = parser.getValue("dual_strategy", "staged");
             for (auto &c : strat) c = (char)tolower(c);
             if (strat == "alternate" || strat == "alt") dual_strategy = E_DUAL_STRAT_ALTERNATE;
             else if (strat == "joint") dual_strategy = E_DUAL_STRAT_JOINT; // reserved; behaves as alternate currently
@@ -378,7 +378,7 @@ void Configuration::Process(int argc, char *argv[])
 
         // staged dual params
         {
-            std::string stage_len = parser.getValue("dual_stage_evals", "5000");
+            std::string stage_len = parser.getValue("dual_stage_evals", parser.getValue("dual_stage_evalus", "100000"));
             if (!stage_len.empty()) dual_stage_evals = String2Value<unsigned long long>(stage_len);
             if (dual_stage_evals < 1ULL) dual_stage_evals = 1ULL;
             std::string stage_start = parser.getValue("dual_stage_start", "A");

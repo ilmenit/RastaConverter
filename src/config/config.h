@@ -118,17 +118,17 @@ struct Configuration {
     e_distance_function blend_distance = E_DISTANCE_YUV; // /blend_distance=
     double blend_gamma = 2.2;                   // /blend_gamma= (rgb-linear)
 
-    double flicker_luma_weight = 1.0;           // controlled by /flicker_luma (0..1 acceptance)
-    double flicker_chroma_weight = 0.2;         // controlled by /flicker_chroma (0..1 acceptance)
+    double flicker_luma_weight = 0.0;           // controlled by /flicker_luma (0..1 acceptance)
+    double flicker_chroma_weight = 0.0;         // controlled by /flicker_chroma (0..1 acceptance)
 
-    e_dual_strategy dual_strategy = E_DUAL_STRAT_ALTERNATE; // /dual_strategy=
+    e_dual_strategy dual_strategy = E_DUAL_STRAT_STAGED; // /dual_strategy=
     e_dual_init dual_init = E_DUAL_INIT_DUP;                // /dual_init=
     double dual_mutate_ratio = 0.5;           // probability to mutate B vs A
     // Cross-frame structural ops probabilities
     double dual_cross_share_prob = 0.05;      // probability of cross copy/swap
     double dual_both_frames_prob = 0.0;       // reserved for future
     // Staged dual strategy parameters
-    unsigned long long dual_stage_evals = 5000; // per-thread iterations per stage when /dual_strategy=staged
+    unsigned long long dual_stage_evals = 100000; // per-thread iterations per stage when /dual_strategy=staged
     bool dual_stage_start_B = false;            // start staged focus on B (default A)
     // Flicker ramp configuration
     unsigned long long blink_ramp_evals = 0;  // number of evals to ramp WL

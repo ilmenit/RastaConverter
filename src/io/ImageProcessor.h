@@ -9,7 +9,7 @@
 #include "color/rgb.h"
 #include "color/Distance.h"
 #include "raster/Program.h"
-#include "config.h"
+#include "config/config.h"
 
 /**
  * Handles image loading, processing, and dithering operations

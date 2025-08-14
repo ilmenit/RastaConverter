@@ -1,7 +1,7 @@
 #include "RastaConverter.h"
 #include "color/Distance.h"
-#include "TargetPicture.h"
-#include "mt19937int.h"
+#include "target/TargetPicture.h"
+#include "utils/mt19937int.h"
 #include <chrono>
 #include <thread>
 #include <fstream>

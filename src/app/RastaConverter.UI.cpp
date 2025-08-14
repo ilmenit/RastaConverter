@@ -1,5 +1,5 @@
 #include "RastaConverter.h"
-#include "TargetPicture.h"
+#include "target/TargetPicture.h"
 #include "color/rgb.h"
 #include <algorithm>
 #include <cstdio>

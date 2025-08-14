@@ -22,7 +22,7 @@ liable for any damage caused due to use of this code even if incidental.
 
 
 // Epoch Headers
-#include "../EpochTypes.h"
+#include "../platform/EpochTypes.h"
 
 using namespace std;
 using namespace Epoch::Types;

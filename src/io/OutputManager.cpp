@@ -1,5 +1,5 @@
 #include "OutputManager.h"
-#include "../TargetPicture.h"
+#include "../target/TargetPicture.h"
 #include <iostream>
 #include <fstream>
 #include <cstring>

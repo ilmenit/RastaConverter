@@ -3,7 +3,7 @@
 #!/bin/bash
 
 # Script to build RastaConverter on POSIX systems via CMake presets
-# Usage: ./build.sh <configure-preset> [Debug|Release] [extra -D options]
+# Usage: ./build.sh [<configure-preset>] [Debug|Release] [extra -D options]
 
 # Default values
 PRESET=""
@@ -19,15 +19,27 @@ if [ $# -gt 0 ]; then EXTRA_CMAKE_ARGS=("$@"); fi
 
 command -v cmake >/dev/null 2>&1 || { echo "CMake is required but not installed. Aborting."; exit 1; }
 
+# Auto-select a sensible default preset if none provided
 if [ -z "$PRESET" ]; then
-  echo "Usage: ./build.sh <configure-preset> [Debug|Release] [extra -D options]"
-  echo "Examples:"
-  echo "  ./build.sh linux-clang Release -DTHREAD_DEBUG=ON -DUI_DEBUG=ON"
-  echo "  ./build.sh macos-clang Debug -DNO_GUI=ON"
-  echo
-  echo "Available presets:"
-  cmake --list-presets
-  exit 1
+  uname_s="$(uname -s 2>/dev/null || echo unknown)"
+  case "$uname_s" in
+    Linux)
+      if command -v clang >/dev/null 2>&1; then
+        PRESET="linux-clang"
+      else
+        PRESET="linux-gcc"
+      fi
+      ;;
+    Darwin)
+      PRESET="macos-clang"
+      ;;
+    *)
+      echo "Unknown platform for auto-preset; please pass a preset."
+      echo "Available presets:"
+      cmake --list-presets
+      exit 1
+      ;;
+  esac
 fi
 
 # Normalize CONFIG case to CMake conventions
@@ -72,15 +84,6 @@ if [ -f "vcpkg.json" ] && [ "${DISABLE_VCPKG:-0}" != "1" ]; then
   fi
   if [ -n "${VCPKG_ROOT:-}" ] && [ -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
     USE_VCPKG=1
-    case "$SELECTED_PRESET" in
-      linux-gcc|linux-gcc-nogui) SELECTED_PRESET="${SELECTED_PRESET/linux-gcc/linux-gcc-vcpkg}" ;;
-      linux-gcc-make|linux-gcc-make-nogui) SELECTED_PRESET="${SELECTED_PRESET/linux-gcc-make/linux-gcc-make-vcpkg}" ;;
-      linux-clang|linux-clang-nogui) SELECTED_PRESET="${SELECTED_PRESET/linux-clang/linux-clang-vcpkg}" ;;
-      linux-clang-make|linux-clang-make-nogui) SELECTED_PRESET="${SELECTED_PRESET/linux-clang-make/linux-clang-make-vcpkg}" ;;
-      macos-clang|macos-clang-nogui) SELECTED_PRESET="${SELECTED_PRESET/macos-clang/macos-clang-vcpkg}" ;;
-      macos-clang-make|macos-clang-make-nogui) SELECTED_PRESET="${SELECTED_PRESET/macos-clang-make/macos-clang-make-vcpkg}" ;;
-      *) ;;
-    esac
   else
     echo "vcpkg manifest detected but VCPKG_ROOT not available; proceeding without vcpkg. Set DISABLE_VCPKG=1 to silence this."
   fi
@@ -107,6 +110,7 @@ if [ $SINGLE_CONFIG_GEN -eq 1 ]; then
 fi
 if [ $USE_VCPKG -eq 1 ]; then
   export VCPKG_ROOT
+  CONFIGURE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_FEATURE_FLAGS=manifests")
 fi
 CONFIGURE_ARGS+=("${EXTRA_CMAKE_ARGS[@]}")
 
@@ -117,7 +121,7 @@ fi
 
 BINARY_DIR="out/build/$SELECTED_PRESET"
 echo "Building in $BINARY_DIR (config $CONFIG) ..."
-cmake --build "$BINARY_DIR" --config "$CONFIG" -j"$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu)"
+cmake --build "$BINARY_DIR" --config "$CONFIG" --parallel "$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu)"
 
 if [ $SINGLE_CONFIG_GEN -eq 1 ]; then
   echo "Build finished. Artifacts under out/build/$SELECTED_PRESET/"

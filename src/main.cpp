@@ -8,7 +8,7 @@
 #undef uint64_t
 #include <stdint.h>
 #include "platform/ConsoleCtrlWin.h"
-#include "RastaConverter.h"
+#include "app/RastaConverter.h"
 #include <iostream>
 #include <fstream>
 #include <mutex>
@@ -111,13 +111,13 @@ Dual-frame mode (A/B frame optimization):
   --dual [on|off]             Enable dual-frame mode (default: off). Bare --dual enables it.
   --dual_init <dup|random|anti>
                               Initial relation of frames (default: dup)
-  --flicker_luma <0..1>       How much luma flicker you accept (0=no, 1=full)
-  --flicker_chroma <0..1>     How much chroma flicker you accept (0=no, 1=full)
+  --flicker_luma <0..1>       How much luma flicker you accept (0=no, 1=full) (default: 1)
+  --flicker_chroma <0..1>     How much chroma flicker you accept (0=no, 1=full) (default: 1)
   --dual_mutate_ratio <0..1>
                               Chance to mutate B vs A (default: 0.5)
   --dual_strategy <alternate|staged>
-                              Mutation scheduling between A/B (default: alternate)
-  --dual_stage_evals <N>      If staged, iterations per focus block (default: 5000)
+                              Mutation scheduling between A/B (default: staged)
+  --dual_stage_evals <N>      If staged, iterations per focus block (default: 100000)
   --dual_stage_start <A|B>    If staged, which frame to focus first (default: A)
   --dual_cross_share_prob <F> Probability of occasional line copy/swap between frames (default: 0.05)
 

@@ -3,7 +3,7 @@
 
 #include <string>
 #include "config.h"
-#include "color/Distance.h"
+#include "Distance.h"
 
 struct rgb;
 

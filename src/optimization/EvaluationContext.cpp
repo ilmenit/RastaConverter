@@ -7,7 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <cmath>
-#include "../TargetPicture.h"
+#include "../target/TargetPicture.h"
 
 EvaluationContext::EvaluationContext()
     : m_best_result(DBL_MAX)

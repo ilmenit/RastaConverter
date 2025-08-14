@@ -1,7 +1,7 @@
 #include "OptimizationController.h"
 #include "DLAS.h"
 #include "LAHC.h"
-#include "../config.h"
+#include "../config/config.h"
 #include "../mutation/RasterMutator.h"
 #include <algorithm>
 #include <iostream>

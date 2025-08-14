@@ -1,7 +1,7 @@
 #include "RasterProgramGenerator.h"
-#include "TargetPicture.h"
+#include "target/TargetPicture.h"
 #include "color/rgb.h"
-#include "mt19937int.h"
+#include "utils/mt19937int.h"
 #include "utils/RandomUtils.h"
 #include <algorithm>
 #include <map>

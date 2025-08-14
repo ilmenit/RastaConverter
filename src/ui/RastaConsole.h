@@ -4,7 +4,7 @@
 
 #include <string>
 #include "FreeImage.h"
-#include "gui.h"
+#include "ui/gui.h"
 
 class RastaConsole {
 private:

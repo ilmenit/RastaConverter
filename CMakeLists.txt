@@ -19,6 +19,7 @@ option(ENABLE_MSVC_FAST_MATH "Use /fp:fast for MSVC/clang-cl in Release" OFF)
 option(ENABLE_AVX2 "Enable AVX2 instructions where supported (MSVC only; use at your own risk)" OFF)
 option(ENABLE_LLD_LINKER "Use lld linker for faster links (Clang/GCC on ELF); optional" OFF)
 option(ENABLE_UNITY_BUILD "Enable unity build for the executable (can improve inlining and compile times)" OFF)
+option(COPY_ALL_RUNTIME_DLLS "Copy all dependent runtime DLLs on Windows (may include many transitive DLLs via vcpkg)" OFF)
 
 # Profile-Guided Optimization (PGO)
 set(PGO_MODE "OFF" CACHE STRING "PGO mode: OFF, GENERATE, or USE")
@@ -76,7 +77,6 @@ endif()
 set(CORE_SOURCES
     src/main.cpp
     src/main.h
-    src/RastaConverter.h
     src/app/RastaConverter.h
     src/app/RastaConverter.ProcessInit.cpp
     src/app/RastaConverter.Init.cpp
@@ -85,18 +85,8 @@ set(CORE_SOURCES
     src/app/RastaConverter.IO.cpp
     src/app/RastaConverter.OnOff.cpp
     src/app/RastaConverter.Save.cpp
-    src/config.cpp
-    src/string_conv.h
-    src/mt19937int.cpp
-    src/mt19937int.h
-    src/port.h
-    src/TargetPicture.cpp
-    src/TargetPicture.h
-    src/OnOffMap.h
-    src/gui.h
-    src/pch.cpp
-    src/pch.h
-    src/config/CommandLineParser.cpp
+    src/common/pch.cpp
+    src/common/pch.h
 )
 
 set(COLOR_SOURCES
@@ -113,6 +103,7 @@ set(RASTER_SOURCES
     src/raster/RasterInstruction.h
     src/raster/RasterProgramGenerator.cpp
     src/raster/RasterProgramGenerator.h
+    src/raster/OnOffMap.h
 )
 
 set(IO_SOURCES
@@ -156,6 +147,10 @@ set(CACHE_SOURCES
 set(UTILS_SOURCES
     src/utils/LinearAllocator.h
     src/utils/RandomUtils.h
+    src/utils/port.h
+    src/utils/string_conv.h
+    src/utils/mt19937int.h
+    src/utils/mt19937int.cpp
 )
 
 set(MUTATION_SOURCES
@@ -169,12 +164,14 @@ if(NO_GUI)
     set(UI_SOURCES 
         src/ui/RastaConsole.cpp
         src/ui/RastaConsole.h
+        src/ui/gui.h
     )
     add_definitions(-DNO_GUI)
 else()
     set(UI_SOURCES 
         src/ui/RastaSDL.cpp
         src/ui/RastaSDL.h
+        src/ui/gui.h
     )
 endif()
 
@@ -190,6 +187,12 @@ set(SOURCES
     ${UTILS_SOURCES}
     ${MUTATION_SOURCES}
     ${UI_SOURCES}
+    src/target/TargetPicture.cpp
+    src/target/TargetPicture.h
+    src/config/config.cpp
+    src/config/config.h
+    src/config/CommandLineParser.cpp
+    src/config/CommandLineParser.h
 )
 
 # Add executable
@@ -197,7 +200,7 @@ add_executable(rasta ${SOURCES})
 
 # Set PCH if available
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
-    target_precompile_headers(rasta PRIVATE src/pch.h)
+    target_precompile_headers(rasta PRIVATE src/common/pch.h)
 endif()
 
 # Optional unity build (merges sources to improve inlining and compile time)
@@ -208,6 +211,8 @@ endif()
 # Include directories always include project src
 target_include_directories(rasta PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
 )
 
 # Link FreeImage using imported target if available, otherwise variables from Find module
@@ -346,15 +351,26 @@ if(WIN32)
     # Add Windows-specific libraries
     target_link_libraries(rasta PRIVATE ws2_32 dbghelp)
 
-    # Copy DLLs on Windows
+    # Copy primary runtime DLLs on Windows: FreeImage, SDL2, SDL2_ttf
+    # Prefer explicit variables from Find modules, otherwise fall back to imported targets when available
     if(FREEIMAGE_DLL)
         add_custom_command(TARGET rasta POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${FREEIMAGE_DLL}"
             $<TARGET_FILE_DIR:rasta>
         )
+    elseif(TARGET FreeImage::FreeImage)
+        # Attempt to copy the imported DLL if the library is shared
+        get_target_property(_fi_type FreeImage::FreeImage TYPE)
+        if(_fi_type STREQUAL "SHARED_LIBRARY")
+            add_custom_command(TARGET rasta POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:FreeImage::FreeImage>
+                $<TARGET_FILE_DIR:rasta>
+            )
+        endif()
     endif()
-    
+
     if(NOT NO_GUI)
         if(SDL2_DLL)
             add_custom_command(TARGET rasta POST_BUILD
@@ -362,6 +378,15 @@ if(WIN32)
                 "${SDL2_DLL}"
                 $<TARGET_FILE_DIR:rasta>
             )
+        elseif(TARGET SDL2::SDL2)
+            get_target_property(_sdl2_type SDL2::SDL2 TYPE)
+            if(_sdl2_type STREQUAL "SHARED_LIBRARY")
+                add_custom_command(TARGET rasta POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:SDL2::SDL2>
+                    $<TARGET_FILE_DIR:rasta>
+                )
+            endif()
         endif()
         
         if(SDL2_TTF_DLL)
@@ -370,16 +395,27 @@ if(WIN32)
                 "${SDL2_TTF_DLL}"
                 $<TARGET_FILE_DIR:rasta>
             )
+        elseif(TARGET SDL2_ttf::SDL2_ttf)
+            get_target_property(_sdlttf_type SDL2_ttf::SDL2_ttf TYPE)
+            if(_sdlttf_type STREQUAL "SHARED_LIBRARY")
+                add_custom_command(TARGET rasta POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:SDL2_ttf::SDL2_ttf>
+                    $<TARGET_FILE_DIR:rasta>
+                )
+            endif()
         endif()
     endif()
 
-    # Additionally, copy runtime DLLs discovered via target dependencies (e.g., vcpkg)
-    add_custom_command(TARGET rasta POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:rasta>
-            $<TARGET_FILE_DIR:rasta>
-        COMMAND_EXPAND_LISTS
-    )
+    # Optionally copy all runtime DLLs discovered via target dependencies (can be noisy with vcpkg)
+    if(COPY_ALL_RUNTIME_DLLS)
+        add_custom_command(TARGET rasta POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:rasta>
+                $<TARGET_FILE_DIR:rasta>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 else()
     # Linux-specific settings
     find_package(Threads REQUIRED)
@@ -394,6 +430,23 @@ if(NOT NO_GUI)
         $<TARGET_FILE_DIR:rasta>
     )
 endif()
+
+# Copy runtime resources
+add_custom_command(TARGET rasta POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/Palettes"
+    "$<TARGET_FILE_DIR:rasta>/Palettes"
+)
+add_custom_command(TARGET rasta POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/Generator"
+    "$<TARGET_FILE_DIR:rasta>/Generator"
+)
+add_custom_command(TARGET rasta POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/help.txt"
+    "$<TARGET_FILE_DIR:rasta>/help.txt"
+)
 
 # Installation rules
 install(TARGETS rasta DESTINATION bin)

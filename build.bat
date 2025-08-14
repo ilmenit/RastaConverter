@@ -22,7 +22,10 @@ if %ERRORLEVEL% NEQ 0 (
   exit /b 1
 )
 
-if "%~1"=="" goto :usage
+if "%~1"=="" (
+  set PRESET=win-msvc
+  goto :skip_preset_shift
+)
 set PRESET=%~1
 
 REM Detect if the second arg is a config
@@ -36,6 +39,8 @@ if /I "%~2"=="Debug" (
 
 REM Shift past preset
 shift
+
+:skip_preset_shift
 
 :parse_args
 if "%~1"=="" goto :args_done
@@ -76,30 +81,36 @@ echo %PRESET% | findstr /I /C:"-make" >nul && set SINGLE_CONFIG_GEN=1
 if /I "%PRESET%"=="win-mingw-gcc" set SINGLE_CONFIG_GEN=1
 if /I "%PRESET%"=="win-mingw-gcc-nogui" set SINGLE_CONFIG_GEN=1
 
-REM Auto-enable vcpkg manifest mode if vcpkg.json is present and VCPKG_ROOT resolves
+REM Enable vcpkg manifest mode on Windows only when explicitly requested (USE_VCPKG=1)
 if exist vcpkg.json (
-  if not defined VCPKG_ROOT (
-    if exist .vcpkg\scripts\buildsystems\vcpkg.cmake (
-      set VCPKG_ROOT=%CD%\.vcpkg
+  if /I "%USE_VCPKG%"=="1" (
+    if /I "%DISABLE_VCPKG%"=="1" (
+      echo USE_VCPKG=1 ignored because DISABLE_VCPKG=1 is set.
     ) else (
-      where git >nul 2>&1 && (
-        echo Bootstrapping local vcpkg under .vcpkg ...
-        git clone --depth 1 https://github.com/microsoft/vcpkg.git .vcpkg
-        if exist .vcpkg\bootstrap-vcpkg.bat (
-          call .vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      if not defined VCPKG_ROOT (
+        if exist .vcpkg\scripts\buildsystems\vcpkg.cmake (
           set VCPKG_ROOT=%CD%\.vcpkg
+        ) else (
+          where git >nul 2>&1 && (
+            echo Bootstrapping local vcpkg under .vcpkg ...
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git .vcpkg
+            if exist .vcpkg\bootstrap-vcpkg.bat (
+              call .vcpkg\bootstrap-vcpkg.bat -disableMetrics
+              set VCPKG_ROOT=%CD%\.vcpkg
+            )
+          )
         )
       )
+      if defined VCPKG_ROOT (
+        set USE_VCPKG=1
+        rem Do not rename preset; inject toolchain to keep binary dir stable (out\build\%PRESET%)
+        set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_TOOLCHAIN_FILE=\"%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake\" -DVCPKG_FEATURE_FLAGS=manifests"
+      ) else (
+        echo USE_VCPKG=1 requested but VCPKG_ROOT not available; proceeding without vcpkg.
+      )
     )
-  )
-  if defined VCPKG_ROOT (
-    set USE_VCPKG=1
-    if /I "%PRESET%"=="win-msvc" set PRESET=win-msvc-vcpkg
-    if /I "%PRESET%"=="win-msvc-ninja" set PRESET=win-msvc-ninja-vcpkg
-    if /I "%PRESET%"=="win-clangcl" set PRESET=win-clangcl-vcpkg
-    if /I "%PRESET%"=="win-mingw-gcc" set PRESET=win-mingw-gcc-vcpkg
   ) else (
-    echo vcpkg manifest detected but VCPKG_ROOT not available; proceeding without vcpkg.
+    rem vcpkg.json present but vcpkg not requested; proceeding without vcpkg.
   )
 )
 

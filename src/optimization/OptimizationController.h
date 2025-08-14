@@ -5,7 +5,7 @@
 #include <string>
 #include <chrono>
 #include <memory>
-#include "../config.h"
+#include "../config/config.h"
 #include "../raster/Program.h"
 #include "EvaluationContext.h"
 #include "../execution/Executor.h"

@@ -6,7 +6,7 @@
 #include <FreeImage.h>
 #include <SDL_ttf.h>
 #include <string>
-#include "gui.h"
+#include "ui/gui.h"
 
 class RastaSDL {
 private:

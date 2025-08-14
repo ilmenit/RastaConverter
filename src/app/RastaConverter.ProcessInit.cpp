@@ -1,7 +1,7 @@
 #include "RastaConverter.h"
 #include "color/Distance.h"
-#include "TargetPicture.h"
-#include "mt19937int.h"
+#include "target/TargetPicture.h"
+#include "utils/mt19937int.h"
 #include <chrono>
 #include <thread>
 #include <fstream>
@@ -175,6 +175,9 @@ bool RastaConverter::ProcessInit()
     for (int i = 0; i < 128; ++i)
         pictureAllErrors[i] = &m_imageProcessor.GetPictureAllErrors()[i];
     
+    // Respect legacy behavior: if no OnOff file provided, do not apply any per-line register disabling
+    const OnOffMap* onoffPtr = cfg.on_off_file.empty() ? nullptr : &m_onOffMap;
+
     m_optimizer.Initialize(
         cfg.threads, 
         m_imageProcessor.GetWidth(), 
@@ -185,7 +188,7 @@ bool RastaConverter::ProcessInit()
         cfg.save_period,
         cfg.cache_size,
         (cfg.continue_processing && cfg.have_resume_seed) ? cfg.resume_seed : cfg.initial_seed,
-        &m_onOffMap,
+        onoffPtr,
         useRegionalMutation,
         cfg.optimizer_type
     );

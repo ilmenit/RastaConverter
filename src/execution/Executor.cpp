@@ -1,12 +1,13 @@
 #include "Executor.h"
 #include "../optimization/EvaluationContext.h"
-#include "TargetPicture.h"
+#include "target/TargetPicture.h"
 #include "../mutation/Mutator.h"
 #include <algorithm>
 #include <thread>
 #include <functional>
 #include <iostream>
 #include <cmath>
+#include "../utils/RandomUtils.h"
 
 Executor::Executor()
     : m_gstate(nullptr)
@@ -909,13 +910,6 @@ int Executor::Random(int range)
 {
     if (range <= 0)
         return 0;
-
-    // XorShift algorithm - much faster than the current LFSR
-    m_randseed ^= m_randseed << 13;
-    m_randseed ^= m_randseed >> 17;
-    m_randseed ^= m_randseed << 5;
-
-    // Use rejection sampling for unbiased distribution
-    uint32_t scaled = (uint32_t)(m_randseed & 0x7FFFFFFF) % range;
-    return (int)scaled;
+    // Use shared MT19937-based RNG for parity with legacy behavior
+    return ::random(range);
 }

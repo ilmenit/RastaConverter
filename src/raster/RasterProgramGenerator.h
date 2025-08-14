@@ -5,7 +5,7 @@
 #include <set>
 #include "Program.h"
 #include "color/rgb.h"
-#include "config.h"
+#include "config/config.h"
 
 /**
  * Responsible for generating raster programs from images

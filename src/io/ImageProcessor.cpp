@@ -1,7 +1,7 @@
 #include "ImageProcessor.h"
-#include "../mt19937int.h"
-#include "../TargetPicture.h"
-#include "../string_conv.h"
+#include "../utils/mt19937int.h"
+#include "../target/TargetPicture.h"
+#include "../utils/string_conv.h"
 #include "../utils/RandomUtils.h"
 #include <iostream>
 #include <algorithm>

@@ -83,14 +83,21 @@ Artifacts are placed in `out/build/<preset>/<config>/`.
 
 ## Quick start (helper scripts)
 
-The scripts are thin wrappers around presets and accept extra `-D` options. On Linux/macOS, if Ninja is not found, the script will automatically fall back to the corresponding `-make` preset (Unix Makefiles) and set `CMAKE_BUILD_TYPE` appropriately for single-config generators:
+The scripts are thin wrappers around presets and accept extra `-D` options. If run without arguments they pick sensible defaults and build a Release configuration:
 
 ```
-# Windows
+# Windows (no arguments → Visual Studio generator, Release)
+build.bat
+
+# Linux (no arguments → prefers Clang if available, otherwise GCC)
+./build.sh
+
+# macOS (no arguments → Apple Clang)
+./build.sh
+
+# Explicit examples
 build.bat win-clangcl Release -DTHREAD_DEBUG=ON -DUI_DEBUG=ON
 build.bat win-msvc Release CLEAN   # removes old cache if generator mismatch
-
-# Linux/macOS
 ./build.sh linux-gcc Release -DNO_GUI=ON   # falls back to linux-gcc-make if Ninja not installed
 ```
 
@@ -117,19 +124,20 @@ build.bat win-msvc Debug -DNO_GUI=ON
 
 ## Dependency management options
 
-### Option A (recommended): vcpkg manifest mode (auto)
+### vcpkg manifest mode
 
-This repo supports vcpkg manifest mode. If a `vcpkg.json` file is present, the helper scripts will automatically enable vcpkg when `VCPKG_ROOT` is available. On Linux/macOS the script attempts to bootstrap a local vcpkg checkout under `.vcpkg` if `VCPKG_ROOT` is not set.
+This repo supports vcpkg manifest mode. The helper scripts can integrate vcpkg when a `vcpkg.json` is present.
 
-- Set `DISABLE_VCPKG=1` to opt-out.
-- Set `VCPKG_ROOT` to your vcpkg path to use a shared install. Otherwise the script will try `.vcpkg` (Linux/macOS).
-- Pick any normal preset (e.g., `linux-gcc`); the script will switch to the corresponding `*-vcpkg` preset.
+- Windows (`build.bat`): vcpkg is opt-in. Set `USE_VCPKG=1` (and `VCPKG_ROOT` if needed) to enable. By default the script uses system/explicit dependencies and keeps the binary directory under the original preset name (e.g., `win-msvc`).
+- Linux/macOS (`build.sh`): vcpkg is auto-enabled when available unless `DISABLE_VCPKG=1` is set. The preset name is kept unchanged; the toolchain is injected via `-DCMAKE_TOOLCHAIN_FILE`.
+- You may point `VCPKG_ROOT` to a shared install, or let the script bootstrap a local checkout under `.vcpkg` (Linux/macOS).
 
 Examples:
 
 ```
-# Windows (shared vcpkg)
+# Windows (shared vcpkg, explicit opt-in)
 set VCPKG_ROOT=C:\vcpkg
+set USE_VCPKG=1
 build.bat win-msvc Release
 
 # Linux/macOS (auto-bootstrap local vcpkg under .vcpkg if missing)
@@ -258,3 +266,18 @@ out/build/<preset>/<config>/
 Windows executable: `rasta.exe`
 
 Linux/macOS executable: `rasta`
+
+## Runtime deployment and assets
+
+- On Windows, the build copies only the primary runtime DLLs by default: `SDL2.dll`, `SDL2_ttf.dll`, and `FreeImage.dll`, along with the executable `rasta.exe`.
+- To copy all dependency DLLs resolved by the linker (for example when using vcpkg and you want a self-contained folder), pass:
+
+```
+-DCOPY_ALL_RUNTIME_DLLS=ON
+```
+
+- Assets copied to the output directory:
+  - `assets/clacon2.ttf` (GUI builds)
+  - `Palettes/` directory
+  - `Generator/` directory
+  - `help.txt`

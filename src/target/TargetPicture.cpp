@@ -80,3 +80,5 @@ unsigned char FindAtariColorIndex(const rgb &col)
 	}
 	return most_similar;
 }
+
+

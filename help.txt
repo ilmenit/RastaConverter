@@ -87,17 +87,17 @@ Enable:
     - anti:  Like random, but pushes B further from A initially
 
 Flicker control:
-  /flicker_luma=0..1     How much luma flicker you accept (0=no, 1=full)
-  /flicker_chroma=0..1   How much chroma flicker you accept (0=no, 1=full)
-  WHY: Perceived flicker from luma is stronger than from chroma, so they are separate. Start with luma≈0.4, chroma≈0.6.
+  /flicker_luma=0..1     How much luma flicker you accept (0=no, 1=full) (default 1)
+  /flicker_chroma=0..1   How much chroma flicker you accept (0=no, 1=full) (default 1)
+  WHY: Perceived flicker from luma is stronger than from chroma, so they are separate. Defaults accept full flicker; lower these if flicker is too visible.
 
 Search behavior:
-  The optimizer alternates updates between frames A and B by default. Initialization duplicates A to B.
+  By default, the optimizer uses staged scheduling between frames. Initialization duplicates A to B.
   /dual_mutate_ratio=0.5                (default 0.5; chance to mutate B vs A)
-  /dual_strategy=alternate|staged       (default alternate)
+  /dual_strategy=alternate|staged       (default staged)
     - alternate: choose A/B each step using /dual_mutate_ratio
     - staged: focus a block of iterations on one frame, then switch
-      /dual_stage_evals=N               (default 5000 per block)
+      /dual_stage_evals=N               (default 100000 per block)
       /dual_stage_start=A|B             (default A)
   /dual_cross_share_prob=F              (optional; default 0.05)
      Occasionally copy/swap a line between A and B to share structure.
@@ -215,11 +215,9 @@ Handy presets
 - High quality (single-frame):
   /threads=8 /distance=ciede /init=smart /s=7 /save=auto
 
-- Dual balanced (dual-frame):
-  /dual=on \
-  /flicker_luma=0.4 /flicker_chroma=0.6 \
-  /dual_mutate_ratio=0.5
+- Dual staged (recommended):
+  /dual=on /dual_strategy=staged /dual_stage_evalus=100000 --flicker_luma=1 --flicker_chroma=1
 
 - Dual flicker-minimized:
-  Same as above, but /flicker_luma=0.2 /flicker_chroma=0.4
+  /dual=on /dual_strategy=staged /dual_stage_evalus=100000 /flicker_luma=0.2 /flicker_chroma=0.4
 

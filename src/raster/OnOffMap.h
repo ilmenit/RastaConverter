@@ -1,7 +1,7 @@
 #ifndef ONOFFMAP_H
 #define ONOFFMAP_H
 
-#include "raster/Program.h"
+#include "Program.h"
 
 /**
  * Structure to store which registers are enabled for each scanline
@@ -12,3 +12,5 @@ struct OnOffMap
 };
 
 #endif // ONOFFMAP_H
+
+

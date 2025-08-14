@@ -19,8 +19,8 @@
 #include "../cache/LineCache.h"
 #include "../cache/InsnSequenceCache.h"
 #include "../utils/LinearAllocator.h"
-#include "../OnOffMap.h"
-#include "../config.h"
+#include "../raster/OnOffMap.h"
+#include "../config/config.h"
 
 // Forward declarations
 class Executor;
@@ -214,8 +214,8 @@ public:
     e_distance_function m_blend_distance = E_DISTANCE_YUV;
     double m_blend_gamma = 2.2;
     double m_blend_gamma_inv = 1.0 / 2.2;
-    double m_flicker_luma_weight = 1.0;
-    double m_flicker_chroma_weight = 0.2;
+    double m_flicker_luma_weight = 0.0;
+    double m_flicker_chroma_weight = 0.0;
     e_dual_strategy m_dual_strategy = E_DUAL_STRAT_ALTERNATE;
     e_dual_init m_dual_init = E_DUAL_INIT_DUP;
     double m_dual_mutate_ratio = 0.5;

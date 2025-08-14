@@ -1,10 +1,11 @@
 #include "RasterMutator.h"
 #include "../optimization/EvaluationContext.h"
-#include "../TargetPicture.h"
+#include "../target/TargetPicture.h"
 #include <algorithm>
 #include <iostream>
 #include <assert.h>
 #include <cmath>
+#include "../utils/RandomUtils.h"
 
 // Define mutation names array for display
 const char* mutation_names[E_MUTATION_MAX] = {
@@ -53,15 +54,9 @@ int RasterMutator::Random(int range)
 {
     if (range <= 0)
         return 0;
-
-    // XorShift algorithm - faster than MT19937
-    m_randseed ^= m_randseed << 13;
-    m_randseed ^= m_randseed >> 17;
-    m_randseed ^= m_randseed << 5;
-
-    // Use rejection sampling for unbiased distribution
-    uint32_t scaled = (uint32_t)(m_randseed & 0x7FFFFFFF) % range;
-    return (int)scaled;
+    // Preserve legacy randomness characteristics used across the codebase
+    // to avoid behavioral regressions in the search dynamics.
+    return ::random(range);
 }
 
 int RasterMutator::SelectMutation()

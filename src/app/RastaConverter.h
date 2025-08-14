@@ -1,13 +1,13 @@
 #ifndef RASTA_CONVERTER_H
 #define RASTA_CONVERTER_H
 
-#include "config.h"
+#include "config/config.h"
 #include "io/ImageProcessor.h"
 #include "raster/RasterProgramGenerator.h"
 #include "optimization/OptimizationController.h"
 #include "io/OutputManager.h"
 #include "FreeImage.h"
-#include "OnOffMap.h"
+#include "raster/OnOffMap.h"
 
 #ifdef NO_GUI
 #include "ui/RastaConsole.h"
