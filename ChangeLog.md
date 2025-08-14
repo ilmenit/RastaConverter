@@ -1,6 +1,7 @@
 ChangeLog
 =========
 
+RastaConverterBeta13      2025-08-14 [AI RELEASE]
 * Significant code refactoring for easier project maintanance
 * New cross-platform build system
 * Returning LAHC algorithm as it provides better results than DLAS in very long runs
