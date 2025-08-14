@@ -278,6 +278,8 @@ void ImageProcessor::PrepareDestinationPicture()
         std::lock_guard<std::mutex> lock(m_color_indexes_mutex);
         m_color_indexes_on_dst_picture.clear();
     }
+    // Reset row progress flags for progressive preview
+    ResetRowProgress();
 
     // Process the image based on dithering method
     if (m_config.dither != E_DITHER_NONE)
@@ -307,6 +309,7 @@ void ImageProcessor::PrepareDestinationPicture()
                 RGBQUAD color = RGB2PIXEL(out_pixel);
                 FreeImage_SetPixelColor(m_destination_bitmap, x, y, &color);
             }
+            if (!m_row_done.empty()) m_row_done[y] = 1; // progressive preview
         }
     }
 
@@ -446,6 +449,7 @@ void ImageProcessor::OtherDithering()
             RGBQUAD color = RGB2PIXEL(out_pixel);
             FreeImage_SetPixelColor(m_destination_bitmap, x, y, &color);
         }
+        if (!m_row_done.empty()) m_row_done[y] = 1; // progressive preview
     }
 }
 
@@ -575,6 +579,8 @@ void ImageProcessor::KnollDitheringParallel(int from, int to)
             p[1] = out_pixel.g;
             p[2] = out_pixel.r;
         }
+        // mark row done for progressive UI
+        if (!m_row_done.empty()) m_row_done[y] = 1;
     }
 }
 

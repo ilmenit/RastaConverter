@@ -218,8 +218,12 @@ private:
     std::vector<line_target> m_created_picture_targets;
     // Dual-frame: snapshot of the other frame's created picture for pair-aware selection
     std::vector<unsigned char> m_dual_other_pixels; // size width*height when used
+    // Dual-frame: per-line pointer view into other frame rows for this evaluation (no copy)
+    std::vector<const unsigned char*> m_dual_other_rows; // size = height when used
     // Dual-frame: transient per-line results pointing into m_created_picture memory
     std::vector<line_cache_result> m_dual_transient_results;
+    // Dual-frame: pointer to current other frame row during rendering (set per Y)
+    const unsigned char* m_dual_other_row_ptr = nullptr;
     
     // Parameters
     unsigned m_width;
@@ -251,6 +255,8 @@ private:
     // Dual-frame: generation counters snapshot for early exit decisions
     unsigned long long m_dual_gen_other_snapshot = 0ULL;
     unsigned long long m_dual_last_other_generation = 0ULL;
+    // Dual-frame: hash of the last 'other' frame used for dual-aware caching
+    unsigned long long m_dual_last_other_hash = 0ULL;
     // Fast-access pointers to context pair tables for this call (if available)
     const float* m_pair_Ysum = nullptr;
     const float* m_pair_Usum = nullptr;

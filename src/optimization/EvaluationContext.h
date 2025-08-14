@@ -153,6 +153,12 @@ public:
     std::vector<color_index_line> m_created_picture_B; // dual mode
     std::vector<line_target> m_created_picture_targets_B; // dual mode
 
+    // Last evaluated A/B snapshots (per-iteration, not only on best-improvement)
+    // Used by dual-mode mutations to select complementary values against the
+    // most recent opposite frame rather than the stale global best.
+    std::vector<color_index_line> m_snapshot_picture_A; // latest A color rows
+    std::vector<color_index_line> m_snapshot_picture_B; // latest B color rows
+
     // Mutation statistics
     int m_mutation_stats[E_MUTATION_MAX] = { 0 };
 
@@ -209,11 +215,7 @@ public:
     double m_blend_gamma = 2.2;
     double m_blend_gamma_inv = 1.0 / 2.2;
     double m_flicker_luma_weight = 1.0;
-    double m_flicker_luma_thresh = 3.0;
-    int    m_flicker_exp_luma = 2;
     double m_flicker_chroma_weight = 0.2;
-    double m_flicker_chroma_thresh = 8.0;
-    int    m_flicker_exp_chroma = 2;
     e_dual_strategy m_dual_strategy = E_DUAL_STRAT_ALTERNATE;
     e_dual_init m_dual_init = E_DUAL_INIT_DUP;
     double m_dual_mutate_ratio = 0.5;
@@ -223,6 +225,9 @@ public:
     // Staged dual params
     unsigned long long m_dual_stage_evals = 5000; // per-thread iterations per stage
     bool m_dual_stage_start_B = false;            // start focusing B first
+    // Global staged state shared by all threads
+    std::atomic<unsigned long long> m_dual_stage_counter{0};
+    std::atomic<bool> m_dual_stage_focus_B{false};
 
     // Flicker weight ramp
     unsigned long long m_blink_ramp_evals = 0; // 0 disables ramp

@@ -34,6 +34,29 @@ DualEvalResult CoreEvaluator::evaluateDual(Executor& exec, raster_picture& picA,
     // The dual-aware executor accumulates the blended base + flicker cost. Use it directly.
     out.cost = (double)cost_accum;
 
+    // Publish fresh A/B line results into context snapshots for better complementary picks
+    if (m_ctx->m_dual_mode) {
+        const unsigned W = m_ctx->m_width;
+        const unsigned H = m_ctx->m_height;
+        if (m_ctx->m_snapshot_picture_A.size() != H) m_ctx->m_snapshot_picture_A.resize(H);
+        if (m_ctx->m_snapshot_picture_B.size() != H) m_ctx->m_snapshot_picture_B.resize(H);
+        // Only copy pointers' rows that actually changed to avoid extra work
+        for (unsigned y = 0; y < H; ++y) {
+            const line_cache_result* lA = out.lineResultsA[y];
+            if (lA) {
+                auto &rowA = m_ctx->m_snapshot_picture_A[y];
+                if (rowA.size() != W) rowA.resize(W);
+                memcpy(rowA.data(), lA->color_row, W);
+            }
+            const line_cache_result* lB = out.lineResultsB[y];
+            if (lB) {
+                auto &rowB = m_ctx->m_snapshot_picture_B[y];
+                if (rowB.size() != W) rowB.resize(W);
+                memcpy(rowB.data(), lB->color_row, W);
+            }
+        }
+    }
+
     // Maintain flicker heatmap (luma delta per pixel) for UI/save, cheap path using pair tables
     const unsigned W = m_ctx->m_width;
     const unsigned H = m_ctx->m_height;

@@ -118,12 +118,8 @@ struct Configuration {
     e_distance_function blend_distance = E_DISTANCE_YUV; // /blend_distance=
     double blend_gamma = 2.2;                   // /blend_gamma= (rgb-linear)
 
-    double flicker_luma_weight = 1.0;           // /flicker_luma_weight=
-    double flicker_luma_thresh = 3.0;           // /flicker_luma_thresh=
-    int    flicker_exp_luma = 2;                // /flicker_exp_luma=
-    double flicker_chroma_weight = 0.2;         // /flicker_chroma_weight=
-    double flicker_chroma_thresh = 8.0;         // /flicker_chroma_thresh=
-    int    flicker_exp_chroma = 2;              // /flicker_exp_chroma=
+    double flicker_luma_weight = 1.0;           // controlled by /flicker_luma (0..1 acceptance)
+    double flicker_chroma_weight = 0.2;         // controlled by /flicker_chroma (0..1 acceptance)
 
     e_dual_strategy dual_strategy = E_DUAL_STRAT_ALTERNATE; // /dual_strategy=
     e_dual_init dual_init = E_DUAL_INIT_DUP;                // /dual_init=

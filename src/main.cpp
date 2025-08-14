@@ -109,18 +109,17 @@ Image processing:
 
 Dual-frame mode (A/B frame optimization):
   --dual [on|off]             Enable dual-frame mode (default: off). Bare --dual enables it.
-  --flicker_luma_weight <F>   Luma flicker weight (default: 1.0)
-  --flicker_luma_thresh <F>   Luma flicker threshold (default: 3)
-  --flicker_exp_luma <INT>    Luma exponent (default: 2)
-  --flicker_chroma_weight <F> Chroma flicker weight (default: 0.2)
-  --flicker_chroma_thresh <F> Chroma flicker threshold (default: 8)
-  --flicker_exp_chroma <INT>  Chroma exponent (default: 2)
+  --dual_init <dup|random|anti>
+                              Initial relation of frames (default: dup)
+  --flicker_luma <0..1>       How much luma flicker you accept (0=no, 1=full)
+  --flicker_chroma <0..1>     How much chroma flicker you accept (0=no, 1=full)
   --dual_mutate_ratio <0..1>
                               Chance to mutate B vs A (default: 0.5)
   --dual_strategy <alternate|staged>
                               Mutation scheduling between A/B (default: alternate)
   --dual_stage_evals <N>      If staged, iterations per focus block (default: 5000)
   --dual_stage_start <A|B>    If staged, which frame to focus first (default: A)
+  --dual_cross_share_prob <F> Probability of occasional line copy/swap between frames (default: 0.05)
 
 Notes:
   - Options accept "/" or "-"/"--" prefixes. Examples: /threads=4, -threads 4, --threads 4

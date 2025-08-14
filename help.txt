@@ -81,18 +81,15 @@ Alternates two frames A/B each refresh; the eye perceives the average, increasin
 
 Enable:
   /dual[=on|off]         Enable dual-frame mode (default off). Bare /dual enables it.
+  /dual_init=dup|random|anti   Initial relation of frames (default dup)
+    - dup:   B starts as a copy of A
+    - random:B is A with random mutations applied
+    - anti:  Like random, but pushes B further from A initially
 
-Flicker control (soft hinge penalties):
-  /flicker_luma_weight=WL      (default 1.0)
-  /flicker_luma_thresh=TL      (default 3)
-  /flicker_exp_luma=PL         (default 2)
-  /flicker_chroma_weight=WC    (default 0.2)
-  /flicker_chroma_thresh=TC    (default 8)
-  /flicker_exp_chroma=PC       (default 2)
-  WHAT: Penalize A↔B differences to reduce flicker, stronger for luminance (Y) than for chroma (U/V).
-  WHY: Human vision is more sensitive to flicker from brightness than from color.
-  HOW: For each pixel, penalties grow smoothly once difference exceeds the threshold TL/TC; exponents (PL/PC) control slope (2=quadratic is smooth and stable).
-  UNITS: Y is on roughly 0..255 scale; U/V magnitudes are smaller (scales derived from the YUV transform used in code).
+Flicker control:
+  /flicker_luma=0..1     How much luma flicker you accept (0=no, 1=full)
+  /flicker_chroma=0..1   How much chroma flicker you accept (0=no, 1=full)
+  WHY: Perceived flicker from luma is stronger than from chroma, so they are separate. Start with luma≈0.4, chroma≈0.6.
 
 Search behavior:
   The optimizer alternates updates between frames A and B by default. Initialization duplicates A to B.
@@ -102,6 +99,8 @@ Search behavior:
     - staged: focus a block of iterations on one frame, then switch
       /dual_stage_evals=N               (default 5000 per block)
       /dual_stage_start=A|B             (default A)
+  /dual_cross_share_prob=F              (optional; default 0.05)
+     Occasionally copy/swap a line between A and B to share structure.
      WHY: Balances effort between A and B; 0.5 mutates both equally often.
 
 GUI behavior in dual-frame mode:
@@ -173,7 +172,7 @@ Cache and threads (/cache, /threads):
 - Choose: /cache=16 is a good starting point per thread; increase if you observe frequent cache clears. Set /threads to the number of physical cores (or 1–2 less) to keep system responsive.
 
 Dual-frame mode: deeper dive
--------------------------------------
+--------------------------------------
 Why dual mode (/dual=on):
 - Alternating A/B frames produces a perceived average on CRTs, effectively increasing available colors beyond the 128 palette entries.
 - Flicker comes mainly from luminance differences (Y) between A and B. Human vision tolerates chroma differences better.
@@ -181,13 +180,18 @@ Why dual mode (/dual=on):
 Blend/distance:
 - YUV is used internally for blending and distance for performance and perceptual alignment.
 
-Flicker penalties (/flicker_*):
-- Why: Hard thresholds stall exploration. Hinge penalties (max(0, Δ−T)^p) keep the landscape smooth so “bad” regions can improve while still discouraging flicker.
-- Choose: Start with WL=1.0, TL=3; WC=0.2, TC=8; exponents=2. Increase WL or lower TL to suppress flicker harder; increase TC or lower WC to allow more chroma variance. Consider relaxing penalties in very detailed regions (masked by motion and texture).
+  Flicker control:
+  - Use /flicker_luma and /flicker_chroma (0..1 acceptance). Higher means you tolerate more flicker.
+  - Internally, flicker uses soft hinge penalties max(0, Δ−T)^p with fixed thresholds and exponents.
 
-Mutation strategy (dual internal alternating updates, /dual_mutate_ratio):
-- Why: Coordinated evolution prevents one frame from diverging too far from the other while still creating color diversity.
-- Choose: alternate updates internally with /dual_mutate_ratio≈0.5 to balance A and B updates. B is initialized from A for stability.
+Mutation scheduling (/dual_strategy):
+- alternate: choose which frame to mutate each step using /dual_mutate_ratio (e.g., 0.5 for balanced A/B).
+- staged: focus many iterations on one frame, then switch (configure with /dual_stage_evals, /dual_stage_start). This can reduce horizontal banding by letting one frame settle before compensating with the other.
+
+Initialization of B (/dual_init):
+- dup: B starts as a copy of A (stable baseline).
+- random: B diverges slightly from A via random mutations.
+- anti: stronger initial divergence than random.
 
 Performance tips
 ----------------
@@ -198,7 +202,7 @@ Performance tips
 
 Troubleshooting
 ---------------
-- Flicker too visible: Increase /flicker_luma_weight or decrease /flicker_luma_thresh; optionally increase /flicker_chroma_weight modestly. Inspect OUT-flicker.png to locate problem areas.
+- Flicker too visible: Lower /flicker_luma (accept less luma flicker) and/or lower /flicker_chroma. Inspect OUT-flicker.png to locate problem areas.
 - Colors look washed out: Try another palette (/pal) or use /distance=ciede (slower). Increase /dither_val ≈ 1.5–2.0.
 - Progress stalls early: Try a different /init (smart or less), or switch optimizer to LAHC for a long run.
 - UI prints too many logs: make sure you did not enable UI_DEBUG/THREAD_DEBUG in your CMake options; otherwise rebuild without these flags.
@@ -213,9 +217,9 @@ Handy presets
 
 - Dual balanced (dual-frame):
   /dual=on \
-  /flicker_luma_weight=1.0 /flicker_luma_thresh=3 /flicker_chroma_weight=0.2 /flicker_chroma_thresh=8 \
+  /flicker_luma=0.4 /flicker_chroma=0.6 \
   /dual_mutate_ratio=0.5
 
 - Dual flicker-minimized:
-  Same as above, but /flicker_luma_weight=1.3 /flicker_luma_thresh=2.5
+  Same as above, but /flicker_luma=0.2 /flicker_chroma=0.4
 

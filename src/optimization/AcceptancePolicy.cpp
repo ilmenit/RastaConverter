@@ -79,6 +79,25 @@ void DLASPolicy::postIterationUpdate(EvaluationContext& ctx) {
     ctx.m_N = m_N;
 }
 
+void DLASPolicy::onStageSwitch(double currentCost, EvaluationContext& ctx, bool /*focusB*/) {
+    // Full reseed: evaluate gives currentCost; raise costMax slightly and set entire history to costMax
+    const double margin = std::max(5.0, currentCost * 0.02); // 2% or 5 absolute units
+    m_currentCost = currentCost;
+    m_costMax = currentCost + margin;
+    if (!m_history.empty()) {
+        std::fill(m_history.begin(), m_history.end(), m_costMax);
+        m_N = (int)m_history.size();
+    } else {
+        m_N = 0;
+    }
+    // Mirror to context for UI/state
+    ctx.m_current_cost = m_currentCost;
+    ctx.m_cost_max = m_costMax;
+    ctx.m_previous_results.assign(m_history.begin(), m_history.end());
+    ctx.m_previous_results_index = 0;
+    ctx.m_N = (int)m_history.size();
+}
+
 // --- LAHCPolicy implementation ---
 
 void LAHCPolicy::init(EvaluationContext& /*ctx*/) {
@@ -126,6 +145,27 @@ void LAHCPolicy::postIterationUpdate(EvaluationContext& ctx) {
         ctx.m_N = (int)std::count(m_history.begin(), m_history.end(), ctx.m_cost_max);
     }
     ++m_index;
+}
+
+void LAHCPolicy::onStageSwitch(double currentCost, EvaluationContext& ctx, bool /*focusB*/) {
+    // Full reseed: set entire history to current evaluated cost
+    m_currentCost = currentCost;
+    if (!m_history.empty()) {
+        std::fill(m_history.begin(), m_history.end(), m_currentCost);
+        m_index = 0;
+    }
+    // Mirror into context
+    ctx.m_current_cost = m_currentCost;
+    ctx.m_previous_results.assign(m_history.begin(), m_history.end());
+    ctx.m_previous_results_index = 0;
+    // For legacy fields, recompute cost_max and N
+    if (!m_history.empty()) {
+        ctx.m_cost_max = *std::max_element(m_history.begin(), m_history.end());
+        ctx.m_N = (int)std::count(m_history.begin(), m_history.end(), ctx.m_cost_max);
+    } else {
+        ctx.m_cost_max = m_currentCost;
+        ctx.m_N = 0;
+    }
 }
 
 

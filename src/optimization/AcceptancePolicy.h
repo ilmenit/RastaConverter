@@ -25,6 +25,10 @@ public:
 
     // Optional callback invoked once per iteration to update history ring, etc.
     virtual void postIterationUpdate(EvaluationContext& /*ctx*/) {}
+
+    // Optional callback: invoked when staged dual-mode flips focus A<->B
+    // Default no-op; policies may relax history to allow uphill moves after switch
+    virtual void onStageSwitch(double /*currentCost*/, EvaluationContext& /*ctx*/, bool /*focusB*/) {}
 };
 
 // Dynamic Late Acceptance Search policy mirroring legacy DLAS logic
@@ -36,6 +40,7 @@ public:
     bool accept(double previousCost, double candidateCost, EvaluationContext& ctx) override;
     void onAccepted(double candidateCost, EvaluationContext& ctx) override;
     void postIterationUpdate(EvaluationContext& ctx) override;
+    void onStageSwitch(double currentCost, EvaluationContext& ctx, bool focusB) override;
 
 private:
     // DLAS state
@@ -55,6 +60,7 @@ public:
     bool accept(double previousCost, double candidateCost, EvaluationContext& ctx) override;
     void onAccepted(double candidateCost, EvaluationContext& ctx) override;
     void postIterationUpdate(EvaluationContext& ctx) override;
+    void onStageSwitch(double currentCost, EvaluationContext& ctx, bool focusB) override;
 
 private:
     int m_historyLength;

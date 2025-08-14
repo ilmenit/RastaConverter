@@ -313,23 +313,31 @@ void Configuration::Process(int argc, char *argv[])
             blend_gamma = 4.0;
         }
 
-        // flicker weights/thresholds/exponents (accept blink_* as aliases)
-        auto getF = [this](const char* key, const char* keyAlias, const char* def) {
-            std::string v = parser.getValue(key, "");
-            if (v.empty()) v = parser.getValue(keyAlias, def);
-            return String2Value<double>(v);
-        };
-        auto getI = [this](const char* key, const char* keyAlias, const char* def) {
-            std::string v = parser.getValue(key, "");
-            if (v.empty()) v = parser.getValue(keyAlias, def);
-            return String2Value<int>(v);
-        };
-        flicker_luma_weight  = getF("flicker_luma_weight",  "blink_luma_weight",  "1.0");
-        flicker_luma_thresh  = getF("flicker_luma_thresh",  "blink_luma_thresh",  "3");
-        flicker_exp_luma     = getI("flicker_exp_luma",     "blink_exp_luma",     "2");
-        flicker_chroma_weight= getF("flicker_chroma_weight","blink_chroma_weight","0.2");
-        flicker_chroma_thresh= getF("flicker_chroma_thresh","blink_chroma_thresh","8");
-        flicker_exp_chroma   = getI("flicker_exp_chroma",   "blink_exp_chroma",   "2");
+        // Simplified flicker controls only: luma/chroma acceptance 0..1
+
+        // Simplified tolerances (0..1): how much flicker is accepted.
+        // 0 -> keep default penalty; 1 -> no penalty. These override weights if provided.
+        {
+            std::string luma_tol = parser.getValue("flicker_luma", "");
+            if (luma_tol.empty()) luma_tol = parser.getValue("blink_luma", "");
+            if (!luma_tol.empty()) {
+                double acc = String2Value<double>(luma_tol);
+                if (acc > 1.0) acc *= 0.01; // accept percentages like 60
+                if (acc < 0.0) acc = 0.0; else if (acc > 1.0) acc = 1.0;
+                const double default_wl = 1.0; // baseline weight
+                flicker_luma_weight = (1.0 - acc) * default_wl;
+            }
+
+            std::string chroma_tol = parser.getValue("flicker_chroma", "");
+            if (chroma_tol.empty()) chroma_tol = parser.getValue("blink_chroma", "");
+            if (!chroma_tol.empty()) {
+                double acc = String2Value<double>(chroma_tol);
+                if (acc > 1.0) acc *= 0.01;
+                if (acc < 0.0) acc = 0.0; else if (acc > 1.0) acc = 1.0;
+                const double default_wc = 0.2; // baseline weight
+                flicker_chroma_weight = (1.0 - acc) * default_wc;
+            }
+        }
 
         // strategy
         {

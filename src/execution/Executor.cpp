@@ -285,9 +285,30 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
     // If dual-aware role is requested, prepare a flat other-frame pixel buffer and parameters
     m_dual_render_role = dual_role;
     if (m_dual_render_role != DUAL_NONE && other_results != nullptr && m_gstate && m_gstate->m_dual_mode) {
-        m_dual_other_pixels.assign((size_t)m_width * (size_t)m_height, 0);
+        // Build a lightweight rolling hash of the 'other' frame rows to decide cache reuse
+        unsigned long long other_hash = 1469598103934665603ull; // FNV-1a offset
+        for (int yy = 0; yy < (int)m_height; ++yy) {
+            const line_cache_result* lr = ((*other_results)[yy]);
+            if (lr && lr->color_row) {
+                // Mix first and last 8 bytes only to avoid scanning entire width
+                const unsigned char* row = lr->color_row;
+                const int W = (int)m_width;
+                int sample = (W >= 8) ? 8 : W;
+                for (int i = 0; i < sample; ++i) { other_hash ^= row[i]; other_hash *= 1099511628211ull; }
+                for (int i = W - sample; i < W; ++i) { if (i >= 0) { other_hash ^= row[i]; other_hash *= 1099511628211ull; } }
+            } else {
+                other_hash ^= 0xFF; other_hash *= 1099511628211ull;
+            }
+        }
+        if (other_hash != m_dual_last_other_hash) {
+            for (int yy = 0; yy < (int)m_height; ++yy) m_line_caches_dual[yy].clear();
+            m_dual_last_other_hash = other_hash;
+        }
+        m_dual_other_pixels.clear();
         m_dual_transient_results.clear();
         m_dual_transient_results.resize(m_height);
+        m_dual_other_rows.clear();
+        m_dual_other_rows.resize(m_height, nullptr);
         // Snapshot generation counter for the other frame (to avoid redundant copies within a call)
         m_dual_gen_other_snapshot = (m_dual_render_role == DUAL_A) ? m_gstate->m_dual_generation_B.load(std::memory_order_relaxed)
                                                                    : m_gstate->m_dual_generation_A.load(std::memory_order_relaxed);
@@ -306,12 +327,11 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         } else {
             m_pair_Ysum = m_pair_Usum = m_pair_Vsum = m_pair_dY = m_pair_dC = nullptr;
         }
+        // Use per-line row pointers directly (no copy) valid for this call
         for (int yy = 0; yy < (int)m_height; ++yy) {
             const line_cache_result* lr = ((*other_results)[yy]);
             if (lr && lr->color_row) {
-                memcpy(&m_dual_other_pixels[(size_t)yy * m_width], lr->color_row, m_width);
-            } else {
-                // leave zeros for this row (black)
+                m_dual_other_rows[yy] = lr->color_row;
             }
         }
         // Cache flicker weights/thresholds once for this call
@@ -325,13 +345,15 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         }
         m_dual_wl = wl;
         m_dual_wc = (float)m_gstate->m_flicker_chroma_weight;
-        m_dual_Tl = (float)m_gstate->m_flicker_luma_thresh;
-        m_dual_Tc = (float)m_gstate->m_flicker_chroma_thresh;
-        m_dual_pl = m_gstate->m_flicker_exp_luma;
-        m_dual_pc = m_gstate->m_flicker_exp_chroma;
+        // Fixed hinge and exponents (simplified interface)
+        m_dual_Tl = 3.0f;  // luma threshold
+        m_dual_Tc = 8.0f;  // chroma threshold
+        m_dual_pl = 2;     // luma exponent
+        m_dual_pc = 2;     // chroma exponent
     } else {
         m_dual_render_role = DUAL_NONE;
         m_dual_other_pixels.clear();
+        m_dual_other_rows.clear();
         m_dual_transient_results.clear();
         m_pair_Ysum = m_pair_Usum = m_pair_Vsum = m_pair_dY = m_pair_dC = nullptr;
     }
@@ -350,6 +372,11 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
 
         // snapshot current machine state
         raster_line& rline = pic->raster_lines[y];
+        // Dual: set fast pointer to the 'other' row for this y once per line
+        if (m_dual_render_role != DUAL_NONE && !m_dual_other_rows.empty())
+            m_dual_other_row_ptr = m_dual_other_rows[y];
+        else
+            m_dual_other_row_ptr = nullptr;
 
         line_cache_key lck;
         CaptureRegisterState(lck.entry_state);
@@ -513,9 +540,9 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
     // Common invariants for this pixel
     const unsigned idx_pix = (index >= 0) ? (unsigned)index : 0u;
     unsigned char other_idx_for_pixel = 0;
-    const bool dual_active = (m_dual_render_role != DUAL_NONE && !m_dual_other_pixels.empty() && m_gstate && m_gstate->m_dual_mode);
+    const bool dual_active = (m_dual_render_role != DUAL_NONE && m_gstate && m_gstate->m_dual_mode);
     if (dual_active) {
-        unsigned char oi = m_dual_other_pixels[idx_pix];
+        unsigned char oi = m_dual_other_row_ptr ? m_dual_other_row_ptr[x] : m_dual_other_pixels[idx_pix];
         other_idx_for_pixel = (oi < 128) ? oi : 0;
     }
     const float Ty = (dual_active ? m_gstate->m_target_y[idx_pix] : 0.0f);

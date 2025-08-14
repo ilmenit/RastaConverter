@@ -148,7 +148,7 @@ void RastaSDL::DisplayBitmap(int x, int y, FIBITMAP* fiBitmap)
 	SDL_DestroyTexture(texture);
 	SDL_FreeSurface(surface);
 
-//	SDL_RenderPresent(renderer);
+	SDL_RenderPresent(renderer);
 }
 
 void Wait(int t)

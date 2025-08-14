@@ -63,6 +63,9 @@ void OptimizationRunner::run()
                     if (lA) {
                         m_ctx->m_created_picture[y].assign(lA->color_row, lA->color_row + m_ctx->m_width);
                         m_ctx->m_created_picture_targets[y].assign(lA->target_row, lA->target_row + m_ctx->m_width);
+                        // also seed fresh snapshots on init
+                        if ((int)m_ctx->m_snapshot_picture_A.size() <= y) m_ctx->m_snapshot_picture_A.resize(m_ctx->m_height);
+                        m_ctx->m_snapshot_picture_A[y] = m_ctx->m_created_picture[y];
                     } else {
                         if (m_ctx->m_created_picture[y].empty()) {
                             m_ctx->m_created_picture[y].assign(m_ctx->m_width, 0);
@@ -72,6 +75,8 @@ void OptimizationRunner::run()
                     if (lB) {
                         m_ctx->m_created_picture_B[y].assign(lB->color_row, lB->color_row + m_ctx->m_width);
                         m_ctx->m_created_picture_targets_B[y].assign(lB->target_row, lB->target_row + m_ctx->m_width);
+                        if ((int)m_ctx->m_snapshot_picture_B.size() <= y) m_ctx->m_snapshot_picture_B.resize(m_ctx->m_height);
+                        m_ctx->m_snapshot_picture_B[y] = m_ctx->m_created_picture_B[y];
                     } else {
                         if (m_ctx->m_created_picture_B[y].empty()) {
                             m_ctx->m_created_picture_B[y].assign(m_ctx->m_width, 0);
@@ -175,10 +180,11 @@ void OptimizationRunner::worker(int threadId)
     std::vector<const line_cache_result*> lastLineResultsA(m_ctx->m_height);
     std::vector<const line_cache_result*> lastLineResultsB(m_ctx->m_height);
 
-    // Per-thread staged dual state
-    bool stage_focus_B = m_ctx->m_dual_stage_start_B;
-    unsigned long long stage_counter = 0ULL;
-    const unsigned long long stage_len = std::max(1ULL, m_ctx->m_dual_stage_evals);
+    // Initialize global staged state once per worker start
+    if (m_ctx->m_dual_strategy == E_DUAL_STRAT_STAGED && threadId == 0) {
+        m_ctx->m_dual_stage_focus_B.store(m_ctx->m_dual_stage_start_B, std::memory_order_relaxed);
+        m_ctx->m_dual_stage_counter.store(0ULL, std::memory_order_relaxed);
+    }
 
     while (m_running.load() && !m_ctx->m_finished.load()) {
         // Mutation choice
@@ -187,11 +193,21 @@ void OptimizationRunner::worker(int threadId)
         bool mutateB = false;
         if (m_ctx->m_dual_mode) {
             if (m_ctx->m_dual_strategy == E_DUAL_STRAT_STAGED) {
-                // Focus one frame for a block of iterations, then switch
-                mutateB = stage_focus_B;
-                if (++stage_counter >= stage_len) {
-                    stage_focus_B = !stage_focus_B;
-                    stage_counter = 0ULL;
+                // Global staged focus to keep all threads coordinated
+                bool focusB = m_ctx->m_dual_stage_focus_B.load(std::memory_order_relaxed);
+                mutateB = focusB;
+                unsigned long long cnt = m_ctx->m_dual_stage_counter.fetch_add(1ULL, std::memory_order_relaxed) + 1ULL;
+                const unsigned long long stage_len = std::max(1ULL, m_ctx->m_dual_stage_evals);
+                if (cnt >= stage_len) {
+                    m_ctx->m_dual_stage_counter.store(0ULL, std::memory_order_relaxed);
+                    bool nextFocusB = !focusB;
+                    m_ctx->m_dual_stage_focus_B.store(nextFocusB, std::memory_order_relaxed);
+                    // Notify acceptance policy of stage switch to relax history
+                    // Guard policy state with context mutex as other policy methods run under this lock
+                    {
+                        std::unique_lock<std::mutex> lock(m_ctx->m_mutex);
+                        m_policy->onStageSwitch(currentCost, *m_ctx, nextFocusB);
+                    }
                 }
             } else {
                 int r = exec.Random(1000);

@@ -69,7 +69,6 @@ if %SHIFT_TWICE% EQU 1 shift
 goto :parse_args
 :args_done
 
-set BINARY_DIR=out\build\%PRESET%
 
 REM Detect single-config generators to pass CMAKE_BUILD_TYPE
 REM Criteria: preset contains "-make" or is MinGW Makefiles presets
@@ -103,6 +102,9 @@ if exist vcpkg.json (
     echo vcpkg manifest detected but VCPKG_ROOT not available; proceeding without vcpkg.
   )
 )
+
+REM Recompute binary dir after any preset auto-switching above
+set BINARY_DIR=out\build\%PRESET%
 
 if %SINGLE_CONFIG_GEN% EQU 1 (
   set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_BUILD_TYPE=%CONFIG%"

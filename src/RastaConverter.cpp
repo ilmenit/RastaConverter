@@ -11,7 +11,9 @@
 #include <vector>
 #include <climits>
 #include <cmath>
+#include <atomic>
 #include "optimization/EvaluationContext.h"
+#include "mutation/RasterMutator.h"
 
 // External const array for mutation names
 extern const char* mutation_names[E_MUTATION_MAX];
@@ -90,7 +92,52 @@ bool RastaConverter::ProcessInit()
     SetDistanceFunction(cfg.pre_dstf);
     
     // Prepare destination picture (apply dithering and transformations)
-    m_imageProcessor.PrepareDestinationPicture();
+    // In GUI mode, run asynchronously to avoid freezing the window event loop.
+    if (!cfg.quiet)
+    {
+        // Enable progressive preview of destination rows during preprocessing
+        m_imageProcessor.ResetRowProgress();
+        std::atomic<bool> preprocess_done{false};
+        std::exception_ptr preprocess_exc;
+        std::thread prep_thread([this, &preprocess_done, &preprocess_exc]() {
+            try {
+                this->m_imageProcessor.PrepareDestinationPicture();
+            } catch (...) {
+                preprocess_exc = std::current_exception();
+            }
+            preprocess_done.store(true, std::memory_order_release);
+        });
+
+        // Pump UI events while preprocessing runs
+        while (!preprocess_done.load(std::memory_order_acquire))
+        {
+            // draw a small status note under source to show activity
+            gui.DisplayText(0, (int)FreeImage_GetHeight(m_imageProcessor.GetInputBitmap()) + 30, "Preprocessing... (dither)   ");
+            // Progressive destination preview: show any rows marked as done
+            // Only in non-dual mode we display the destination pane
+            if (!cfg.dual_mode) {
+                const int H = m_imageProcessor.GetHeight();
+                for (int y = 0; y < H; ++y) {
+                    if (m_imageProcessor.IsRowDone(y)) {
+                        ShowDestinationLine(y);
+                    }
+                }
+            }
+            (void)gui.NextFrame();
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+        prep_thread.join();
+        if (preprocess_exc) {
+            try { std::rethrow_exception(preprocess_exc); } catch (const std::exception& ex) { Error(ex.what()); } catch (...) { Error("Preprocess failed"); }
+        }
+        // Clear the preprocessing status line and present
+        gui.DisplayText(0, (int)FreeImage_GetHeight(m_imageProcessor.GetInputBitmap()) + 30, std::string(200, ' '));
+        gui.DisplayBitmap(0, 0, m_imageProcessor.GetInputBitmap());
+    }
+    else
+    {
+        m_imageProcessor.PrepareDestinationPicture();
+    }
     
     // Save the preprocessed image
     m_outputManager.Initialize(cfg.output_file, m_imageProcessor.GetWidth(), m_imageProcessor.GetHeight());
@@ -154,11 +201,7 @@ bool RastaConverter::ProcessInit()
         ctx.m_blend_distance = E_DISTANCE_YUV;
         ctx.m_blend_gamma = cfg.blend_gamma;
         ctx.m_flicker_luma_weight = cfg.flicker_luma_weight;
-        ctx.m_flicker_luma_thresh = cfg.flicker_luma_thresh;
-        ctx.m_flicker_exp_luma = cfg.flicker_exp_luma;
         ctx.m_flicker_chroma_weight = cfg.flicker_chroma_weight;
-        ctx.m_flicker_chroma_thresh = cfg.flicker_chroma_thresh;
-        ctx.m_flicker_exp_chroma = cfg.flicker_exp_chroma;
         // Strategy and init from config
         ctx.m_dual_strategy = cfg.dual_strategy;
         ctx.m_dual_init = cfg.dual_init;
@@ -170,11 +213,10 @@ bool RastaConverter::ProcessInit()
         // Sensible defaults for dual mode if user did not provide a ramp
         ctx.m_blink_ramp_evals = (cfg.blink_ramp_evals > 0) ? cfg.blink_ramp_evals : 250000ULL;
         ctx.m_flicker_luma_weight_initial = cfg.flicker_luma_weight_initial > 0.0 ? cfg.flicker_luma_weight_initial : 0.6;
+        // Initialize staged focus globals for all threads
+        ctx.m_dual_stage_focus_B.store(ctx.m_dual_stage_start_B, std::memory_order_relaxed);
+        ctx.m_dual_stage_counter.store(0ULL, std::memory_order_relaxed);
         // Prepare YUV data if using dual mode
-        // If dual init dup, initialize B from A at start; else leave for optimizer to mutate
-        if (cfg.dual_mode && cfg.dual_init == E_DUAL_INIT_DUP) {
-            ctx.m_best_pic_B = ctx.m_best_pic; // will be cached during evaluation
-        }
         // Precompute dual transforms using source image, not destination
         const std::vector<screen_line>* dualTarget = &m_imageProcessor.GetSourcePicture();
         if (cfg.dual_mode) {
@@ -182,6 +224,7 @@ bool RastaConverter::ProcessInit()
             // sampling (e.g., in the mutator) uses the original rescaled image.
             ctx.m_picture = dualTarget->data();
             lock.unlock();
+            // Precompute transforms after setting m_picture
             m_optimizer.GetEvaluationContext().PrecomputeDualTransforms();
             lock.lock();
             // If history is still the minimal default (1), increase it for dual mode to help acceptance
@@ -242,6 +285,33 @@ void RastaConverter::Init()
                 for (int i = 0; i < 128; ++i) vec[i] = (unsigned char)(i * 2);
             }
             m_optimizer.SetInitialProgram(m, fullPalettePerLine);
+
+            // Initialize frame B according to dual_init now that A is set
+            if (cfg.dual_init == E_DUAL_INIT_DUP) {
+                auto &ctx = m_optimizer.GetEvaluationContext();
+                std::unique_lock<std::mutex> lock{ ctx.m_mutex };
+                ctx.m_best_pic_B = ctx.m_best_pic;
+            } else if (cfg.dual_init == E_DUAL_INIT_RANDOM || cfg.dual_init == E_DUAL_INIT_ANTI) {
+                auto &ctx = m_optimizer.GetEvaluationContext();
+                raster_picture tempB;
+                {
+                    std::unique_lock<std::mutex> lock{ ctx.m_mutex };
+                    tempB = ctx.m_best_pic; // copy A
+                }
+                // Apply randomized divergence to B outside of ctx lock
+                RasterMutator initMut(&ctx, /*thread_id=*/0);
+                unsigned long long seed = (unsigned long long)((cfg.continue_processing && cfg.have_resume_seed) ? cfg.resume_seed : cfg.initial_seed);
+                initMut.Init(seed ^ 0xC0FFEEULL);
+                initMut.SetDualFrameRole(true);
+                const int iterations = (cfg.dual_init == E_DUAL_INIT_ANTI) ? (m_imageProcessor.GetHeight() * 2) : (std::max)(1, m_imageProcessor.GetHeight() / 2);
+                for (int it = 0; it < iterations; ++it) {
+                    try { initMut.MutateProgram(&tempB); } catch (...) {}
+                }
+                {
+                    std::unique_lock<std::mutex> lock{ ctx.m_mutex };
+                    ctx.m_best_pic_B = tempB;
+                }
+            }
         } else {
             m_optimizer.SetInitialProgram(m, m_imageProcessor.GetPossibleColorsForEachLine());
         }
@@ -527,7 +597,7 @@ void RastaConverter::ShowDestinationLine(int y)
 {
     if (!cfg.preprocess_only && !cfg.dual_mode)
     {
-        unsigned int where_x = FreeImage_GetWidth(m_imageProcessor.GetInputBitmap());
+        unsigned int where_x = 2*FreeImage_GetWidth(m_imageProcessor.GetInputBitmap());
         gui.DisplayBitmapLine(where_x, y, y, m_imageProcessor.GetDestinationBitmap());
     }
 }
@@ -668,8 +738,25 @@ void RastaConverter::ShowMutationStats()
     }
 
     // Move general summary far to the right to free space for mutation lists
-    gui.DisplayText(summaryX, baseY + 0,  std::string("Evaluations: ") + std::to_string(evaluations));
-    gui.DisplayText(summaryX, baseY + 20, std::string("LastBest: ") + std::to_string(last_best_eval) + std::string("                "));
+	// Helper to format large integers with thousands separators for readability
+	auto format_with_commas = [](unsigned long long value) -> std::string {
+		std::string s = std::to_string(value);
+		std::string out;
+		out.reserve(s.size() + s.size() / 3);
+		int groupCount = 0;
+		for (int i = (int)s.size() - 1; i >= 0; --i) {
+			out.push_back(s[i]);
+			if (++groupCount == 3 && i != 0) {
+				out.push_back(',');
+				groupCount = 0;
+			}
+		}
+		std::reverse(out.begin(), out.end());
+		return out;
+	};
+
+	gui.DisplayText(summaryX, baseY + 0,  std::string("Evaluations: ") + format_with_commas(evaluations));
+	gui.DisplayText(summaryX, baseY + 20, std::string("LastBest: ") + format_with_commas(last_best_eval));
     gui.DisplayText(summaryX, baseY + 40, std::string("Rate: ") + std::to_string((unsigned long long)m_optimizer.GetRate()) + std::string("                "));
     {
         double norm = m_outputManager.NormalizeScore(best_result);

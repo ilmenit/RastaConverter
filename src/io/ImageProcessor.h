@@ -146,6 +146,16 @@ public:
      */
     const std::vector<std::vector<unsigned char>>& GetDetailsData() const { return m_details_data; }
     
+    // Row-progress API for progressive preview
+    void ResetRowProgress()
+    {
+        m_row_done.assign(m_height, (unsigned char)0);
+    }
+    bool IsRowDone(int y) const
+    {
+        return (y >= 0 && y < m_height && !m_row_done.empty()) ? (m_row_done[y] != 0) : false;
+    }
+    
 private:
     // Processing for Knoll dithering
     void KnollDitheringParallel(int from, int to);
@@ -180,6 +190,9 @@ private:
     
     // Possible colors
     std::vector<std::vector<unsigned char>> m_possible_colors_for_each_line;
+    
+    // Row completion flags for progressive display during preprocessing (0/1)
+    std::vector<unsigned char> m_row_done;
 };
 
 #endif // IMAGE_PROCESSOR_H
