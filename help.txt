@@ -232,14 +232,14 @@ Troubleshooting
 Handy presets
 -------------
 - Fast preview (single-frame):
-  /threads=4 /distance=yuv /init=random /save=auto
+  /threads=4 /distance=yuv /init=smart 
 
-- High quality (single-frame):
-  /threads=8 /distance=ciede /init=smart /s=7 /save=auto
+- High quality (single-frame, very long run):
+  /threads=8 /distance=ciede /init=random /optimizer=lahc /s=50000
 
-- Dual staged (recommended):
-  /dual=on /dual_strategy=staged /dual_stage_evalus=100000 --flicker_luma=1 --flicker_chroma=1
+- Dual staged (experimental):
+  /dual=on /dual_strategy=staged /dual_stage_evals=100000 --flicker_luma=1 --flicker_chroma=1
 
-- Dual flicker-minimized:
-  /dual=on /dual_strategy=staged /dual_stage_evalus=100000 /flicker_luma=0.2 /flicker_chroma=0.4
+- Dual flicker-minimized (experimental):
+  /dual=on /dual_strategy=staged /dual_stage_evals=100000 /flicker_luma=0.2 /flicker_chroma=0.4
 
