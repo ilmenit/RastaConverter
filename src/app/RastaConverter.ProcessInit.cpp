@@ -197,6 +197,8 @@ bool RastaConverter::ProcessInit()
     {
         auto& ctx = m_optimizer.GetEvaluationContext();
         std::unique_lock<std::mutex> lock{ ctx.m_mutex };
+        // Pass mutation base selection from Configuration
+        ctx.m_mutation_base = cfg.mutation_base;
         ctx.m_dual_mode = cfg.dual_mode;
         // Only YUV blend space/distance are supported in current build
         ctx.m_blend_space = E_BLEND_YUV;

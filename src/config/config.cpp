@@ -179,6 +179,13 @@ void Configuration::Process(int argc, char *argv[])
 	if (solutions<1)
 		solutions=1;
 
+    // Mutation base selection (best|current), default: best (legacy behavior)
+    {
+        std::string mutb = parser.getValue("mutation_base", "best");
+        for (auto &c : mutb) c = (char)tolower(c);
+        if (mutb == "current") mutation_base = E_MUT_BASE_CURRENT; else mutation_base = E_MUT_BASE_BEST;
+    }
+
     if (parser.switchExists("preprocess"))
 		preprocess_only=true;
 	else

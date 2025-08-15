@@ -183,6 +183,9 @@ public:
     // Regional mutation config
     bool m_use_regional_mutation = false;         // Whether to use regional mutation
 
+    // Mutation base selection (default legacy: best)
+    e_mutation_base m_mutation_base = E_MUT_BASE_BEST;
+
     // Auto-save timing
     std::chrono::time_point<std::chrono::steady_clock> m_previous_save_time;
 

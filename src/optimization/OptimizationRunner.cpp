@@ -217,9 +217,18 @@ void OptimizationRunner::worker(int threadId)
         try {
             if (m_ctx->m_dual_mode && mutateB) {
                 mutator.SetDualFrameRole(true);
+                if (m_ctx && m_ctx->m_mutation_base == E_MUT_BASE_BEST) {
+                    std::unique_lock<std::mutex> lock(m_ctx->m_mutex);
+                    candB = m_ctx->m_best_pic_B.raster_lines.empty() ? m_ctx->m_best_pic : m_ctx->m_best_pic_B;
+                }
                 mutator.MutateProgram(&candB);
             } else {
                 mutator.SetDualFrameRole(false);
+                // Honor mutation base selection: best (legacy) or current (alternative)
+                if (m_ctx && m_ctx->m_mutation_base == E_MUT_BASE_BEST) {
+                    std::unique_lock<std::mutex> lock(m_ctx->m_mutex);
+                    candA = m_ctx->m_best_pic;
+                }
                 mutator.MutateProgram(&candA);
             }
         } catch (...) {

@@ -1,6 +1,14 @@
 ChangeLog
 =========
 
+RastaConverterBeta13.1    2025-08-15 [AI RELEASE]
+Fixing regression:
+* Added /mutation_base=best|current (default: best) to control mutation baseline
+  - best: mutate from global best each step (legacy behavior)
+  - current: mutate from currently accepted solution (exploratory alternative)
+* Improved optimizer RNG to be per-thread for stable, reproducible multi-threaded runs
+* Adjusted low-color initialization to align with legacy behavior
+
 RastaConverterBeta13      2025-08-14 [AI RELEASE]
 * Significant code refactoring for easier project maintanance
 * New cross-platform build system

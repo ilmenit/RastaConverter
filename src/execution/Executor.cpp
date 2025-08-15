@@ -37,7 +37,7 @@ void Executor::Init(unsigned width, unsigned height,
                    Mutator* mutator,
                    int thread_id)
 {
-    m_randseed = randseed;
+    m_randseed = randseed ? randseed : 1ULL;
     m_width = width;
     m_height = height;
     
@@ -910,6 +910,10 @@ int Executor::Random(int range)
 {
     if (range <= 0)
         return 0;
-    // Use shared MT19937-based RNG for parity with legacy behavior
-    return ::random(range);
+    // Per-thread LFSR-like generator compatible with legacy characteristics
+    // Avoid shared global RNG to ensure thread-safety and reproducibility
+    m_randseed = (m_randseed << 32) + (((m_randseed >> 31) ^ (m_randseed >> 30)) & ((1ull << 32) - 1));
+    int v = (int)(m_randseed & 0x7fffffff);
+    if (range == 0) return 0;
+    return v % range;
 }

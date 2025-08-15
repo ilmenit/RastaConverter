@@ -30,7 +30,7 @@ class RastaExperimentRunner:
 		# Always write outputs under results_dir and enforce .png suffix in base
 		out_base = self.results_dir / f"{output_name}.png"
 
-		cmd = [str(self.rasta_exe), str(self.input_file), "/max_evals=1000000", "/quiet"]
+		cmd = [str(self.rasta_exe), str(self.input_file), "/max_evals=10000000", "/quiet"]
 
 		# Provide a default stable seed unless overridden
 		if "seed" not in params:
@@ -127,7 +127,7 @@ class RastaExperimentRunner:
 			parts.append(f"threads={params['threads']}")
 		return " ".join(parts)
 
-	def _pow2_ticks_millions(self, min_m=1/1024, max_m=1.0):
+	def _pow2_ticks_millions(self, min_m=0.001, max_m=10.0):
 		vals = []
 		v = min_m
 		while v <= max_m * 1.000001:  # tolerance
@@ -167,9 +167,9 @@ class RastaExperimentRunner:
 		# Axes formatting
 		if log_x:
 			plt.xscale('log')
-			plt.xlim(1/1024, 1.0)  # in millions
+			plt.xlim(0.001, 10.0)  # 1K to 10M evaluations
 			# Power-of-two ticks and guiding lines
-			major_x = self._pow2_ticks_millions(1/1024, 1.0)
+			major_x = self._pow2_ticks_millions(0.001, 10.0)
 			plt.xticks(major_x, [f"{x:.3f}".rstrip('0').rstrip('.') for x in major_x])
 			for x in major_x:
 				plt.axvline(x=x, color='gray', linestyle=':', alpha=0.35)
@@ -272,7 +272,7 @@ def main():
 
 		is_time = (experiment_name == "Set5_Thread_Count_Comparison")
 		x_col = "Seconds" if is_time else "Millions"
-		x_label = "Time (seconds)" if is_time else "Millions of evaluations"
+		x_label = "Time (seconds)" if is_time else "Millions of evaluations (0.001 = 1K, 10.0 = 10M)"
 		log_x = not is_time
 
 		runner.create_comparison_graph(

@@ -47,6 +47,12 @@ enum e_optimizer_type {
     E_OPT_LAHC,
 };
 
+// Mutation base selection for optimization step
+enum e_mutation_base {
+    E_MUT_BASE_BEST,     // mutate from global best every iteration (legacy behavior)
+    E_MUT_BASE_CURRENT   // mutate from currently accepted solution (new alternative)
+};
+
 // Dual-frame blend mode enums
 enum e_blend_space {
     E_BLEND_YUV,
@@ -133,6 +139,9 @@ struct Configuration {
     // Flicker ramp configuration
     unsigned long long blink_ramp_evals = 0;  // number of evals to ramp WL
     double flicker_luma_weight_initial = 1.0; // starting WL if ramp enabled
+
+    // Mutation base selection (default: best)
+    e_mutation_base mutation_base = E_MUT_BASE_BEST;
 };
 
 #endif

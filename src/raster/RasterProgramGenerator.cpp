@@ -46,13 +46,13 @@ void RasterProgramGenerator::CreateLowColorRasterPicture(raster_picture* r, cons
     // Start with an empty picture
     CreateEmptyRasterPicture(r);
     
-    // Assign colors to registers
+    // Assign colors to registers (legacy behavior: fill consecutive COLOR0.., up to available regs)
     int i = 0;
-    for (std::set<unsigned char>::iterator m = colorIndexes.begin(); 
-         m != colorIndexes.end() && i < 4; // Only use first 4 color registers
-         ++m, ++i)
+    for (std::set<unsigned char>::iterator m = colorIndexes.begin(); m != colorIndexes.end(); ++m)
     {
+        if (i >= 8) break; // cap at available color registers like old code path
         r->mem_regs_init[E_COLOR0 + i] = (*m) * 2;
+        ++i;
     }
 }
 

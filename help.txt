@@ -63,6 +63,9 @@ Common options
   /max_evals=ULL         Stop after N evaluations (default very large)
   /s=N                   DLAS/LAHC history length (default 1)
   /mutation_strategy=global|regional  (default global)
+  /mutation_base=best|current        Baseline program for each mutation (default best)
+     - best:    mutate from the global best-so-far every step (stable, legacy behavior)
+     - current: mutate from the currently accepted solution (more exploratory)
   /cache=MB              Line cache size in MB (default 16)
   /seed=random|NUMBER    Initial RNG seed (default random)
   /save=auto|N           Auto-save period: auto=time-based, or every N evals
@@ -192,6 +195,17 @@ Why Global is usually better:
 - Threads can immediately jump to improving any promising area
 - More balanced optimization across the entire image
 - Less likely to get stuck in local optima
+
+Mutation Base (/mutation_base):
+--------------------------------
+Why:
+- The baseline determines which program each mutation starts from.
+- best keeps the search anchored to the global best-so-far, yielding steady improvements and stable behavior.
+- current follows the latest accepted solution, increasing exploration but sometimes drifting.
+
+Choose:
+- Start with best (default) for consistent, legacy-like results.
+- Try current when you want the optimizer to roam more broadly; it can help on some images but may require longer runs.
 
 Dual-frame mode: deeper dive
 --------------------------------------

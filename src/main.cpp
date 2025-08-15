@@ -78,6 +78,8 @@ General options:
   --optimizer <dlas|lahc>   Optimizer algorithm (default: dlas)
   --mutation_strategy <global|regional>
                                Mutation strategy (default: global)
+  --mutation_base <best|current>
+                                Mutation baseline (default: best)
   -s <N>                      DLAS/LAHC history length (default: 1)
   --threads <N>               Number of worker threads (default: 1)
   --max_evals <N>             Stop after N evaluations (0 = unlimited)

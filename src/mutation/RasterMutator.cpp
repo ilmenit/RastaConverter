@@ -54,9 +54,11 @@ int RasterMutator::Random(int range)
 {
     if (range <= 0)
         return 0;
-    // Preserve legacy randomness characteristics used across the codebase
-    // to avoid behavioral regressions in the search dynamics.
-    return ::random(range);
+    // Thread-local LFSR-like RNG to avoid shared global state.
+    // Keep behavior close to legacy per-thread generator.
+    m_randseed = (m_randseed << 32) + (((m_randseed >> 31) ^ (m_randseed >> 30)) & ((1ull << 32) - 1));
+    int v = (int)(m_randseed & 0x7fffffff);
+    return v % range;
 }
 
 int RasterMutator::SelectMutation()
