@@ -16,6 +16,7 @@ The project supports:
 - CMake 3.21+
 - Ninja (recommended; used by presets)
 - Dependencies: FreeImage; SDL2 + SDL2_ttf for GUI builds
+- **Windows 7+ compatibility**: `win-msvc` presets are configured to run on Windows 7 and later
 
 ### Linux
 - GCC or Clang
@@ -56,6 +57,10 @@ Typical builds:
 cmake --preset win-clangcl
 cmake --build out/build/win-clangcl --config Release
 
+# Windows (MSVC - Windows 7+ compatible by default)
+cmake --preset win-msvc
+cmake --build out/build/win-msvc --config Release
+
 # Linux (GCC)
 cmake --preset linux-gcc              # Ninja Multi-Config
 cmake --build out/build/linux-gcc --config Release
@@ -83,7 +88,7 @@ Artifacts are placed in `out/build/<preset>/<config>/`.
 
 ## Quick start (helper scripts)
 
-The scripts are thin wrappers around presets and accept extra `-D` options. If run without arguments they pick sensible defaults and build a Release configuration:
+The scripts are thin wrappers around presets and accept extra `-D` options. If run without arguments they pick sensible defaults and build a Release configuration. They now include a smart fallback to vcpkg when dependencies are missing (see below):
 
 ```
 # Windows (no arguments → Visual Studio generator, Release)
@@ -102,6 +107,27 @@ build.bat win-msvc Release CLEAN   # removes old cache if generator mismatch
 ```
 
 Run without arguments to see usage and the preset list.
+
+### Smart dependency fallback (vcpkg)
+
+If the initial configure fails due to missing dependencies (FreeImage, SDL2, SDL2_ttf), the scripts will:
+
+1. Detect the failure and explain which dependencies appear to be missing.
+2. Offer an interactive prompt to retry using a local vcpkg manifest (if `vcpkg.json` is present). This bootstraps a local checkout under `.vcpkg/` (no system-wide installs), injects the toolchain, and re-runs configure.
+3. Respect your current environment: if you already have `VCPKG_ROOT` set, it will be used automatically; if you pass explicit `*_DIR` cache variables the scripts won’t switch to vcpkg unless you confirm.
+
+Non-interactive/CI controls:
+
+- `AUTO_VCPKG=1` → automatically enable the vcpkg fallback without prompting.
+- `DISABLE_VCPKG=1` → never use vcpkg; fail with guidance instead.
+- `NONINTERACTIVE=1` → disable prompts; combine with `AUTO_VCPKG` to force behavior.
+
+macOS triplets when using vcpkg:
+
+- Apple Silicon: `-DVCPKG_TARGET_TRIPLET=arm64-osx` is applied automatically.
+- Intel: `-DVCPKG_TARGET_TRIPLET=x64-osx` is applied automatically.
+
+Windows keeps the same output directory layout; the toolchain is injected without changing the preset name.
 
 ## Passing compile-time options (logging, GUI)
 
@@ -126,22 +152,28 @@ build.bat win-msvc Debug -DNO_GUI=ON
 
 ### vcpkg manifest mode
 
-This repo supports vcpkg manifest mode. The helper scripts can integrate vcpkg when a `vcpkg.json` is present.
+This repo supports vcpkg manifest mode. The helper scripts can integrate vcpkg when a `vcpkg.json` is present, and will offer it as a fallback when dependencies are missing.
 
-- Windows (`build.bat`): vcpkg is opt-in. Set `USE_VCPKG=1` (and `VCPKG_ROOT` if needed) to enable. By default the script uses system/explicit dependencies and keeps the binary directory under the original preset name (e.g., `win-msvc`).
-- Linux/macOS (`build.sh`): vcpkg is auto-enabled when available unless `DISABLE_VCPKG=1` is set. The preset name is kept unchanged; the toolchain is injected via `-DCMAKE_TOOLCHAIN_FILE`.
+- Windows (`build.bat`): first tries your system/explicit dependencies. On failure it prompts to use vcpkg and injects the toolchain (keeping the same preset and binary dir). Set `AUTO_VCPKG=1` to skip the prompt; set `DISABLE_VCPKG=1` to never use vcpkg.
+- Linux/macOS (`build.sh`): same smart fallback behavior. If `VCPKG_ROOT` is already set to a valid install, it will be used automatically. You can still pass `DISABLE_VCPKG=1` to avoid vcpkg.
 - You may point `VCPKG_ROOT` to a shared install, or let the script bootstrap a local checkout under `.vcpkg` (Linux/macOS).
 
 Examples:
 
 ```
-# Windows (shared vcpkg, explicit opt-in)
+# Windows (shared vcpkg or local fallback)
 set VCPKG_ROOT=C:\vcpkg
-set USE_VCPKG=1
+build.bat win-msvc Release
+
+# Windows (auto fallback to local vcpkg without prompt)
+set AUTO_VCPKG=1
 build.bat win-msvc Release
 
 # Linux/macOS (auto-bootstrap local vcpkg under .vcpkg if missing)
 ./build.sh linux-gcc Release
+
+# Linux/macOS (disable vcpkg entirely)
+DISABLE_VCPKG=1 ./build.sh linux-gcc Release
 ```
 
 ### Option B: System packages
@@ -241,19 +273,32 @@ Use these to squeeze more performance when acceptable for your use-case:
 
 ## Troubleshooting
 
-- List presets:
+- List presets (CMake 3.21+):
   ```
   cmake --list-presets
   ```
+- Older CMake (3.19–3.20): the scripts automatically fall back to classic `-S/-B` configure without presets.
 - CMake can’t find libraries:
-  - Prefer vcpkg presets (set `VCPKG_ROOT`)
-  - Or provide `FREEIMAGE_DIR`, `SDL2_DIR`, `SDL2_TTF_DIR`
-  - Or install system dev packages (see above) and ensure `pkg-config` is installed
+  - Accept the vcpkg fallback when prompted (recommended), or pre-set `AUTO_VCPKG=1`.
+  - Or provide `FREEIMAGE_DIR`, `SDL2_DIR`, `SDL2_TTF_DIR` for your local installs.
+  - Or install system dev packages (see above) and ensure `pkg-config` is installed.
 - Windows runtime DLLs:
   - DLLs are copied to the output dir automatically when discoverable
+- Windows 7 compatibility:
+  - `win-msvc` presets are automatically configured for Windows 7+ compatibility
+  - Uses `_WIN32_WINNT=0x0601` and `/SUBSYSTEM:CONSOLE,6.01` to ensure compatibility
+  - If you need to override these settings, you can pass `-DCMAKE_CXX_FLAGS` and `-DCMAKE_EXE_LINKER_FLAGS` to override the defaults
 - MinGW on Windows:
   - When using single-config generators (MinGW Makefiles or Unix Makefiles), the helper scripts set `CMAKE_BUILD_TYPE` based on the selected configuration.
   - Run from the MSYS2 MinGW 64-bit shell or ensure `C:/msys64/mingw64/bin` is on PATH before configuring
+
+### Understanding configure failures
+
+When configure fails, the scripts print a concise summary such as:
+
+- Which package lookup failed (e.g., `SDL2_ttf` config not found)
+- The next action (offer vcpkg fallback; provide minimal per-OS install hints)
+- The exact arguments used for configure (generator, toolchain, triplet when applicable)
 
 ## Where is the binary?
 

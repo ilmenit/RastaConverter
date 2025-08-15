@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.19)
 project(RastaConverter VERSION 1.0.0 LANGUAGES CXX)
 
 # Set C++ standard
@@ -198,8 +198,8 @@ set(SOURCES
 # Add executable
 add_executable(rasta ${SOURCES})
 
-# Set PCH if available
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
+# Set PCH if available (disabled for Windows 7 compatibility to avoid PCH conflicts)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.16 AND NOT WIN32)
     target_precompile_headers(rasta PRIVATE src/common/pch.h)
 endif()
 
@@ -351,6 +351,14 @@ if(WIN32)
     # Use Windows executable name 'RastaConverter.exe'
     set_target_properties(rasta PROPERTIES OUTPUT_NAME RastaConverter)
 
+    # Windows 7 compatibility: apply flags only to the actual source compilation
+    # This prevents the use of Windows APIs introduced after Windows 7
+    if(MSVC)
+        # Set Windows 7 compatibility for source files only (not CMake internal files)
+        target_compile_definitions(rasta PRIVATE _WIN32_WINNT=0x0601)
+        target_link_options(rasta PRIVATE "/SUBSYSTEM:CONSOLE,6.01")
+    endif()
+
     # Add Windows-specific libraries
     target_link_libraries(rasta PRIVATE ws2_32 dbghelp)
 
@@ -411,13 +419,16 @@ if(WIN32)
     endif()
 
     # Optionally copy all runtime DLLs discovered via target dependencies (can be noisy with vcpkg)
-    if(COPY_ALL_RUNTIME_DLLS)
-        add_custom_command(TARGET rasta POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:rasta>
-                $<TARGET_FILE_DIR:rasta>
-            COMMAND_EXPAND_LISTS
-        )
+    # Requires CMake >= 3.21 for $<TARGET_RUNTIME_DLLS:...>
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.21)
+        if(COPY_ALL_RUNTIME_DLLS)
+            add_custom_command(TARGET rasta POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_RUNTIME_DLLS:rasta>
+                    $<TARGET_FILE_DIR:rasta>
+                COMMAND_EXPAND_LISTS
+            )
+        endif()
     endif()
 else()
     # Linux-specific settings
