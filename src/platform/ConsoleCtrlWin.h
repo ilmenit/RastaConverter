@@ -105,6 +105,8 @@ inline void RegisterSignalHandlers()
 
 #else
 inline void RegisterConsoleCtrlLogger() {}
+inline void RegisterUnhandledExceptionLogger() {}
+inline void RegisterSignalHandlers() {}
 #endif
 
 

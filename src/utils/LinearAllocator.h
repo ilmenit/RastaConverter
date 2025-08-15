@@ -3,7 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <malloc.h>
+#include <cstdlib>
 #include <stdexcept>  // Added include for std::bad_alloc
 
 /**
