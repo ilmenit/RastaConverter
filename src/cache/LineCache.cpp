@@ -1,6 +1,6 @@
 #include "LineCache.h"
 #include <cstring>
-#include <stdexcept>  // Added include for exception handling
+#include <cassert>  // For assertions instead of exceptions
 
 line_cache::line_cache()
 {
@@ -26,9 +26,7 @@ const line_cache_result* line_cache::find(const line_cache_key& key, uint32_t ha
     {
         for (int i = hbidx - 1; i >= 0; --i)
         {
-            // Check for null pointers before dereferencing
-            if (hb->nodes[i].value != nullptr && 
-                hb->nodes[i].hash == hash && 
+            if (hb->nodes[i].hash == hash && 
                 key == hb->nodes[i].value->first)
             {
                 return &hb->nodes[i].value->second;
@@ -50,10 +48,7 @@ line_cache_result& line_cache::insert(const line_cache_key& key, uint32_t hash, 
     if (!hb || hbidx >= hash_block::N)
     {
         hash_block* hb2 = alloc.allocate<hash_block>();
-        if (!hb2) {
-            // Handle allocation failure - throw exception
-            throw std::bad_alloc();
-        }
+        assert(hb2 && "LineCache: allocation failed");
         
         memset(hb2, 0, sizeof(*hb2));
         hb2->next = hb;
@@ -65,10 +60,7 @@ line_cache_result& line_cache::insert(const line_cache_key& key, uint32_t hash, 
     hc.offset = hbidx + 1;
 
     value_type* value = alloc.allocate<value_type>();
-    if (!value) {
-        // Handle allocation failure - throw exception
-        throw std::bad_alloc();
-    }
+    assert(value && "LineCache: allocation failed");
     
     value->first = key;
 

@@ -83,6 +83,16 @@ public:
                                     int index, int x, int y, 
                                     bool& restart_line, 
                                     distance_t& best_error);
+                                    
+    // Optimized single-frame and dual-frame implementations
+    e_target FindClosestColorRegisterSingle(sprites_row_memory_t& spriterow, 
+                                           int index, int x, int y, 
+                                           bool& restart_line, 
+                                           distance_t& best_error);
+    e_target FindClosestColorRegisterDual(sprites_row_memory_t& spriterow, 
+                                         int index, int x, int y, 
+                                         bool& restart_line, 
+                                         distance_t& best_error);
     
     /**
      * Turn off registers according to the on/off map
@@ -202,6 +212,7 @@ private:
     unsigned char m_sprite_shift_regs[4];
     unsigned char m_sprite_shift_emitted[4];
     unsigned char m_sprite_shift_start_array[256];
+    bool m_sprite_shift_start_array_dirty;
     
     // Caching
     linear_allocator* m_linear_allocator_ptr;
@@ -228,13 +239,19 @@ private:
     // Parameters
     unsigned m_width;
     unsigned m_height;
-    const std::vector<distance_t>* m_picture_all_errors[128];
+    const distance_t* m_picture_all_errors[128];
     const screen_line *m_picture;
     int m_solutions;
     size_t m_cache_size;
     
     // Random number generation
     unsigned long long m_randseed;
+    
+    // Function pointer for optimized single/dual frame color register selection
+    e_target (Executor::*m_find_closest_color_register_fn)(sprites_row_memory_t& spriterow, 
+                                                          int index, int x, int y, 
+                                                          bool& restart_line, 
+                                                          distance_t& best_error);
     
     // Best solution tracking
     raster_picture m_best_pic;

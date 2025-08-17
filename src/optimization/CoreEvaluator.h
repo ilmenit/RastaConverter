@@ -26,6 +26,9 @@ public:
 
     // Render and score single frame
     SingleEvalResult evaluateSingle(Executor& exec, raster_picture& pic);
+    
+    // Render and score single frame using pre-allocated result (no heap allocations)
+    void evaluateSingle(Executor& exec, raster_picture& pic, SingleEvalResult& result);
 
     // Render and score dual frame with coordinate-descent step
     // mutateB: when true, B is the mutated frame; A is fixed and rendered plain first

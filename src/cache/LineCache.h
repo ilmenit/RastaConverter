@@ -16,56 +16,26 @@ struct line_cache_key
 
     uint32_t hash()
     {
-        // Mix register state
-        uint32_t h = 0;
+        uint32_t hash = 0;
+        
+        hash += (size_t)entry_state.reg_a;
+        hash += (size_t)entry_state.reg_x << 8;
+        hash += (size_t)entry_state.reg_y << 16;
 
-        h += (uint32_t)entry_state.reg_a;
-        h += (uint32_t)entry_state.reg_x << 8;
-        h += (uint32_t)entry_state.reg_y << 16;
+        for(int i=0; i<E_TARGET_MAX; ++i)
+            hash += (size_t)entry_state.mem_regs[i] << (8*(i & 3));
 
-        for (int i = 0; i < E_TARGET_MAX; ++i)
-            h += (uint32_t)entry_state.mem_regs[i] << (8 * (i & 3));
+        hash += insn_seq->hash;
 
-        // WARNING: Never dereference insn_seq here. It may be a dangling pointer
-        // if the underlying instruction-sequence cache was cleared by another thread
-        // (dual-frame mode evaluates two programs with different caches). We only use
-        // the pointer value to distinguish instruction sequences; equality also
-        // relies on pointer identity.
-        if (insn_seq != nullptr) {
-            uintptr_t p = (uintptr_t)insn_seq;
-            // Mix pointer bits (portable 32-bit fold)
-            uint32_t lo = (uint32_t)(p & 0xFFFFFFFFu);
-            uint32_t hi = (uint32_t)((p >> 32) & 0xFFFFFFFFu);
-            h ^= (lo * 2654435761u) ^ (hi * 2246822519u);
-        }
+        hash += (hash * 0x1a572cf3) >> 20;
 
-        // Final avalanche
-        h ^= (h >> 17);
-        h *= 0x85ebca6b;
-        h ^= (h >> 13);
-        h *= 0xc2b2ae35;
-        h ^= (h >> 16);
-
-        return h;
+        return hash;
     }
 };
 
 inline bool operator==(const line_cache_key& key1, const line_cache_key& key2)
 {
-    // Check for null pointers first
-    if (key1.insn_seq == nullptr && key2.insn_seq == nullptr) {
-        // Both are null, consider equal based on registers only
-    }
-    else if (key1.insn_seq == nullptr || key2.insn_seq == nullptr) {
-        // One is null but the other isn't, they can't be equal
-        return false;
-    }
-    else if (key1.insn_seq != key2.insn_seq) {
-        // Both non-null but different pointers
-        return false;
-    }
-
-    // Check register state equality
+    if (key1.insn_seq != key2.insn_seq) return false;
     if (key1.entry_state.reg_a != key2.entry_state.reg_a) return false;
     if (key1.entry_state.reg_x != key2.entry_state.reg_x) return false;
     if (key1.entry_state.reg_y != key2.entry_state.reg_y) return false;

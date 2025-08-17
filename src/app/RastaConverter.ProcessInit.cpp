@@ -190,6 +190,7 @@ bool RastaConverter::ProcessInit()
         (cfg.continue_processing && cfg.have_resume_seed) ? cfg.resume_seed : cfg.initial_seed,
         onoffPtr,
         useRegionalMutation,
+        cfg.legacy_mutations,
         cfg.optimizer_type
     );
 

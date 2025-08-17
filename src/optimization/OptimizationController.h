@@ -43,6 +43,7 @@ public:
      * @param initialSeed Random seed
      * @param onoffMap Register enable/disable map
      * @param useRegionalMutation Whether to use region-based mutation
+     * @param useLegacyMutations Whether to use only the original 9 mutation types for maximum performance
      * @return True if initialization succeeded
      */
      bool Initialize(int threads, int width, int height, 
@@ -54,6 +55,7 @@ public:
                   unsigned long initialSeed,
                   const OnOffMap* onoffMap = nullptr,
                    bool useRegionalMutation = false,
+                   bool useLegacyMutations = false,
                    e_optimizer_type optimizer_type = E_OPT_DLAS);
     
     /**

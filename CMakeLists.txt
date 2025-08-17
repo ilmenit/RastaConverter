@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.21)
 project(RastaConverter VERSION 1.0.0 LANGUAGES CXX)
 
 # Set C++ standard
@@ -15,8 +15,8 @@ option(IGNORE_SDL_QUIT "Ignore SDL_QUIT and ESC (for diagnosing unexpected exits
 option(ENABLE_LTO "Enable interprocedural optimization (IPO/LTO) for Release builds" ON)
 option(ENABLE_FAST_MATH "Enable fast-math on Release builds for GCC/Clang" ON)
 option(ENABLE_DEAD_STRIP "Enable dead code/data elimination in Release (function/data sections + linker GC)" ON)
-option(ENABLE_MSVC_FAST_MATH "Use /fp:fast for MSVC/clang-cl in Release" OFF)
-option(ENABLE_AVX2 "Enable AVX2 instructions where supported (MSVC only; use at your own risk)" OFF)
+option(ENABLE_MSVC_FAST_MATH "Use /fp:fast for MSVC/clang-cl in Release" ON)
+option(ENABLE_AVX2 "Enable AVX2 instructions where supported (MSVC only; use at your own risk)" ON)
 option(ENABLE_LLD_LINKER "Use lld linker for faster links (Clang/GCC on ELF); optional" OFF)
 option(ENABLE_UNITY_BUILD "Enable unity build for the executable (can improve inlining and compile times)" OFF)
 option(COPY_ALL_RUNTIME_DLLS "Copy all dependent runtime DLLs on Windows (may include many transitive DLLs via vcpkg)" OFF)

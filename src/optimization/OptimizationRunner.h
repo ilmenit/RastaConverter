@@ -4,6 +4,7 @@
 #include <thread>
 #include <memory>
 #include <vector>
+#include <mutex>
 #include "EvaluationContext.h"
 #include "CoreEvaluator.h"
 #include "AcceptancePolicy.h"
@@ -22,6 +23,8 @@ public:
 
 private:
     void worker(int threadId);
+    void workerSingle(int threadId);  // Optimized single-frame worker
+    void workerDual(int threadId);    // Full dual-frame worker
 
 private:
     EvaluationContext* m_ctx;
@@ -29,6 +32,7 @@ private:
     Mutator* m_reference_mutator; // not owned
     std::atomic<bool> m_running{false};
     CoreEvaluator m_evaluator;
+    // Note: policy methods now run under context mutex for correctness.
 };
 
 #endif // OPTIMIZATION_RUNNER_H

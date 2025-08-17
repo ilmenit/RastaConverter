@@ -108,6 +108,7 @@ struct Configuration {
 	FREE_IMAGE_FILTER rescale_filter;
 	e_init_type init_type;
     e_optimizer_type optimizer_type;
+    bool legacy_mutations = false; // Use only the original 9 mutation types for maximum performance
     bool quiet;
     // CLI handling flags
     bool show_help = false;

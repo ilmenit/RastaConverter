@@ -16,6 +16,9 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 
+# Old sources 
+*old-src/
+
 # Packages
 .vcpkg/
 
@@ -74,6 +77,7 @@ ipch/
 *.sdf
 *.cachefile
 src/.vs/*
+*.vs/*
 
 # Visual Studio profiler
 *.psess

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <cstring>
+#include <cassert>
 
 #include "../raster/RasterInstruction.h"
 #include "../utils/LinearAllocator.h"
@@ -59,13 +60,9 @@ public:
 
     const insn_sequence *insert(const insn_sequence& key, linear_allocator& alloc)
     {
-        if (key.insns == nullptr && key.insn_count != 0) {
-            // Invalid input
-            throw std::runtime_error("insn_sequence_cache::insert: key.insns is null with non-zero count");
-        }
-        if (key.insn_count > 0 && (uintptr_t)key.insns < 0x10000) {
-            throw std::runtime_error("insn_sequence_cache::insert: suspicious insns pointer");
-        }
+        // Debug validation - removed exception overhead
+        assert(!(key.insns == nullptr && key.insn_count != 0) && "insn_sequence_cache::insert: key.insns is null with non-zero count");
+        assert(!(key.insn_count > 0 && (uintptr_t)key.insns < 0x10000) && "insn_sequence_cache::insert: suspicious insns pointer");
         hash_chain& hc = hash_table[key.hash & 1023];
         hash_block *hb = hc.first;
         int hbidx = hc.offset;

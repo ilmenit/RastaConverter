@@ -55,28 +55,28 @@ Common options
   /details=FILE           Optional details map
   /details_val=FLOAT      Details strength (default 0.5)
 
--- Optimizer:
-  /optimizer=dlas|lahc  Select optimizer (default dlas)
-    Internals: both optimizers now use a shared optimization runner and evaluator.
-    Acceptance is pluggable via policies (DLAS/LAHC). LAHC supports dual mode.
+- Optimizer:
+  /optimizer=dlas|lahc    Select optimizer (default dlas)
+    Internals: both optimizers use a shared optimization runner and evaluator; acceptance is pluggable (DLAS/LAHC).
   /threads=N              Number of threads (default 1)
-  /max_evals=ULL         Stop after N evaluations (default very large)
-  /s=N                   DLAS/LAHC history length (default 1)
-  /mutation_strategy=global|regional  (default global)
-  /mutation_base=best|current        Baseline program for each mutation (default best)
-     - best:    mutate from the global best-so-far every step (stable, legacy behavior)
-     - current: mutate from the currently accepted solution (more exploratory)
-  /cache=MB              Line cache size in MB (default 16)
-  /seed=random|NUMBER    Initial RNG seed (default random)
-  /save=auto|N           Auto-save period: auto=time-based, or every N evals
-  /onoff=FILE            Enable/disable registers per line from file
-  /init=random|empty|less|smart  Initial program (default random)
+  /max_evals=ULL          Stop after N evaluations (default very large)
+  /s=N                    DLAS/LAHC history length (default 1)
+  /mutation_strategy=global|regional   Mutation region selection (default global)
+  /mutation_base=best|current          Baseline program for each mutation (default best)
+     - best:    mutate from global best-so-far every step (legacy behavior)
+     - current: mutate from currently accepted solution (more exploratory)
+  /legacy_mutations or --legacy-mutations  Use only original 9 mutation types (max performance)
+  /cache=MB               Line cache size in MB (default 16)
+  /seed=random|NUMBER     Initial RNG seed (default random)
+  /save=auto|N            Auto-save period: auto=time-based, or every N evals
+  /onoff=FILE             Enable/disable registers per line from file
+  /init=random|empty|less|smart   Initial program (default random)
      - random: broad exploration, stable default
      - empty: minimalist start
      - less: fewer colors initially; often yields quick gains but can plateau
      - smart: heuristic guided start
-  /preprocess            Only run preprocessing; save -src.png and -dst.png and exit
-  /quiet or /q           Reduce console output
+  /preprocess             Only preprocessing; save -src.png and -dst.png and exit
+  /quiet or /q            Reduce console output
 
 Dual-frame mode (CRT blending)
 --------------------------------------
@@ -130,7 +130,7 @@ To build an Atari executable, copy the generated outputs to the Generator direct
 Notes
 -----
 - Dual mode is ~2–2.5× more expensive per evaluation (A and B are rendered each step).
-- Internal pair evaluation uses a YUV fast path.
+- Internal pair evaluation uses a YUV fast path. Flicker penalty controls: /flicker_luma, /flicker_chroma (0..1 acceptance; higher tolerates more flicker).
 
 Debug logging (build-time)
 --------------------------

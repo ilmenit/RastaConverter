@@ -193,6 +193,9 @@ void Configuration::Process(int argc, char *argv[])
 
     // Quiet flag for headless/CLI operation
     quiet = parser.switchExists("quiet") || parser.switchExists("q");
+    
+    // Legacy mutations flag for maximum performance (use only original 9 mutation types)
+    legacy_mutations = parser.switchExists("legacy_mutations") || parser.switchExists("legacy-mutations");
 
 	string brightness_value = parser.getValue("brightness","0");
 	brightness=String2Value<int>(brightness_value);

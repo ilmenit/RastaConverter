@@ -11,7 +11,6 @@
 #include <ctime>
 #include <functional>
 #include <thread>
-#include <atomic>  // Add this for atomic operations
 #include <cfloat>   // For DBL_MAX
 #include <algorithm> // For std::find
 #include "../raster/Program.h"
@@ -140,6 +139,8 @@ public:
     // Best solution found
     raster_picture m_best_pic;
     double m_best_result = DBL_MAX;
+    // Generation counter for lock-free best picture access
+    std::atomic<unsigned long long> m_best_generation{0};
     // Second best program for dual mode (frame B)
     raster_picture m_best_pic_B;
 
@@ -164,6 +165,9 @@ public:
 
     // Thread configuration
     int m_thread_count = 1;
+    
+    // Performance optimization flags
+    bool m_legacy_mutations = false; // Use only original 9 mutation types for maximum performance
 
     // Start time for statistics
     time_t m_time_start;

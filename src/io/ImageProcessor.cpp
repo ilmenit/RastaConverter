@@ -534,7 +534,7 @@ void ImageProcessor::ParallelFor(int from, int to, void* (*start_routine)(void*)
         threads_arg[t].from = cur_from;
         threads_arg[t].to = cur_from + step;
 
-        threads.emplace_back(std::bind(start_routine, (void*)&threads_arg[t]));
+        threads.emplace_back(start_routine, (void*)&threads_arg[t]);
         cur_from += step;
     }
     for (int t = 0; t < num_threads; ++t)

@@ -1,4 +1,5 @@
 @echo off
+if /I "%BUILD_DEBUG%"=="1" @echo on
 REM Script to build RastaConverter on Windows systems
 REM Usage: build.bat [PRESET] [CONFIG] [CLEAN] [extra cmake -D options]
 REM Examples:
@@ -23,7 +24,7 @@ set NONINTERACTIVE=%NONINTERACTIVE%
 if "%NONINTERACTIVE%"=="" set NONINTERACTIVE=0
 
 where cmake >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   echo CMake is required but not installed. Aborting.
   exit /b 1
 )
@@ -41,6 +42,12 @@ if /I "%~2"=="Debug" (
 ) else if /I "%~2"=="Release" (
   set CONFIG=Release
   shift
+) else if /I "%~2"=="RelWithDebInfo" (
+  set CONFIG=RelWithDebInfo
+  shift
+) else if /I "%~2"=="MinSizeRel" (
+  set CONFIG=MinSizeRel
+  shift
 )
 
 REM Shift past preset
@@ -50,35 +57,86 @@ shift
 
 :parse_args
 if "%~1"=="" goto :args_done
-set SHIFT_TWICE=0
 if /I "%~1"=="CLEAN" (
-  set CLEAN=1
-) else if /I "%~1"=="CLEANONLY" (
-  set CLEANONLY=1
-) else (
-  set "ARG=%~1"
-  set "PREFIX=!ARG:~0,2!"
-  if /I "!PREFIX!"=="-D" (
-    rem Join space-separated -D VAR VALUE into -DVAR=VALUE for CMake
-    for /f "tokens=1,2 delims==" %%A in ("!ARG!") do set "AFTER=%%B"
-    if not defined AFTER (
-      if not "%~2"=="" (
-        set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! !ARG!=%~2"
-        set SHIFT_TWICE=1
-      ) else (
-        set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! !ARG!"
-      )
-    ) else (
-      set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! !ARG!"
-    )
-  ) else (
-    set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! \"%~1\""
-  )
+	set CLEAN=1
+	if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Parsed token: %~1  -> CLEAN=1
+	shift
+	goto :parse_args
 )
-shift
-if %SHIFT_TWICE% EQU 1 shift
-goto :parse_args
+if /I "%~1"=="CLEANONLY" (
+	set CLEANONLY=1
+	if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Parsed token: %~1  -> CLEANONLY=1
+	shift
+	goto :parse_args
+)
+
+set "ARG=%~1"
+if /I "!ARG:~0,2!"=="-D" (
+	rem -D style option
+	if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Inspect -D token: ARG=!ARG!, NEXT="%~2"
+	set "HAS_EQ="
+	set "ARG_BEFORE_EQ="
+	for /f "tokens=1* delims==" %%A in ("!ARG!") do (
+		set "ARG_BEFORE_EQ=%%A"
+		rem Fixed: Check if the part before = is different from original arg, indicating = was found
+		if not "%%A"=="!ARG!" set HAS_EQ=1
+	)
+	if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] HAS_EQ=!HAS_EQ!
+	if defined HAS_EQ (
+		rem Already -DVAR=VALUE (or -DVAR=) â€" wrap whole token in quotes to preserve spaces reliably
+		set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! ^"!ARG!^""
+		if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Added -D with equals (quoted): "!ARG!"
+		shift
+		goto :parse_args
+	) else (
+		rem Possibly split as: -DVAR  VALUE (consume next token if it is a value)
+		if "%~2"=="" (
+			set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! !ARG!"
+			if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Added lone -D (no value): !ARG!
+			shift
+			goto :parse_args
+		)
+		set "NEXT_RAW=%~2"
+		set "FIRSTCHAR=!NEXT_RAW:~0,1!"
+		if "!FIRSTCHAR!"=="-" (
+			set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! !ARG!"
+			if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Next token looks like a switch; keeping !ARG! without value
+			shift
+			goto :parse_args
+		)
+		if "!FIRSTCHAR!"=="/" (
+			set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! !ARG!"
+			if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Next token looks like a switch; keeping !ARG! without value
+			shift
+			goto :parse_args
+		)
+		rem Join as a single quoted token: "-DVAR=VALUE" preserving spaces in VALUE
+		set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! ^"!ARG!=%~2^""
+		if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Joined split -D as single quoted token: "!ARG!=%~2"
+		shift
+		shift
+		goto :parse_args
+	)
+) else (
+	rem Positional argument (quote to preserve spaces)
+	set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! \"%~1\""
+	if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] Added positional: "%~1"
+	shift
+	goto :parse_args
+)
+
 :args_done
+if /I "%BUILD_DEBUG%"=="1" (
+	echo.
+	echo [DEBUG] Args parsed:
+	echo   - PRESET=%PRESET%
+	echo   - CONFIG=%CONFIG%
+	echo   - CLEAN=%CLEAN%
+	echo   - CLEANONLY=%CLEANONLY%
+	echo   - EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS%
+	echo.
+	rem pause
+)
 
 
 REM Detect single-config generators to pass CMAKE_BUILD_TYPE
@@ -91,7 +149,8 @@ REM Prepare for optional vcpkg fallback later (do not enable by default)
 if exist vcpkg.json (
   if /I "%DISABLE_VCPKG%"=="1" (
     rem vcpkg disabled explicitly
-  ) else if /I "%AUTO_VCPKG%"=="1" (
+  ) else if /I "%USE_VCPKG%"=="1" (
+    rem Explicit opt-in: USE_VCPKG=1 forces immediate use of vcpkg
     if not defined VCPKG_ROOT (
       if exist .vcpkg\scripts\buildsystems\vcpkg.cmake (
         set VCPKG_ROOT=%CD%\.vcpkg
@@ -107,33 +166,14 @@ if exist vcpkg.json (
       )
     )
     if defined VCPKG_ROOT (
-      set USE_VCPKG=1
-      set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_TOOLCHAIN_FILE=\"%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake\" -DVCPKG_FEATURE_FLAGS=manifests"
-    )
-  )
-)
-
-REM Explicit opt-in: USE_VCPKG=1 forces immediate use of vcpkg if available
-if exist vcpkg.json if /I NOT "%DISABLE_VCPKG%"=="1" if /I "%USE_VCPKG%"=="1" (
-  if not defined VCPKG_ROOT (
-    if exist .vcpkg\scripts\buildsystems\vcpkg.cmake (
-      set VCPKG_ROOT=%CD%\.vcpkg
-    ) else (
-      where git >nul 2>&1 && (
-        echo Preparing local vcpkg under .vcpkg ...
-        git clone --depth 1 https://github.com/microsoft/vcpkg.git .vcpkg
-        if exist .vcpkg\bootstrap-vcpkg.bat (
-          call .vcpkg\bootstrap-vcpkg.bat -disableMetrics
-          set VCPKG_ROOT=%CD%\.vcpkg
-        )
+      if exist "%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" (
+        set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_TOOLCHAIN_FILE=\"%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake\" -DVCPKG_FEATURE_FLAGS=manifests"
+      ) else (
+        echo USE_VCPKG=1 requested but VCPKG_ROOT toolchain not found; proceeding without vcpkg.
       )
+    ) else (
+      echo USE_VCPKG=1 requested but VCPKG_ROOT not available; proceeding without vcpkg.
     )
-  )
-  if defined VCPKG_ROOT (
-    set USE_VCPKG=1
-    set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_TOOLCHAIN_FILE=\"%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake\" -DVCPKG_FEATURE_FLAGS=manifests"
-  ) else (
-    echo USE_VCPKG=1 requested but VCPKG_ROOT not available; proceeding without vcpkg.
   )
 )
 
@@ -144,52 +184,81 @@ if %SINGLE_CONFIG_GEN% EQU 1 (
   set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_BUILD_TYPE=%CONFIG%"
 )
 
+REM If CLEAN requested, remove build directory before configure (align with build.ps1)
+if %CLEAN% EQU 1 (
+  if exist "%BINARY_DIR%" (
+    echo CLEAN requested: removing %BINARY_DIR% before configure ...
+    rmdir /s /q "%BINARY_DIR%"
+  )
+)
+
 REM Detect CMake version to decide if presets are supported
-for /f "tokens=3" %%v in ('cmake --version ^| findstr /R "^cmake version"') do set CMAKE_VER=%%v
-for /f "tokens=1,2 delims=." %%a in ("%CMAKE_VER%") do (
-  set CMAKE_MAJOR=%%a
-  set CMAKE_MINOR=%%b
+set CMAKE_MAJOR=0
+set CMAKE_MINOR=0
+set CMAKE_VER_TEMP=
+for /f "delims=" %%v in ('cmake --version') do (
+  if not defined CMAKE_VER_TEMP set "CMAKE_VER_TEMP=%%v"
+)
+for /f "tokens=3" %%v in ("%CMAKE_VER_TEMP%") do set CMAKE_VER_TEMP=%%v
+
+if defined CMAKE_VER_TEMP (
+  for /f "tokens=1,2 delims=." %%a in ("%CMAKE_VER_TEMP%") do (
+    set CMAKE_MAJOR=%%a
+    set CMAKE_MINOR=%%b
+  )
 )
 set SUPPORTS_PRESETS=0
-if %CMAKE_MAJOR% GEQ 4 set SUPPORTS_PRESETS=1
-if %CMAKE_MAJOR% EQU 3 if %CMAKE_MINOR% GEQ 21 set SUPPORTS_PRESETS=1
+if not "%CMAKE_MAJOR%"=="0" if not "%CMAKE_MINOR%"=="" (
+  if %CMAKE_MAJOR% GEQ 4 set SUPPORTS_PRESETS=1
+  if %CMAKE_MAJOR% EQU 3 if %CMAKE_MINOR% GEQ 21 set SUPPORTS_PRESETS=1
+)
+
+rem Require modern CMake presets support
+if %SUPPORTS_PRESETS% NEQ 1 (
+  echo This project now requires CMake 3.21+ with presets. Please upgrade CMake.
+  exit /b 1
+)
+
+if /I "%BUILD_DEBUG%"=="1" (
+  echo.
+  echo [DEBUG] CMake version detection:
+  echo   - CMAKE_VER_TEMP=%CMAKE_VER_TEMP%
+  echo   - CMAKE_MAJOR=%CMAKE_MAJOR%
+  echo   - CMAKE_MINOR=%CMAKE_MINOR%
+  echo   - SUPPORTS_PRESETS=%SUPPORTS_PRESETS%
+  echo   - BINARY_DIR=%BINARY_DIR%
+  echo.
+  pause
+)
 
 set CONFIGURE_FAILED=0
 
-if %SUPPORTS_PRESETS% EQU 1 (
-  echo Configuring with CMake preset %PRESET% ...
-  if not "%EXTRA_CMAKE_ARGS%"=="" echo Extra CMake args:%EXTRA_CMAKE_ARGS%
-  cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
-  if %ERRORLEVEL% NEQ 0 (
-    echo Configure failed with presets, attempting a clean configure by removing %BINARY_DIR% ...
-    if exist "%BINARY_DIR%" rmdir /s /q "%BINARY_DIR%"
-    cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
-  )
-  if %ERRORLEVEL% NEQ 0 set CONFIGURE_FAILED=1
-) else (
-  echo CMake %CMAKE_MAJOR%.%CMAKE_MINOR% does not support presets. Falling back to -S/-B.
-  set GEN=
-  if /I "%PRESET%"=="win-msvc" set GEN=Visual Studio 17 2022
-  if /I "%PRESET%"=="win-msvc-nogui" set GEN=Visual Studio 17 2022
-  if /I "%PRESET%"=="win-msvc-ninja" set GEN=Ninja Multi-Config
-  if /I "%PRESET%"=="win-msvc-ninja-nogui" set GEN=Ninja Multi-Config
-  if /I "%PRESET%"=="win-clangcl" set GEN=Visual Studio 17 2022
-  if /I "%PRESET%"=="win-clangcl-nogui" set GEN=Visual Studio 17 2022
-  if /I "%PRESET%"=="win-mingw-gcc" set GEN=MinGW Makefiles
-  if /I "%PRESET%"=="win-mingw-gcc-nogui" set GEN=MinGW Makefiles
-  if "%GEN%"=="" set GEN=Visual Studio 17 2022
-  set CFG_ARGS=-S . -B "%BINARY_DIR%" -G "%GEN%"
-  if %SINGLE_CONFIG_GEN% EQU 1 set CFG_ARGS=%CFG_ARGS% -DCMAKE_BUILD_TYPE=%CONFIG%
-  echo Configuring with: cmake %CFG_ARGS% %EXTRA_CMAKE_ARGS%
-  if /I "%PRESET%"=="win-clangcl" set CFG_ARGS=%CFG_ARGS% -T ClangCL
-  if /I "%PRESET%"=="win-clangcl-nogui" set CFG_ARGS=%CFG_ARGS% -T ClangCL
-  echo %PRESET% | findstr /I /C:"-nogui" >nul && set CFG_ARGS=%CFG_ARGS% -DNO_GUI=ON
-  cmake %CFG_ARGS% %EXTRA_CMAKE_ARGS%
-  if %ERRORLEVEL% NEQ 0 set CONFIGURE_FAILED=1
+echo Configuring with CMake preset %PRESET% ...
+if not "%EXTRA_CMAKE_ARGS%"=="" echo Extra CMake args: %EXTRA_CMAKE_ARGS%
+if /I "%BUILD_DEBUG%"=="1" (
+  echo [DEBUG] About to run: cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
+  pause
 )
+cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
+if not exist "%BINARY_DIR%\CMakeCache.txt" (
+  if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] CMakeCache.txt not found. Retrying configure...
+  echo Configure failed with presets, attempting a clean configure by removing %BINARY_DIR% ...
+  if exist "%BINARY_DIR%" rmdir /s /q "%BINARY_DIR%"
+  cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
+)
+if not exist "%BINARY_DIR%\CMakeCache.txt" (
+  if /I "%BUILD_DEBUG%"=="1" echo [DEBUG] CMakeCache.txt still not found after retry. Setting CONFIGURE_FAILED=1
+  set CONFIGURE_FAILED=1
+)
+
+:after_configure
 
 if %CONFIGURE_FAILED% NEQ 0 (
   echo Initial configure failed.
+  if /I "%BUILD_DEBUG%"=="1" (
+    echo [DEBUG] CONFIGURE_FAILED is %CONFIGURE_FAILED%. Entering failure/vcpkg logic.
+    pause
+  )
   if exist vcpkg.json if /I NOT "%DISABLE_VCPKG%"=="1" (
     if %USE_VCPKG% EQU 0 (
       set TRY_VCPKG=
@@ -198,7 +267,7 @@ if %CONFIGURE_FAILED% NEQ 0 (
       ) else if /I "%NONINTERACTIVE%"=="1" (
         set TRY_VCPKG=N
       ) else (
-        set /p TRY_VCPKG=Dependencies may be missing (FreeImage/SDL2/SDL2_ttf). Attempt vcpkg fallback (local .vcpkg checkout)? [Y/n] 
+        set /p "TRY_VCPKG=Dependencies may be missing. Attempt vcpkg fallback? [Y/n] "
       )
       if /I "%TRY_VCPKG%"=="n" (
         echo Skipping vcpkg fallback. Please install dependencies manually or set AUTO_VCPKG=1.
@@ -228,12 +297,9 @@ if %CONFIGURE_FAILED% NEQ 0 (
       set USE_VCPKG=1
       set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_TOOLCHAIN_FILE=\"%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake\" -DVCPKG_FEATURE_FLAGS=manifests"
       echo Re-configuring with vcpkg toolchain ...
-      if %SUPPORTS_PRESETS% EQU 1 (
-        cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
-      ) else (
-        cmake %CFG_ARGS% %EXTRA_CMAKE_ARGS%
-      )
-      if %ERRORLEVEL% NEQ 0 (
+      if exist "%BINARY_DIR%" rmdir /s /q "%BINARY_DIR%"
+      cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
+      if not exist "%BINARY_DIR%\CMakeCache.txt" (
         echo Configure with vcpkg failed. Aborting.
         exit /b 1
       )
@@ -257,7 +323,7 @@ if %CLEANONLY% EQU 1 goto :done
 
 echo Building in %BINARY_DIR% ^(config %CONFIG%^)...
 cmake --build %BINARY_DIR% --config %CONFIG%
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   echo Build failed!
   rem Offer vcpkg fallback on build-time failure if not already using it
   if exist vcpkg.json if /I NOT "%DISABLE_VCPKG%"=="1" if %USE_VCPKG% EQU 0 (
@@ -267,7 +333,7 @@ if %ERRORLEVEL% NEQ 0 (
     ) else if /I "%NONINTERACTIVE%"=="1" (
       set TRY_VCPKG=N
     ) else (
-      set /p TRY_VCPKG=Linker failure detected. Retry configure+build with vcpkg fallback? [Y/n] 
+      set /p "TRY_VCPKG=Linker failure detected. Retry with vcpkg fallback? [Y/n] "
     )
     if /I not "%TRY_VCPKG%"=="n" (
       if not defined VCPKG_ROOT (
@@ -291,20 +357,15 @@ if %ERRORLEVEL% NEQ 0 (
       set USE_VCPKG=1
       set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_TOOLCHAIN_FILE=\"%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake\" -DVCPKG_FEATURE_FLAGS=manifests"
       echo Re-configuring with vcpkg toolchain ...
-      if %SUPPORTS_PRESETS% EQU 1 (
-        if exist "%BINARY_DIR%" rmdir /s /q "%BINARY_DIR%"
-        cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
-      ) else (
-        if exist "%BINARY_DIR%" rmdir /s /q "%BINARY_DIR%"
-        cmake %CFG_ARGS% %EXTRA_CMAKE_ARGS%
-      )
-      if %ERRORLEVEL% NEQ 0 (
+      if exist "%BINARY_DIR%" rmdir /s /q "%BINARY_DIR%"
+      cmake --preset %PRESET% %EXTRA_CMAKE_ARGS%
+      if not exist "%BINARY_DIR%\CMakeCache.txt" (
         echo Configure with vcpkg failed. Aborting.
         exit /b 1
       )
       echo Building with vcpkg toolchain ...
       cmake --build %BINARY_DIR% --config %CONFIG%
-      if %ERRORLEVEL% NEQ 0 (
+      if errorlevel 1 (
         echo Build failed even with vcpkg. Aborting.
         exit /b 1
       )

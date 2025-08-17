@@ -139,6 +139,8 @@ run_configure_with_presets() {
   fi
   CONFIGURE_ARGS+=("${EXTRA_CMAKE_ARGS[@]}")
   cmake "${CONFIGURE_ARGS[@]}"
+  # Check for successful configure by verifying CMakeCache.txt exists
+  [ -f "$BINARY_DIR/CMakeCache.txt" ]
 }
 
 # Map preset to generator for -S/-B fallback
@@ -186,6 +188,8 @@ run_configure_with_sB() {
   fi
   CONFIGURE_ARGS+=("${EXTRA_CMAKE_ARGS[@]}")
   cmake "${CONFIGURE_ARGS[@]}"
+  # Check for successful configure by verifying CMakeCache.txt exists
+  [ -f "$BINARY_DIR/CMakeCache.txt" ]
 }
 
 BINARY_DIR="out/build/$SELECTED_PRESET"

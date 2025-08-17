@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <cmath>
+#include <cassert>
 #include "../target/TargetPicture.h"
 
 EvaluationContext::EvaluationContext()
@@ -197,16 +198,12 @@ bool EvaluationContext::ReportEvaluationResult(double result,
                                              const sprites_memory_t& sprites_memory,
                                              Mutator* mutator)
 {
-    // Do not need to acquire the mutex here, as it should already be locked by the caller
-    // Policies handle acceptance/history state. This method only tracks global "best" and UI data.
-    // Validate basic parameters
-    if (!pic || !m_initialized) {
-        std::cerr << "Invalid parameters in ReportEvaluationResult" << std::endl;
-        return false;
-    }
+    // Fast path - minimal validation with asserts
+    assert(pic && "pic must not be null");
+    assert(m_initialized && "context must be initialized");
+    
     // Check termination condition first
     if (m_max_evals > 0 && m_evaluations >= m_max_evals) {
-        std::cout << "[FIN] EvaluationContext: max_evals reached (" << m_evaluations << "/" << m_max_evals << ")" << std::endl;
         CTX_MARK_FINISHED((*this), "max_evals_reached");
         return false;
     }
@@ -217,64 +214,44 @@ bool EvaluationContext::ReportEvaluationResult(double result,
         m_best_pic = *pic;
         m_best_pic.uncache_insns();
         m_best_result = result;
+        // Increment generation for lock-free best picture access
+        m_best_generation.fetch_add(1, std::memory_order_release);
 
-        // Update visualization state
-        try {
-            m_created_picture.resize(m_height);
-            m_created_picture_targets.resize(m_height);
+        // Update visualization state - simple and fast
+        m_created_picture.resize(m_height);
+        m_created_picture_targets.resize(m_height);
 
-            for (int y = 0; y < (int)m_height; ++y) {
-                if (y < (int)line_results.size() && line_results[y] != nullptr) {
-                    const line_cache_result& lcr = *line_results[y];
-                    m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
-                    m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
-                }
-                else {
-                    // Handle null or missing line result
-                    if (!m_created_picture[y].empty()) {
-                        // Keep existing data if available
-                    }
-                    else {
-                        // Initialize with zeros (black)
-                        m_created_picture[y].assign(m_width, 0);
-                        m_created_picture_targets[y].assign(m_width, E_COLBAK);
-                    }
-                }
+        for (int y = 0; y < (int)m_height; ++y) {
+            if (y < (int)line_results.size() && line_results[y]) {
+                const line_cache_result& lcr = *line_results[y];
+                m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
+                m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
             }
+            else {
+                // Simple fallback - fill with black
+                m_created_picture[y].assign(m_width, 0);
+                m_created_picture_targets[y].assign(m_width, E_COLBAK);
+            }
+        }
 
-            // Copy sprites memory
-            memcpy(&m_sprites_memory, &sprites_memory, sizeof(m_sprites_memory));
-        }
-        catch (const std::exception& e) {
-            std::cerr << "Error updating visualization data: " << e.what() << std::endl;
-        }
+        // Copy sprites memory
+        memcpy(&m_sprites_memory, &sprites_memory, sizeof(m_sprites_memory));
         
-        // Get mutation statistics from the mutator
+        // Update mutation statistics - fast path
         if (mutator) {
-            try {
-                const int* current_mutations = mutator->GetCurrentMutations();
-                for (int i = 0; i < E_MUTATION_MAX; ++i) {
-                    if (current_mutations[i]) {
-                        m_mutation_stats[i] += current_mutations[i];
-                    }
+            const int* current_mutations = mutator->GetCurrentMutations();
+            for (int i = 0; i < E_MUTATION_MAX; ++i) {
+                if (current_mutations[i]) {
+                    m_mutation_stats[i] += current_mutations[i];
                 }
-            }
-            catch (const std::exception& e) {
-                std::cerr << "Error updating mutation statistics: " << e.what() << std::endl;
             }
         }
 
         m_update_improvement = true;
         m_condvar_update.notify_all();
-        
-        // Log best solution improvement (can be suppressed by build flag)
-        #ifndef SUPPRESS_IMPROVEMENT_LOGS
-        std::cout << "New best solution: " << result << " (evaluation #" << m_evaluations << ")" << std::endl;
-        #endif
-        
+                
         // Check for perfect solution (zero distance)
         if (result == 0) {
-            std::cout << "[FIN] Perfect solution found!" << std::endl;
             CTX_MARK_FINISHED((*this), "perfect_solution");
         }
     }
@@ -317,6 +294,8 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
         m_best_pic = *picA; m_best_pic.uncache_insns();
         m_best_pic_B = *picB; m_best_pic_B.uncache_insns();
         m_best_result = result;
+        // Increment generation for lock-free best picture access
+        m_best_generation.fetch_add(1, std::memory_order_release);
 
         // Update visualization: store A and B created pictures (GUI can blend)
         try {
@@ -385,9 +364,6 @@ bool EvaluationContext::ReportEvaluationResultDual(double result,
         }
         m_update_improvement = true;
         m_condvar_update.notify_all();
-        #ifndef SUPPRESS_IMPROVEMENT_LOGS
-        std::cout << "New best dual solution: " << result << " (#" << m_evaluations << ")" << std::endl;
-        #endif
         if (result == 0) {
             std::cout << "[FIN] Perfect dual solution found!" << std::endl;
             CTX_MARK_FINISHED((*this), "perfect_solution");

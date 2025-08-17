@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <stdexcept>  // Added include for std::bad_alloc
+#include <cassert>  // For assert instead of exceptions
 
 /**
  * Simple linear allocator for efficient memory allocation
@@ -58,15 +58,12 @@ public:
      * Allocate an object of type T
      * 
      * @return Pointer to allocated object
-     * @throws std::bad_alloc if allocation fails
      */
     template<class T>
     T *allocate()
     {
         void* memory = allocate(sizeof(T));
-        if (!memory) {
-            throw std::bad_alloc();
-        }
+        assert(memory && "LinearAllocator: allocation failed");
         return new(memory) T;
     }
 
@@ -75,7 +72,6 @@ public:
      * 
      * @param n Size in bytes to allocate
      * @return Pointer to allocated memory
-     * @throws std::bad_alloc if allocation fails
      */
     void *allocate(size_t n)
     {
@@ -90,10 +86,7 @@ public:
                 to_alloc = n;
 
             chunk_node *new_node = (chunk_node *)malloc(sizeof(chunk_node) + to_alloc);
-            if (!new_node) {
-                // Handle allocation failure - throw exception
-                throw std::bad_alloc();
-            }
+            assert(new_node && "LinearAllocator: malloc failed");
             
             new_node->next = chunk_list;
             chunk_list = new_node;

@@ -3,6 +3,7 @@
 RastaConverter builds on Windows, Linux and macOS using CMake. You can use either:
 - CMake directly with Presets 
 - The provided helper scripts: `build.bat` (Windows) and `build.sh` (Linux/macOS)
+- The new, more robust `build.ps1` (Windows PowerShell)
 
 The project supports:
 - GUI and No-GUI variants
@@ -21,13 +22,13 @@ The project supports:
 ### Linux
 - GCC or Clang
 - CMake 3.21+
-- Ninja (recommended; used by presets). If Ninja is not available, presets with `-make` suffix use Unix Makefiles automatically in the helper script.
+- Ninja (recommended; used by presets)
 - Dependencies: `freeimage`, `sdl2`, `sdl2-ttf` (package names vary by distro)
 
 ### macOS
 - Xcode command line tools (Apple Clang)
 - CMake 3.21+
-- Ninja (recommended; used by presets). If Ninja is not available, presets with `-make` suffix use Unix Makefiles automatically in the helper script.
+- Ninja (recommended; used by presets)
 - Dependencies via Homebrew: `freeimage`, `sdl2`, `sdl2_ttf`
 
 ## Quick start (Presets)
@@ -88,10 +89,13 @@ Artifacts are placed in `out/build/<preset>/<config>/`.
 
 ## Quick start (helper scripts)
 
-The scripts are thin wrappers around presets and accept extra `-D` options. If run without arguments they pick sensible defaults and build a Release configuration. They now include a smart fallback to vcpkg when dependencies are missing (see below):
+The scripts are thin wrappers around CMake Presets (CMake 3.21+ required) and accept extra `-D` options. If run without arguments they pick sensible defaults and build a Release configuration. They include a smart fallback to vcpkg when dependencies are missing (see below):
 
-```
-# Windows (no arguments → Visual Studio generator, Release)
+```powershell
+# Windows (PowerShell - recommended)
+./build.ps1
+
+# Windows (legacy batch file)
 build.bat
 
 # Linux (no arguments → prefers Clang if available, otherwise GCC)
@@ -100,10 +104,16 @@ build.bat
 # macOS (no arguments → Apple Clang)
 ./build.sh
 
-# Explicit examples
+# Explicit examples (PowerShell)
+./build.ps1 -Preset win-clangcl -Config Release -ExtraCmakeArgs "-DTHREAD_DEBUG=ON", "-DUI_DEBUG=ON"
+./build.ps1 -Preset win-msvc -Config Release -Clean
+
+# Explicit examples (legacy batch)
 build.bat win-clangcl Release -DTHREAD_DEBUG=ON -DUI_DEBUG=ON
-build.bat win-msvc Release CLEAN   # removes old cache if generator mismatch
-./build.sh linux-gcc Release -DNO_GUI=ON   # falls back to linux-gcc-make if Ninja not installed
+build.bat win-msvc Release CLEAN
+
+# Explicit examples (Linux/macOS)
+./build.sh linux-gcc Release -DNO_GUI=ON
 ```
 
 Run without arguments to see usage and the preset list.
@@ -154,20 +164,20 @@ build.bat win-msvc Debug -DNO_GUI=ON
 
 This repo supports vcpkg manifest mode. The helper scripts can integrate vcpkg when a `vcpkg.json` is present, and will offer it as a fallback when dependencies are missing.
 
-- Windows (`build.bat`): first tries your system/explicit dependencies. On failure it prompts to use vcpkg and injects the toolchain (keeping the same preset and binary dir). Set `AUTO_VCPKG=1` to skip the prompt; set `DISABLE_VCPKG=1` to never use vcpkg.
+- Windows (`build.bat` / `build.ps1`): first tries your system/explicit dependencies. On failure it prompts to use vcpkg and injects the toolchain (keeping the same preset and binary dir). Set `AUTO_VCPKG=1` to skip the prompt; set `DISABLE_VCPKG=1` to never use vcpkg.
 - Linux/macOS (`build.sh`): same smart fallback behavior. If `VCPKG_ROOT` is already set to a valid install, it will be used automatically. You can still pass `DISABLE_VCPKG=1` to avoid vcpkg.
 - You may point `VCPKG_ROOT` to a shared install, or let the script bootstrap a local checkout under `.vcpkg` (Linux/macOS).
 
 Examples:
 
 ```
-# Windows (shared vcpkg or local fallback)
-set VCPKG_ROOT=C:\vcpkg
-build.bat win-msvc Release
+# Windows (shared vcpkg or local fallback with PowerShell)
+$env:VCPKG_ROOT="C:\vcpkg"
+./build.ps1 -Preset win-msvc -Config Release
 
-# Windows (auto fallback to local vcpkg without prompt)
-set AUTO_VCPKG=1
-build.bat win-msvc Release
+# Windows (auto fallback to local vcpkg without prompt with PowerShell)
+$env:AUTO_VCPKG=1
+./build.ps1 -Preset win-msvc -Config Release
 
 # Linux/macOS (auto-bootstrap local vcpkg under .vcpkg if missing)
 ./build.sh linux-gcc Release
@@ -224,8 +234,8 @@ Tip: For performance experiments on CPU-heavy code, try `win-clangcl` (thin LTO)
 - IPO/LTO is enabled by default where supported. Disable with `-DENABLE_LTO=OFF` if needed.
 - Fast-math for GCC/Clang is ON by default in Release/RelWithDebInfo. Disable with `-DENABLE_FAST_MATH=OFF`.
 - Dead code/data elimination is ON by default: function/data sections + linker GC. Disable with `-DENABLE_DEAD_STRIP=OFF`.
-- MSVC/clang-cl fast-math is OFF by default (use `-DENABLE_MSVC_FAST_MATH=ON` if acceptable for your workload).
-- Optional AVX2 for MSVC/clang-cl: `-DENABLE_AVX2=ON` (ensure target CPUs support it).
+- MSVC/clang-cl fast-math is ON by default. Disable with `-DENABLE_MSVC_FAST_MATH=OFF`.
+- AVX2 for MSVC/clang-cl is ON by default. Disable with `-DENABLE_AVX2=OFF` (ensure target CPUs support it).
 - PGO workflow: `-DPGO_MODE=GENERATE` to record, run representative workloads, then `-DPGO_MODE=USE` (and `-DPGO_PROFILE_PATH=` for Clang).
 
 ### Fast and safe defaults
@@ -246,14 +256,14 @@ Use these to squeeze more performance when acceptable for your use-case:
 
 ### Max performance recipes
 
-- Windows (MSVC), fast-math + AVX2:
+- Windows (MSVC), fast-math + AVX2 (now defaults ON):
   ```
-  build.bat win-msvc Release -DENABLE_MSVC_FAST_MATH=ON -DENABLE_AVX2=ON -DENABLE_UNITY_BUILD=ON
+  build.bat win-msvc Release -DENABLE_UNITY_BUILD=ON
   ```
 
-- Windows (clang-cl), ThinLTO + fast-math + AVX2:
+- Windows (clang-cl), ThinLTO + fast-math + AVX2 (now defaults ON):
   ```
-  build.bat win-clangcl Release -DENABLE_MSVC_FAST_MATH=ON -DENABLE_AVX2=ON -DENABLE_UNITY_BUILD=ON
+  build.bat win-clangcl Release -DENABLE_UNITY_BUILD=ON
   ```
 
 - Linux (Clang), ThinLTO + dead strip + lld:

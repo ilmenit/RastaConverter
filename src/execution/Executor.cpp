@@ -26,6 +26,7 @@ Executor::Executor()
     memset(m_sprite_shift_regs, 0, sizeof(m_sprite_shift_regs));
     memset(m_sprite_shift_emitted, 0, sizeof(m_sprite_shift_emitted));
     memset(m_sprite_shift_start_array, 0, sizeof(m_sprite_shift_start_array));
+    m_sprite_shift_start_array_dirty = true;
     memset(m_picture_all_errors, 0, sizeof(m_picture_all_errors));
 }
 
@@ -41,9 +42,9 @@ void Executor::Init(unsigned width, unsigned height,
     m_width = width;
     m_height = height;
     
-    // Copy the array of pointers to vectors
+    // Copy the array of pointers to vectors (store raw pointers for hot access)
     for (int i = 0; i < 128; i++) {
-        m_picture_all_errors[i] = pictureAllErrors[i];
+        m_picture_all_errors[i] = pictureAllErrors[i] ? pictureAllErrors[i]->data() : nullptr;
     }
     
     m_picture = picture;
@@ -76,6 +77,13 @@ void Executor::Init(unsigned width, unsigned height,
     // Clear LRU tracking
     m_lru_lines.clear();
     m_lru_set.clear();
+    
+    // Initialize function pointer for optimized single/dual frame color selection
+    if (gstate && gstate->m_dual_mode) {
+        m_find_closest_color_register_fn = &Executor::FindClosestColorRegisterDual;
+    } else {
+        m_find_closest_color_register_fn = &Executor::FindClosestColorRegisterSingle;
+    }
 }
 
 void Executor::UpdateLRU(int line_index) {
@@ -137,52 +145,39 @@ void Executor::Run() {
             }
         }
         #endif
-        // Check for cache size with cooldown to avoid thrash
-        static thread_local unsigned long long last_clear_evals = 0;
-        static thread_local unsigned long long last_clear_time_ms = 0;
-        auto now = std::chrono::steady_clock::now();
-        auto now_ms = (unsigned long long)std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-
+        // Immediate cache clearing when over limit - no cooldown
         if (m_linear_allocator_ptr->size() > m_cache_size) {
-            bool cooldown_elapsed = (now_ms - last_clear_time_ms) > 1000; // 1s
-            bool evals_progressed = (m_gstate->m_evaluations - last_clear_evals) > 5000;
-            if (cooldown_elapsed && evals_progressed) {
-                // Acquire a mutex to coordinate cache clearing
-                std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);
+            // Acquire a mutex to coordinate cache clearing
+            std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);
 
-                // Check again after acquiring the lock (another thread might have cleared)
-                if (m_linear_allocator_ptr->size() > m_cache_size) {
-                    // First, try clearing least recently used lines (25% of height)
-                    size_t lines_to_clear = std::max((size_t)m_height / 4, (size_t)1);
-                    size_t cleared = 0;
+            // Check again after acquiring the lock (another thread might have cleared)
+            if (m_linear_allocator_ptr->size() > m_cache_size) {
+                // First, try clearing least recently used lines (25% of height)
+                size_t lines_to_clear = std::max((size_t)m_height / 4, (size_t)1);
+                size_t cleared = 0;
 
-                    // Clear the least recently used lines
-                    while (cleared < lines_to_clear && !m_lru_lines.empty()) {
-                        int y = m_lru_lines.front();
-                        m_lru_lines.pop_front();
-                        m_lru_set.erase(y);
+                // Clear the least recently used lines
+                while (cleared < lines_to_clear && !m_lru_lines.empty()) {
+                    int y = m_lru_lines.front();
+                    m_lru_lines.pop_front();
+                    m_lru_set.erase(y);
 
-                        // Clear just this line's cache
-                        m_line_caches[y].clear();
-                        cleared++;
-                    }
+                    // Clear just this line's cache
+                    m_line_caches[y].clear();
+                    cleared++;
+                }
 
-                    // If we're still using too much memory, do a full clear
-                    if (m_linear_allocator_ptr->size() > m_cache_size * 0.9) {
-                        m_insn_seq_cache_ptr->clear();
-                        for (int y2 = 0; y2 < (int)m_height; ++y2)
-                            m_line_caches[y2].clear();
-                        m_linear_allocator_ptr->clear();
-                        m_best_pic.recache_insns(*m_insn_seq_cache_ptr, *m_linear_allocator_ptr);
+                // If we're still using too much memory, do a full clear
+                if (m_linear_allocator_ptr->size() > m_cache_size * 0.9) {
+                    m_insn_seq_cache_ptr->clear();
+                    for (int y2 = 0; y2 < (int)m_height; ++y2)
+                        m_line_caches[y2].clear();
+                    m_linear_allocator_ptr->clear();
+                    m_best_pic.recache_insns(*m_insn_seq_cache_ptr, *m_linear_allocator_ptr);
 
-                        // Reset LRU tracking
-                        m_lru_lines.clear();
-                        m_lru_set.clear();
-                    }
-
-                    // Update cooldown trackers
-                    last_clear_time_ms = now_ms;
-                    last_clear_evals = m_gstate->m_evaluations;
+                    // Reset LRU tracking
+                    m_lru_lines.clear();
+                    m_lru_set.clear();
                 }
             }
         }
@@ -279,7 +274,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
     memset(m_sprites_memory, 0, sizeof(m_sprites_memory));
     
     bool restart_line = false;
-    bool shift_start_array_dirty = true;
+    m_sprite_shift_start_array_dirty = true;
     distance_accum_t total_error = 0;
     distance_accum_t dual_total_error = 0; // accumulates blended base+flicker only in dual-aware mode
 
@@ -353,10 +348,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         m_dual_pc = 2;     // chroma exponent
     } else {
         m_dual_render_role = DUAL_NONE;
-        m_dual_other_pixels.clear();
-        m_dual_other_rows.clear();
-        m_dual_transient_results.clear();
-        m_pair_Ysum = m_pair_Usum = m_pair_Vsum = m_pair_dY = m_pair_dC = nullptr;
+        // Do not clear dual vectors or pointers in single-frame path to avoid per-call overhead
     }
 
     for (y = 0; y < (int)m_height; ++y)
@@ -364,7 +356,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         if (restart_line)
         {
             RestoreLineRegs();
-            shift_start_array_dirty = true;
+            m_sprite_shift_start_array_dirty = true;
         }
         else
         {
@@ -401,7 +393,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
             results_array[y] = cached_line_result;
             ApplyRegisterState(cached_line_result->new_state);
             memcpy(m_sprites_memory[y], cached_line_result->sprite_data, sizeof m_sprites_memory[y]);
-            shift_start_array_dirty = true;
+            m_sprite_shift_start_array_dirty = true;
 
             // Update LRU status for this line
             UpdateLRU(y);
@@ -413,9 +405,9 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
             continue;
         }
 
-        if (shift_start_array_dirty)
+        if (m_sprite_shift_start_array_dirty)
         {
-            shift_start_array_dirty = false;
+            m_sprite_shift_start_array_dirty = false;
             ResetSpriteShiftStartArray();
         }
 
@@ -425,11 +417,14 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         restart_line = false;
         ip = 0;
         cycle = 0;
+#ifdef NDEBUG
+        next_instr_offset = screen_cycles[cycle].offset;
+#else
         next_instr_offset = safe_screen_cycle_offset(cycle);
+#endif
 
-        // on new line clear sprite shifts and wait to be taken from mem_regs
+        // Reset sprite shifts per legacy behavior: clear shift registers only
         memset(m_sprite_shift_regs, 0, sizeof(m_sprite_shift_regs));
-        memset(m_sprite_shift_emitted, 0, sizeof(m_sprite_shift_emitted));
 
         if (!rastinsncnt)
             next_instr_offset = 1000;
@@ -441,45 +436,96 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
 
         sprites_row_memory_t& spriterow = m_sprites_memory[y];
 
-        for (x = -sprite_screen_color_cycle_start; x < 176; ++x)
-        {
-            // check position of sprites
-            const int sprite_check_x = x + sprite_screen_color_cycle_start;
-
-            const unsigned char sprite_start_mask = m_sprite_shift_start_array[sprite_check_x];
-
-            if (sprite_start_mask)
+        if (m_dual_render_role == DUAL_NONE) {
+            // Single-frame hot path (no per-pixel role branch)
+            for (x = -sprite_screen_color_cycle_start; x < 176; ++x)
             {
-                if (sprite_start_mask & 1) StartSpriteShift(E_HPOSP0);
-                if (sprite_start_mask & 2) StartSpriteShift(E_HPOSP1);
-                if (sprite_start_mask & 4) StartSpriteShift(E_HPOSP2);
-                if (sprite_start_mask & 8) StartSpriteShift(E_HPOSP3);
-            }
+                // check position of sprites
+                const int sprite_check_x = x + sprite_screen_color_cycle_start;
 
-            while (next_instr_offset < x && ip < rastinsncnt) // execute instructions
-            {
-                if (!rastinsns || ip >= rastinsncnt) {
-                    next_instr_offset = 1000;
-                    break;
+                const unsigned char sprite_start_mask = m_sprite_shift_start_array[sprite_check_x];
+
+                if (sprite_start_mask)
+                {
+                    if (sprite_start_mask & 1) StartSpriteShift(E_HPOSP0);
+                    if (sprite_start_mask & 2) StartSpriteShift(E_HPOSP1);
+                    if (sprite_start_mask & 4) StartSpriteShift(E_HPOSP2);
+                    if (sprite_start_mask & 8) StartSpriteShift(E_HPOSP3);
                 }
-                instr = &rastinsns[ip++];
-                ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
 
-                cycle += GetInstructionCycles(*instr);
-                next_instr_offset = safe_screen_cycle_offset(cycle);
-                if (ip >= rastinsncnt)
-                    next_instr_offset = 1000;
+                while (next_instr_offset < x && ip < rastinsncnt) // execute instructions
+                {
+                    if (!rastinsns || ip >= rastinsncnt) {
+                        next_instr_offset = 1000;
+                        break;
+                    }
+                    instr = &rastinsns[ip++];
+                    ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
+
+                    cycle += GetInstructionCycles(*instr);
+#ifdef NDEBUG
+                    next_instr_offset = screen_cycles[cycle].offset;
+#else
+                    next_instr_offset = safe_screen_cycle_offset(cycle);
+#endif
+                    if (ip >= rastinsncnt)
+                        next_instr_offset = 1000;
+                }
+
+                if ((unsigned)x < (unsigned)m_width)        // x>=0 && x<m_width
+                {
+                    distance_t closest_dist;
+                    e_target closest_register = FindClosestColorRegisterSingle(spriterow, picture_row_index + x, x, y, restart_line, closest_dist);
+                    total_line_error += closest_dist;
+                    created_picture_row[x] = m_mem_regs[closest_register] >> 1;
+                    created_picture_targets_row[x] = closest_register;
+                }
             }
-
-            if ((unsigned)x < (unsigned)m_width)        // x>=0 && x<m_width
+        } else {
+            // Dual-aware path
+            for (x = -sprite_screen_color_cycle_start; x < 176; ++x)
             {
-                // put pixel closest per current mode (single-frame or dual-aware)
-                distance_t closest_dist;
-                e_target closest_register = FindClosestColorRegister(spriterow, picture_row_index + x, x, y, restart_line, closest_dist);
-                total_line_error += closest_dist;
-                if (m_dual_render_role != DUAL_NONE) dual_line_error += (distance_accum_t)closest_dist;
-                created_picture_row[x] = m_mem_regs[closest_register] >> 1;
-                created_picture_targets_row[x] = closest_register;
+                // check position of sprites
+                const int sprite_check_x = x + sprite_screen_color_cycle_start;
+
+                const unsigned char sprite_start_mask = m_sprite_shift_start_array[sprite_check_x];
+
+                if (sprite_start_mask)
+                {
+                    if (sprite_start_mask & 1) StartSpriteShift(E_HPOSP0);
+                    if (sprite_start_mask & 2) StartSpriteShift(E_HPOSP1);
+                    if (sprite_start_mask & 4) StartSpriteShift(E_HPOSP2);
+                    if (sprite_start_mask & 8) StartSpriteShift(E_HPOSP3);
+                }
+
+                while (next_instr_offset < x && ip < rastinsncnt) // execute instructions
+                {
+                    if (!rastinsns || ip >= rastinsncnt) {
+                        next_instr_offset = 1000;
+                        break;
+                    }
+                    instr = &rastinsns[ip++];
+                    ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
+
+                    cycle += GetInstructionCycles(*instr);
+#ifdef NDEBUG
+                    next_instr_offset = screen_cycles[cycle].offset;
+#else
+                    next_instr_offset = safe_screen_cycle_offset(cycle);
+#endif
+                    if (ip >= rastinsncnt)
+                        next_instr_offset = 1000;
+                }
+
+                if ((unsigned)x < (unsigned)m_width)        // x>=0 && x<m_width
+                {
+                    distance_t closest_dist;
+                    e_target closest_register = FindClosestColorRegisterDual(spriterow, picture_row_index + x, x, y, restart_line, closest_dist);
+                    total_line_error += closest_dist;
+                    dual_line_error += (distance_accum_t)closest_dist;
+                    created_picture_row[x] = m_mem_regs[closest_register] >> 1;
+                    created_picture_targets_row[x] = closest_register;
+                }
             }
         }
 
@@ -530,6 +576,133 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
 }
 
 e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int index, int x, int y, bool &restart_line, distance_t& best_error)
+{
+    // Use function pointer for optimized implementation
+    return (this->*m_find_closest_color_register_fn)(spriterow, index, x, y, restart_line, best_error);
+}
+
+e_target Executor::FindClosestColorRegisterSingle(sprites_row_memory_t& spriterow, int index, int x, int y, bool &restart_line, distance_t& best_error)
+{
+    distance_t distance;
+    int sprite_bit = 0;
+    int best_sprite_bit = 0;
+    e_target result = E_COLBAK;
+    distance_t min_distance = DISTANCE_MAX;
+    bool sprite_covers_colbak = false;
+
+    // Additional input validation
+    if (index < 0) {
+        best_error = DISTANCE_MAX;
+        return E_COLBAK;
+    }
+    
+    // check sprites (optimized single-frame version)
+    // Sprites priority is 0,1,2,3
+    for (int temp = E_COLPM0; temp <= E_COLPM3; ++temp)
+    {
+        int sprite_pos = m_sprite_shift_regs[temp - E_COLPM0];
+        int sprite_x = sprite_pos - sprite_screen_color_cycle_start;
+
+        unsigned x_offset = (unsigned)(x - sprite_x);
+        if (x_offset < sprite_size)        // (x>=sprite_x && x<sprite_x+sprite_size)
+        {
+            sprite_bit = x_offset >> 2; // bit of this sprite memory
+            
+            // Ensure sprite_bit is within bounds
+            if (sprite_bit < 0 || sprite_bit >= 8) {
+                sprite_bit = 0;
+            }
+            
+            sprite_covers_colbak = true;
+
+            // never shifted out remaining sprite pixels combine with sprite memory
+            int sprite_leftover_pixel = 0;
+            if (m_sprite_shift_start_array_dirty)
+            {
+                ResetSpriteShiftStartArray();
+                m_sprite_shift_start_array_dirty = false;
+            }
+            unsigned sprite_leftover_bit = x - sprite_x - (sprite_bit << 2);
+            if (sprite_leftover_bit < 4)
+                sprite_leftover_pixel = (m_sprites_memory[y][temp - E_COLPM0][sprite_bit] >> (4 - sprite_leftover_bit - 1)) & 1;
+
+            // Single-frame: use precomputed error map (fast path)
+            unsigned char mem_reg_value = m_mem_regs[temp];
+            unsigned char color_index = mem_reg_value / 2; // assume 0..127
+#ifndef NDEBUG
+            assert(color_index < 128);
+#endif
+            const distance_t* __restrict err_ptr = m_picture_all_errors[color_index];
+#ifndef NDEBUG
+            assert(err_ptr != nullptr);
+#endif
+            distance = err_ptr[index];
+
+            if (spriterow[temp - E_COLPM0][sprite_bit] || sprite_leftover_pixel)
+            {
+                // priority of sprites - next sprites are hidden below that one, so they are not processed
+                best_sprite_bit = sprite_bit;
+                result = (e_target)temp;
+                min_distance = distance;
+                break;
+            }
+            if (distance < min_distance)
+            {
+                best_sprite_bit = sprite_bit;
+                result = (e_target)temp;
+                min_distance = distance;
+            }
+        }
+    }
+
+    // check standard colors (optimized single-frame version)
+    int last_color_register;
+
+    if (sprite_covers_colbak)
+        last_color_register = E_COLOR2; // COLBAK is not used
+    else
+        last_color_register = E_COLBAK;
+
+    for (int temp = E_COLOR0; temp <= last_color_register; ++temp)
+    {
+        // Single-frame original selection using precomputed error map (fast path)
+        unsigned char mem_reg_value = m_mem_regs[temp];
+        unsigned char color_index = mem_reg_value / 2; // 0..127
+#ifndef NDEBUG
+        assert(color_index < 128);
+#endif
+        const distance_t* __restrict err_ptr = m_picture_all_errors[color_index];
+#ifndef NDEBUG
+        assert(err_ptr != nullptr);
+#endif
+        distance = err_ptr[index];
+
+        if (distance < min_distance)
+        {
+            min_distance = distance;
+            result = (e_target)temp;
+        }
+    }
+
+    // the best color is in sprite, then set the proper bit of the sprite memory and then restart this line
+    if (result >= E_COLPM0 && result <= E_COLPM3)
+    {
+        // Ensure best_sprite_bit is within bounds before accessing
+        if (best_sprite_bit >= 0 && best_sprite_bit < 8) {
+            // if PMG bit has been modified, then restart this line, because previous pixels of COLBAK may be covered
+            if (spriterow[result - E_COLPM0][best_sprite_bit] == false)
+            {
+                restart_line = true;
+                spriterow[result - E_COLPM0][best_sprite_bit] = true;
+            }
+        }
+    }
+
+    best_error = min_distance;
+    return result;
+}
+
+e_target Executor::FindClosestColorRegisterDual(sprites_row_memory_t& spriterow, int index, int x, int y, bool &restart_line, distance_t& best_error)
 {
     distance_t distance;
     int sprite_bit = 0;  // Initialize to prevent uninitialized use
@@ -629,13 +802,12 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
                     distance_d = base + flick;
                 }
             } else {
-                // Single-frame: use precomputed error map
-                distance = DISTANCE_MAX;
-                if (color_index < 128 && m_picture_all_errors[color_index] != nullptr) {
-                    const std::vector<distance_t>* error_vector = m_picture_all_errors[color_index];
-                    if (index < (int)error_vector->size()) {
-                        distance = (*error_vector)[index];
-                    }
+                // Single-frame: use precomputed error map (raw pointer, no per-pixel bounds checks)
+                if (color_index < 128) {
+                    const distance_t* __restrict err_ptr = m_picture_all_errors[color_index];
+                    distance = err_ptr ? err_ptr[index] : DISTANCE_MAX;
+                } else {
+                    distance = DISTANCE_MAX;
                 }
                 distance_d = (double)distance;
             }
@@ -714,13 +886,12 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
                 distance_d = base + flick;
             }
         } else {
-            // Single-frame original selection using precomputed error map to destination
-            distance = DISTANCE_MAX;
-            if (color_index < 128 && m_picture_all_errors[color_index] != nullptr) {
-                const std::vector<distance_t>* error_vector = m_picture_all_errors[color_index];
-                if (index < (int)error_vector->size()) {
-                    distance = (*error_vector)[index];
-                }
+            // Single-frame original selection using precomputed error map to destination (raw pointer)
+            if (color_index < 128) {
+                const distance_t* __restrict err_ptr = m_picture_all_errors[color_index];
+                distance = err_ptr ? err_ptr[index] : DISTANCE_MAX;
+            } else {
+                distance = DISTANCE_MAX;
             }
             distance_d = (double)distance;
         }

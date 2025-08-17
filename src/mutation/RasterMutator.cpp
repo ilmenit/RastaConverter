@@ -63,11 +63,15 @@ int RasterMutator::Random(int range)
 
 int RasterMutator::SelectMutation()
 {
+    // Determine mutation count based on legacy mode
+    // Legacy mode uses only the original 9 mutation types for maximum performance
+    const int max_mutations = (m_gstate && m_gstate->m_legacy_mutations) ? 9 : E_MUTATION_MAX;
+    
     // Calculate weights based on success history
     double weights[E_MUTATION_MAX];
     double total_weight = 0.0;
 
-    for (int i = 0; i < E_MUTATION_MAX; i++) {
+    for (int i = 0; i < max_mutations; i++) {
         // Use success rate if we have enough samples, otherwise use default weight
         double success_rate = 0.1;  // Default weight
 
@@ -90,13 +94,13 @@ int RasterMutator::SelectMutation()
     double r = (double)Random(10000) / 10000.0 * total_weight;
     double sum = 0;
 
-    for (int i = 0; i < E_MUTATION_MAX; i++) {
+    for (int i = 0; i < max_mutations; i++) {
         sum += weights[i];
         if (r <= sum) return i;
     }
 
     // Fallback (should rarely happen)
-    return Random(E_MUTATION_MAX);
+    return Random(max_mutations);
 }
 
 void RasterMutator::MutateProgram(raster_picture* pic)
@@ -110,9 +114,6 @@ void RasterMutator::MutateProgram(raster_picture* pic)
     bool use_regional = m_gstate->m_use_regional_mutation;
     int new_line = m_currently_mutated_y;
 
-    // Thread synchronization needed when lines could be accessed by multiple threads
-    std::unique_lock<std::mutex> lock(m_gstate->m_mutex, std::defer_lock);
-
     if (use_regional) {
         // Regional mutation strategy - each thread focuses on its own region
         int thread_count = std::max(1, m_gstate->m_thread_count);  // Ensure we don't divide by zero
@@ -122,9 +123,7 @@ void RasterMutator::MutateProgram(raster_picture* pic)
         int region_end = (m_thread_id == thread_count - 1) ?
             m_height : region_start + lines_per_thread;
 
-        // Acquire lock only if we might go outside our region
         if (Random(100) >= 80) {
-            lock.lock();
             new_line = Random(m_height);
         }
         else if (region_end > region_start) {
@@ -138,9 +137,6 @@ void RasterMutator::MutateProgram(raster_picture* pic)
     }
     else {
         // Global mutation strategy - all threads can mutate any line
-        // Need to lock when modifying global state
-        lock.lock();
-
         if (new_line >= static_cast<int>(pic->raster_lines.size())) {
             new_line = 0;
         }
@@ -159,13 +155,8 @@ void RasterMutator::MutateProgram(raster_picture* pic)
         new_line = Random(m_height);
     }
 
-    // Update the current line to mutate
+    // Update the current line to mutate (thread-local state)
     m_currently_mutated_y = new_line;
-
-    // If we acquired a lock, release it after updating m_currently_mutated_y
-    if (lock.owns_lock()) {
-        lock.unlock();
-    }
 
     // Batch memory register mutations
     if (Random(10) == 0) // mutate random init mem reg
@@ -181,10 +172,7 @@ void RasterMutator::MutateProgram(raster_picture* pic)
             targ = Random(E_TARGET_MAX);
         } while (targ == E_COLBAK);
 
-        // Lock for memory register mutations
-        std::unique_lock<std::mutex> mem_lock(m_gstate->m_mutex);
         pic->mem_regs_init[targ] += c;
-        mem_lock.unlock();
     }
 
     // Ensure current line is in bounds
@@ -198,7 +186,6 @@ void RasterMutator::MutateProgram(raster_picture* pic)
     {
         for (int t = 0; t < 10; ++t)
         {
-            bool need_lock = false;
             new_line = m_currently_mutated_y;
 
             if (use_regional) {
@@ -210,8 +197,6 @@ void RasterMutator::MutateProgram(raster_picture* pic)
                     m_height : region_start + lines_per_thread;
 
                 if (Random(100) >= 80) {
-                    // Going outside our region - need lock
-                    need_lock = true;
                     new_line = Random(m_height);
                 }
                 else if (region_end > region_start) {
@@ -225,14 +210,11 @@ void RasterMutator::MutateProgram(raster_picture* pic)
                 }
                 else {
                     // Fallback if region is empty
-                    need_lock = true;
                     new_line = Random(m_height);
                 }
             }
             else {
-                // Global mutation - always need lock
-                need_lock = true;
-
+                // Global mutation
                 if (Random(2))
                     new_line = new_line - 1;
                 else
@@ -245,23 +227,12 @@ void RasterMutator::MutateProgram(raster_picture* pic)
                     new_line = 0;
             }
 
-            // Acquire lock if needed
-            std::unique_lock<std::mutex> batch_lock(m_gstate->m_mutex, std::defer_lock);
-            if (need_lock) {
-                batch_lock.lock();
-            }
-
             // Ensure new_line is within valid bounds
             if (new_line < 0 || new_line >= static_cast<int>(m_height)) {
                 new_line = Random(m_height);
             }
 
             m_currently_mutated_y = new_line;
-
-            // Release lock before mutating if we acquired it
-            if (batch_lock.owns_lock()) {
-                batch_lock.unlock();
-            }
 
             // Ensure current line is in bounds
             if (m_currently_mutated_y >= 0 && m_currently_mutated_y < static_cast<int>(pic->raster_lines.size())) {
@@ -909,7 +880,7 @@ void RasterMutator::BatchMutateLine(raster_line& prog, raster_picture& pic, int 
 void RasterMutator::MutateLine(raster_line& prog, raster_picture& pic)
 {
     // Apply a batch of mutations based on line complexity
-    int mutation_count = std::min(3 + (int)(prog.instructions.size() / 5), 8);
+    int mutation_count = std::min(2 + (int)(prog.instructions.size() / 6), 6);
 
     // Call the batch mutation method instead of doing individual mutations
     BatchMutateLine(prog, pic, mutation_count);

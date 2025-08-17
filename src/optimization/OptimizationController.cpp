@@ -32,6 +32,7 @@ bool OptimizationController::Initialize(int threads, int width, int height,
     unsigned long initialSeed,
     const OnOffMap* onoffMap,
     bool useRegionalMutation,
+    bool useLegacyMutations,
     e_optimizer_type optimizer_type)
 {
     // Initialize evaluation context
@@ -51,6 +52,7 @@ bool OptimizationController::Initialize(int threads, int width, int height,
     m_evalContext.m_thread_count = threads;
     m_evalContext.m_time_start = time(nullptr);
     m_evalContext.m_use_regional_mutation = useRegionalMutation;
+    m_evalContext.m_legacy_mutations = useLegacyMutations;
     // Dual-frame configuration is wired via EvaluationContext in RastaConverter
     // so we rely on RastaConverter to set these fields after Initialize(). Defaults remain off.
 

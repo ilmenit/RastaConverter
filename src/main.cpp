@@ -87,6 +87,7 @@ General options:
   --continue                  Resume from last saved state
   --preprocess                Only preprocess, save -src/-dst images and exit
   -q, --quiet                 Headless/quiet mode (no GUI)
+  --legacy-mutations          Use only original 9 mutation types (max performance)
 
 Image processing:
   --distance <yuv|euclid|ciede|cie94>       Distance function (default: yuv)
@@ -122,6 +123,7 @@ Dual-frame mode (A/B frame optimization):
   --dual_stage_evals <N>      If staged, iterations per focus block (default: 100000)
   --dual_stage_start <A|B>    If staged, which frame to focus first (default: A)
   --dual_cross_share_prob <F> Probability of occasional line copy/swap between frames (default: 0.05)
+  --dual_both_frames_prob <F> Reserved small pair tweak probability (default: 0.0)
 
 Notes:
   - Options accept "/" or "-"/"--" prefixes. Examples: /threads=4, -threads 4, --threads 4

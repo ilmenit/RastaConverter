@@ -7,8 +7,15 @@ SingleEvalResult CoreEvaluator::evaluateSingle(Executor& exec, raster_picture& p
     SingleEvalResult out;
     out.lineResults.resize(m_ctx->m_height);
     out.cost = (double)exec.ExecuteRasterProgram(&pic, out.lineResults.data());
-    std::memcpy(&out.spritesMemory, &exec.GetSpritesMemory(), sizeof(out.spritesMemory));
+    // Avoid copying sprites memory here; callers can read from exec.GetSpritesMemory() when needed
     return out;
+}
+
+void CoreEvaluator::evaluateSingle(Executor& exec, raster_picture& pic, SingleEvalResult& result)
+{
+    // Use pre-allocated buffer - no heap allocations
+    result.cost = (double)exec.ExecuteRasterProgram(&pic, result.lineResults.data());
+    // Avoid copying sprites memory here; callers can read from exec.GetSpritesMemory() when needed
 }
 
 DualEvalResult CoreEvaluator::evaluateDual(Executor& exec, raster_picture& picA, raster_picture& picB, bool mutateB)
@@ -57,33 +64,7 @@ DualEvalResult CoreEvaluator::evaluateDual(Executor& exec, raster_picture& picA,
         }
     }
 
-    // Maintain flicker heatmap (luma delta per pixel) for UI/save, cheap path using pair tables
-    const unsigned W = m_ctx->m_width;
-    const unsigned H = m_ctx->m_height;
-    if (m_ctx->m_flicker_heatmap.size() != (size_t)W * (size_t)H) {
-        m_ctx->m_flicker_heatmap.assign((size_t)W * (size_t)H, 0);
-    }
-    for (unsigned y = 0; y < H; ++y) {
-        const line_cache_result* lA = out.lineResultsA[y];
-        const line_cache_result* lB = out.lineResultsB[y];
-        if (!lA || !lB) continue;
-        const unsigned char* rowA = lA->color_row;
-        const unsigned char* rowB = lB->color_row;
-        for (unsigned x = 0; x < W; ++x) {
-            const unsigned idx = y * W + x;
-            const unsigned char a = rowA[x];
-            const unsigned char b = rowB[x];
-            float dY = 0.0f;
-            if (m_ctx->m_have_pair_tables && !m_ctx->m_pair_dY.empty()) {
-                dY = m_ctx->m_pair_dY[((unsigned)a << 7) | (unsigned)b];
-            } else {
-                dY = fabsf(m_ctx->m_palette_y[a] - m_ctx->m_palette_y[b]);
-            }
-            float scaled = dY * (1.0f / 2.0f);
-            if (scaled > 255.0f) scaled = 255.0f; if (scaled < 0.0f) scaled = 0.0f;
-            m_ctx->m_flicker_heatmap[idx] = (unsigned char)(scaled + 0.5f);
-        }
-    }
+    // Flicker heatmap removed for performance - was expensive per-pixel computation
     return out;
 }
 
