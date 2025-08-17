@@ -181,9 +181,9 @@ struct raster_picture {
 
 		for(size_t i=0; i<n; ++i)
 		{
-            // Defensive: ensure vector data is contiguous and count matches
-            raster_lines[i].rehash();
-            raster_lines[i].recache_insns(cache, alloc);
+			// Ensure up-to-date hash for caching key
+			raster_lines[i].rehash();
+			raster_lines[i].recache_insns(cache, alloc);
 		}
 	}
 
@@ -193,6 +193,7 @@ struct raster_picture {
         for (size_t i = 0; i < n; ++i)
         {
             if (raster_lines[i].cache_key == NULL) {
+                // Dirty line: recompute hash before inserting into cache
                 raster_lines[i].rehash();
                 raster_lines[i].recache_insns(cache, alloc);
             }

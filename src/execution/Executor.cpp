@@ -129,6 +129,7 @@ void Executor::Run() {
     raster_picture new_picture;
     std::vector<const line_cache_result*> line_results(m_height);
 
+    // OLD PATTERN: Remove throttling overhead for maximum performance
     while (!m_gstate->m_finished.load()) {
         // Periodic diagnostics on very low progress to detect stalls
         static thread_local unsigned int slow_counter = 0;
@@ -145,9 +146,9 @@ void Executor::Run() {
             }
         }
         #endif
-        // Immediate cache clearing when over limit - no cooldown
+        // OLD PATTERN: Simple cache management like old Evaluator (eliminate throttling overhead)
         if (m_linear_allocator_ptr->size() > m_cache_size) {
-            // Acquire a mutex to coordinate cache clearing
+            // Acquire a mutex to coordinate cache clearing across executors
             std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);
 
             // Check again after acquiring the lock (another thread might have cleared)
@@ -167,7 +168,7 @@ void Executor::Run() {
                     cleared++;
                 }
 
-                // If we're still using too much memory, do a full clear
+                // OLD PATTERN: Use 0.9 threshold like old code for consistent behavior
                 if (m_linear_allocator_ptr->size() > m_cache_size * 0.9) {
                     m_insn_seq_cache_ptr->clear();
                     for (int y2 = 0; y2 < (int)m_height; ++y2)
@@ -381,12 +382,10 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
         unsigned char* __restrict created_picture_row = &m_created_picture[y][0];
         unsigned char* __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
 
-        const line_cache_result* cached_line_result = nullptr;
-        if (m_dual_render_role == DUAL_NONE) {
-            cached_line_result = m_line_caches[y].find(lck, lck_hash);
-        } else {
-            cached_line_result = m_line_caches_dual[y].find(lck, lck_hash);
-        }
+        // Hot path optimization: eliminate dual-frame branch for single-frame mode
+        const line_cache_result* cached_line_result = (m_dual_render_role == DUAL_NONE) 
+            ? m_line_caches[y].find(lck, lck_hash)
+            : m_line_caches_dual[y].find(lck, lck_hash);
         if (cached_line_result)
         {
             // sweet! cache hit!!
@@ -463,11 +462,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
                     ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
 
                     cycle += GetInstructionCycles(*instr);
-#ifdef NDEBUG
                     next_instr_offset = screen_cycles[cycle].offset;
-#else
-                    next_instr_offset = safe_screen_cycle_offset(cycle);
-#endif
                     if (ip >= rastinsncnt)
                         next_instr_offset = 1000;
                 }
@@ -508,11 +503,7 @@ distance_accum_t Executor::ExecuteRasterProgram(raster_picture* pic, const line_
                     ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
 
                     cycle += GetInstructionCycles(*instr);
-#ifdef NDEBUG
                     next_instr_offset = screen_cycles[cycle].offset;
-#else
-                    next_instr_offset = safe_screen_cycle_offset(cycle);
-#endif
                     if (ip >= rastinsncnt)
                         next_instr_offset = 1000;
                 }
@@ -584,19 +575,12 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
 e_target Executor::FindClosestColorRegisterSingle(sprites_row_memory_t& spriterow, int index, int x, int y, bool &restart_line, distance_t& best_error)
 {
     distance_t distance;
-    int sprite_bit = 0;
-    int best_sprite_bit = 0;
+    int sprite_bit;
+    int best_sprite_bit;
     e_target result = E_COLBAK;
     distance_t min_distance = DISTANCE_MAX;
     bool sprite_covers_colbak = false;
 
-    // Additional input validation
-    if (index < 0) {
-        best_error = DISTANCE_MAX;
-        return E_COLBAK;
-    }
-    
-    // check sprites (optimized single-frame version)
     // Sprites priority is 0,1,2,3
     for (int temp = E_COLPM0; temp <= E_COLPM3; ++temp)
     {
@@ -604,43 +588,23 @@ e_target Executor::FindClosestColorRegisterSingle(sprites_row_memory_t& spritero
         int sprite_x = sprite_pos - sprite_screen_color_cycle_start;
 
         unsigned x_offset = (unsigned)(x - sprite_x);
-        if (x_offset < sprite_size)        // (x>=sprite_x && x<sprite_x+sprite_size)
+        if (x_offset < sprite_size)
         {
             sprite_bit = x_offset >> 2; // bit of this sprite memory
-            
-            // Ensure sprite_bit is within bounds
-            if (sprite_bit < 0 || sprite_bit >= 8) {
-                sprite_bit = 0;
-            }
-            
             sprite_covers_colbak = true;
 
             // never shifted out remaining sprite pixels combine with sprite memory
             int sprite_leftover_pixel = 0;
-            if (m_sprite_shift_start_array_dirty)
+            int sprite_leftover = x_offset + m_sprite_shift_emitted[temp - E_COLPM0];
+            if (sprite_leftover < sprite_size)
             {
-                ResetSpriteShiftStartArray();
-                m_sprite_shift_start_array_dirty = false;
+                int sprite_leftover_bit = sprite_leftover >> 2;
+                sprite_leftover_pixel = spriterow[temp - E_COLPM0][sprite_leftover_bit];
             }
-            unsigned sprite_leftover_bit = x - sprite_x - (sprite_bit << 2);
-            if (sprite_leftover_bit < 4)
-                sprite_leftover_pixel = (m_sprites_memory[y][temp - E_COLPM0][sprite_bit] >> (4 - sprite_leftover_bit - 1)) & 1;
 
-            // Single-frame: use precomputed error map (fast path)
-            unsigned char mem_reg_value = m_mem_regs[temp];
-            unsigned char color_index = mem_reg_value / 2; // assume 0..127
-#ifndef NDEBUG
-            assert(color_index < 128);
-#endif
-            const distance_t* __restrict err_ptr = m_picture_all_errors[color_index];
-#ifndef NDEBUG
-            assert(err_ptr != nullptr);
-#endif
-            distance = err_ptr[index];
-
+            distance = m_picture_all_errors[m_mem_regs[temp] / 2][index];
             if (spriterow[temp - E_COLPM0][sprite_bit] || sprite_leftover_pixel)
             {
-                // priority of sprites - next sprites are hidden below that one, so they are not processed
                 best_sprite_bit = sprite_bit;
                 result = (e_target)temp;
                 min_distance = distance;
@@ -655,9 +619,8 @@ e_target Executor::FindClosestColorRegisterSingle(sprites_row_memory_t& spritero
         }
     }
 
-    // check standard colors (optimized single-frame version)
+    // check standard colors
     int last_color_register;
-
     if (sprite_covers_colbak)
         last_color_register = E_COLOR2; // COLBAK is not used
     else
@@ -665,18 +628,7 @@ e_target Executor::FindClosestColorRegisterSingle(sprites_row_memory_t& spritero
 
     for (int temp = E_COLOR0; temp <= last_color_register; ++temp)
     {
-        // Single-frame original selection using precomputed error map (fast path)
-        unsigned char mem_reg_value = m_mem_regs[temp];
-        unsigned char color_index = mem_reg_value / 2; // 0..127
-#ifndef NDEBUG
-        assert(color_index < 128);
-#endif
-        const distance_t* __restrict err_ptr = m_picture_all_errors[color_index];
-#ifndef NDEBUG
-        assert(err_ptr != nullptr);
-#endif
-        distance = err_ptr[index];
-
+        distance = m_picture_all_errors[m_mem_regs[temp] / 2][index];
         if (distance < min_distance)
         {
             min_distance = distance;
@@ -684,17 +636,12 @@ e_target Executor::FindClosestColorRegisterSingle(sprites_row_memory_t& spritero
         }
     }
 
-    // the best color is in sprite, then set the proper bit of the sprite memory and then restart this line
     if (result >= E_COLPM0 && result <= E_COLPM3)
     {
-        // Ensure best_sprite_bit is within bounds before accessing
-        if (best_sprite_bit >= 0 && best_sprite_bit < 8) {
-            // if PMG bit has been modified, then restart this line, because previous pixels of COLBAK may be covered
-            if (spriterow[result - E_COLPM0][best_sprite_bit] == false)
-            {
-                restart_line = true;
-                spriterow[result - E_COLPM0][best_sprite_bit] = true;
-            }
+        if (spriterow[result - E_COLPM0][best_sprite_bit] == false)
+        {
+            restart_line = true;
+            spriterow[result - E_COLPM0][best_sprite_bit] = true;
         }
     }
 

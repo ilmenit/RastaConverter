@@ -54,11 +54,14 @@ int RasterMutator::Random(int range)
 {
     if (range <= 0)
         return 0;
-    // Thread-local LFSR-like RNG to avoid shared global state.
-    // Keep behavior close to legacy per-thread generator.
-    m_randseed = (m_randseed << 32) + (((m_randseed >> 31) ^ (m_randseed >> 30)) & ((1ull << 32) - 1));
-    int v = (int)(m_randseed & 0x7fffffff);
-    return v % range;
+    // Fast xorshift32 like legacy evaluator (use low 32 bits of seed)
+    uint32_t s = (uint32_t)(m_randseed & 0xffffffffu);
+    if (s == 0) s = 0x9E3779B9u; // avoid zero state
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    m_randseed = (m_randseed & 0xffffffff00000000ull) | (uint64_t)s;
+    return (int)(s % (uint32_t)range);
 }
 
 int RasterMutator::SelectMutation()

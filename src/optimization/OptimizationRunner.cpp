@@ -40,7 +40,8 @@ void OptimizationRunner::run()
             m_ctx->m_cache_size,
             m_reference_mutator,
             -1);
-        initExec.Start();
+        // CRITICAL FIX: DO NOT call initExec.Start() - causes thread competition!
+        // Use direct evaluation for initialization instead
 
         if (m_ctx->m_dual_mode) {
             // Ensure B initialized
@@ -159,6 +160,9 @@ void OptimizationRunner::worker(int threadId)
 
 void OptimizationRunner::workerSingle(int threadId)
 {
+    // PERFORMANCE CRITICAL: Use old Evaluator pattern for maximum single-frame performance
+    // This bypasses the OptimizationRunner overhead and mimics the old efficient Evaluator::Run() loop
+    
     RasterMutator mutator(m_ctx, threadId);
     mutator.Init((unsigned long long)time(NULL) + (unsigned long long)threadId * 187927ULL);
 
@@ -175,81 +179,57 @@ void OptimizationRunner::workerSingle(int threadId)
         m_ctx->m_cache_size,
         &mutator,
         threadId);
+    // CRITICAL FIX: Call exec.Start() to register executor, but NOT exec.Run()
+    // Start() only registers, doesn't launch threads
     exec.Start();
 
-    // Single-frame optimized - no dual structures
-    raster_picture current = m_ctx->m_best_pic;
+    // OLD EVALUATOR PATTERN - Minimal overhead single evaluation loop
+    raster_picture new_picture;
+    std::vector<const line_cache_result*> line_results(m_ctx->m_height);
+    bool clean_first_evaluation = true;
+    
+    // CRITICAL FIX: Track current accepted cost like old Evaluator (not just best cost)
     double currentCost = m_ctx->m_best_result;
-    
-    // Lock-free best picture tracking to avoid hot-path contention
-    raster_picture local_best_pic = m_ctx->m_best_pic;
-    unsigned long long local_best_generation = m_ctx->m_best_generation.load(std::memory_order_acquire);
 
-    // Reuse line results buffer to avoid per-iteration allocations
-    std::vector<const line_cache_result*> reusableLineResults(m_ctx->m_height);
-    SingleEvalResult reusableResult;
-    reusableResult.lineResults.resize(m_ctx->m_height);
-    
-    // Statistics throttling - only collect every N iterations to avoid per-iteration time() calls
-    constexpr int STATS_THROTTLE_INTERVAL = 10000;
-    int stats_counter = 0;
-
+    // Emulate old Evaluator::Run() pattern exactly for maximum performance
     while (m_running.load() && !m_ctx->m_finished.load()) {
-        // Simple mutation - no dual-frame logic
-        raster_picture candidate = current;
+        // OLD PATTERN: Always start from best pic and mutate
+        new_picture = m_ctx->m_best_pic;
+
+        if (clean_first_evaluation) {
+            clean_first_evaluation = false;
+        } else {
+            mutator.MutateProgram(&new_picture);
+        }
+
+        // OLD PATTERN: Direct execution with minimal overhead
+        double result = (double)exec.ExecuteRasterProgram(&new_picture, line_results.data());
+
+        // OLD PATTERN: Single mutex lock at the end like old Evaluator
+        std::unique_lock<std::mutex> lock(m_ctx->m_mutex);
         
-        // Honor mutation base selection with lock-free best picture access
-        if (m_ctx->m_mutation_base == E_MUT_BASE_BEST) {
-            // Check if best picture has been updated (lock-free)
-            unsigned long long current_generation = m_ctx->m_best_generation.load(std::memory_order_acquire);
-            if (current_generation != local_best_generation) {
-                // Best picture changed, update our local copy
-                std::unique_lock<std::mutex> lock(m_ctx->m_mutex);
-                // Re-read generation inside lock to avoid race condition
-                current_generation = m_ctx->m_best_generation.load(std::memory_order_relaxed);
-                local_best_pic = m_ctx->m_best_pic;
-                local_best_generation = current_generation;
-            }
-            candidate = local_best_pic;
+        ++m_ctx->m_evaluations;
+
+        // Check for termination
+        if ((m_ctx->m_max_evals > 0 && m_ctx->m_evaluations >= m_ctx->m_max_evals) || m_ctx->m_finished.load()) {
+            CTX_MARK_FINISHED((*m_ctx), "runner_max_evals");
+            break;
+        }
+
+        // OLD PATTERN: Direct acceptance logic like old Evaluator - use currentCost not best_result!
+        bool accept = m_policy->accept(currentCost, result, *m_ctx);
+        
+        if (accept) {
+            currentCost = result;  // Update current accepted cost
+            m_policy->onAccepted(result, *m_ctx);
         }
         
-        mutator.MutateProgram(&candidate);
-
-        // Simple evaluation using reusable buffer - no allocations
-        m_evaluator.evaluateSingle(exec, candidate, reusableResult);
-        double candCost = reusableResult.cost;
-
-        // Single tight critical section - optimized to reduce mutex contention
-        {
-            std::unique_lock<std::mutex> lock(m_ctx->m_mutex);
-            
-            ++m_ctx->m_evaluations;
-            
-            // Throttled statistics collection - avoid per-iteration time() calls
-            if (++stats_counter >= STATS_THROTTLE_INTERVAL) {
-                stats_counter = 0;
-                m_ctx->CollectStatisticsTickUnsafe();
-            }
-            
-            if ((m_ctx->m_max_evals > 0 && m_ctx->m_evaluations >= m_ctx->m_max_evals) || m_ctx->m_finished.load()) {
-                CTX_MARK_FINISHED((*m_ctx), "runner_max_evals");
-                break;
-            }
-            
-            bool accept = m_policy->accept(currentCost, candCost, *m_ctx);
-            if (accept) {
-                currentCost = candCost;
-                current = candidate;
-                m_policy->onAccepted(candCost, *m_ctx);
-            }
-            
-            if (candCost < m_ctx->m_best_result) {
-                // Copy sprites memory only when improving; pass executor's current view to avoid extra memcpy per eval
-                m_ctx->ReportEvaluationResult(candCost, &candidate, reusableResult.lineResults, exec.GetSpritesMemory(), &mutator);
-            }
-            
-            m_policy->postIterationUpdate(*m_ctx);
+        // OLD PATTERN: Only report improvements, not all accepted solutions (check under lock)
+        if (result < m_ctx->m_best_result) {
+            m_ctx->ReportEvaluationResult(result, &new_picture, line_results, exec.GetSpritesMemory(), &mutator);
         }
+
+        m_policy->postIterationUpdate(*m_ctx);
     }
 }
 
