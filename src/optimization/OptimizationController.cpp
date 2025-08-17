@@ -149,7 +149,8 @@ void OptimizationController::Run()
         std::unique_lock<std::mutex> lock(m_evalContext.m_mutex);
         m_evalContext.m_time_start = time(NULL);
         m_evalContext.m_statistics.clear();
-        m_evalContext.m_last_statistics_seconds = 0;
+        // Note: Now using evaluation-based statistics collection (every 10K evals)
+        // instead of time-based collection, so no need to initialize time counter
     }
 }
 

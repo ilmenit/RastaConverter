@@ -174,7 +174,6 @@ public:
 
     // Statistics tracking
     statistics_list m_statistics;
-    unsigned m_last_statistics_seconds = 0;
 
     // DLAS specific fields
     double m_cost_max = DBL_MAX;                  // Maximum cost threshold

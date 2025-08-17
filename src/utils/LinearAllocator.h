@@ -42,7 +42,8 @@ public:
             chunk_list = next;
         }
 
-        alloc_ptr = nullptr;
+        // Keep alloc_ptr for potential reuse optimization
+        // Safe because alloc_left = 0 forces reallocation before any dereference
         alloc_left = 0;
         alloc_total = 0;
     }

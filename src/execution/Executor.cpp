@@ -575,8 +575,8 @@ e_target Executor::FindClosestColorRegister(sprites_row_memory_t& spriterow, int
 e_target Executor::FindClosestColorRegisterSingle(sprites_row_memory_t& spriterow, int index, int x, int y, bool &restart_line, distance_t& best_error)
 {
     distance_t distance;
-    int sprite_bit;
-    int best_sprite_bit;
+    int sprite_bit = 0;  // Initialize to prevent uninitialized use
+    int best_sprite_bit = 0;  // Initialize to prevent uninitialized use
     e_target result = E_COLBAK;
     distance_t min_distance = DISTANCE_MAX;
     bool sprite_covers_colbak = false;

@@ -210,6 +210,11 @@ void OptimizationRunner::workerSingle(int threadId)
         
         ++m_ctx->m_evaluations;
 
+        // OLD PATTERN: Statistics collection every 10,000 evaluations like old Evaluator
+        if (m_ctx->m_evaluations % 10000 == 0) {
+            m_ctx->CollectStatisticsTickUnsafe();
+        }
+
         // Check for termination
         if ((m_ctx->m_max_evals > 0 && m_ctx->m_evaluations >= m_ctx->m_max_evals) || m_ctx->m_finished.load()) {
             CTX_MARK_FINISHED((*m_ctx), "runner_max_evals");

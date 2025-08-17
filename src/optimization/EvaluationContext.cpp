@@ -38,13 +38,12 @@ EvaluationContext::~EvaluationContext()
 }
 void EvaluationContext::CollectStatisticsTickUnsafe()
 {
-    time_t now = time(NULL);
-    unsigned seconds = (unsigned)(now - m_time_start);
-    if (seconds > m_last_statistics_seconds) {
-        m_last_statistics_seconds = seconds;
+    // Use old evaluation-based collection frequency for consistent memory usage
+    // Collect every 10,000 evaluations instead of every second to prevent unbounded growth
+    if (m_evaluations > 0 && m_evaluations % 10000 == 0) {
         statistics_point pt;
         pt.evaluations = (unsigned)std::min<unsigned long long>(m_evaluations, UINT32_MAX);
-        pt.seconds = seconds;
+        pt.seconds = (unsigned)(time(NULL) - m_time_start);
         pt.distance = m_best_result;
         m_statistics.push_back(pt);
     }
