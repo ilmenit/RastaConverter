@@ -267,6 +267,7 @@ void RastaConverter::MainLoopDual()
 		bestA.uncache_insns();
 		m_eval_gstate.m_best_pic = bestA;
 		m_eval_gstate.m_best_result = (double)bestCostA;
+		m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 		UpdateCreatedFromResults(resultsA, m_eval_gstate.m_created_picture);
 		UpdateTargetsFromResults(resultsA, m_eval_gstate.m_created_picture_targets);
 		memcpy(&m_eval_gstate.m_sprites_memory, &bootstrapEval.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
@@ -301,6 +302,7 @@ void RastaConverter::MainLoopDual()
 						bestCostA = cost; localBest = cand; cand.uncache_insns();
 						m_eval_gstate.m_best_pic = cand;
 						m_eval_gstate.m_best_result = (double)bestCostA;
+						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						improved_flag = true;
 						// Throttle heavy copies to reduce overhead during bootstrap
 						if ((m_eval_gstate.m_evaluations & 0x7FFULL) == 0ULL) {
@@ -737,6 +739,7 @@ void RastaConverter::MainLoopDual()
 						}
 						// Skip mutation stats aggregation in dual alternation per request
 						m_eval_gstate.m_best_result = cost;
+						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						m_eval_gstate.m_update_improvement = true;
 						m_eval_gstate.m_condvar_update.notify_one();
 					}

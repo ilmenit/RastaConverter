@@ -6,7 +6,17 @@
 	icl "no_name.h"
 
 	org $00
+
+fcnt	.ds 2
+fadr	.ds 2
+fhlp	.ds 2
+cloc	.ds 1
+regA	.ds 1
+regX	.ds 1
+regY	.ds 1
 byt2	.ds 1
+
+zc	.ds ZCOLORS
 
 * ---	BASIC switch OFF
 	org $2000\ mva #$ff portb\ rts\ ini $2000
@@ -20,6 +30,10 @@ scr	ins "output.png.mic", 0, 8160
 	ELS
 scr	ins "output.png.mic"
 	EIF
+
+	.ifdef nil_used
+nil	:8*40 brk
+	eif
 
 	.ALIGN $0400
 ant	ANTIC_PROGRAM scr,ant
@@ -45,6 +59,8 @@ main
 	sei			;stop interrups
 	mva #$00 nmien		;stop all interrupts
 	mva #$fe portb		;switch off ROM to get 16k more ram
+
+	ZPINIT
 
 ////////////////////
 // RASTER PROGRAM //
@@ -75,8 +91,7 @@ LOOP	lda vcount		;synchronization for the first screen line
 	jsr wait54cycle
 	inc byt2
 
-;  icl "output.png.rp"
-  icl "output.png.opt"
+  icl "output.png.rp"
 
 raster_program_end
 
@@ -161,95 +176,46 @@ byt3	brk
 ;---
 
 .MACRO	ANTIC_PROGRAM
-	:+8 dta $4e,a(:1+$0000+#*40)	
+	:+8 dta $4e,a(:1+$0000+#*40)
 	:+8 dta $4e,a(:1+$0140+#*40)
 	:+8 dta $4e,a(:1+$0280+#*40)
 	:+8 dta $4e,a(:1+$03C0+#*40)
-	ift PIC_HEIGHT > $8	
 	:+8 dta $4e,a(:1+$0500+#*40)
-	eif
-	ift PIC_HEIGHT > $10
 	:+8 dta $4e,a(:1+$0640+#*40)
-	eif
-	ift PIC_HEIGHT > $18	
 	:+8 dta $4e,a(:1+$0780+#*40)
-	eif
-	ift PIC_HEIGHT > $20	
 	:+8 dta $4e,a(:1+$08C0+#*40)
-	eif
-	ift PIC_HEIGHT > $28	
 	:+8 dta $4e,a(:1+$0A00+#*40)
-	eif
-	ift PIC_HEIGHT > $30	
 	:+8 dta $4e,a(:1+$0B40+#*40)
-	eif
-	ift PIC_HEIGHT > $38	
 	:+8 dta $4e,a(:1+$0C80+#*40)
-	eif
-	ift PIC_HEIGHT > $40	
 	:+8 dta $4e,a(:1+$0DC0+#*40)
-	eif
-	ift PIC_HEIGHT > $48	
 	:+8 dta $4e,a(:1+$0F00+#*40)
-	eif
-	ift PIC_HEIGHT > $50	
 	:+8 dta $4e,a(:1+$1040+#*40)
-	eif
-	ift PIC_HEIGHT > $58	
 	:+8 dta $4e,a(:1+$1180+#*40)
-	eif
-	ift PIC_HEIGHT > $60	
 	:+8 dta $4e,a(:1+$12C0+#*40)
-	eif
-	ift PIC_HEIGHT > $68	
 	:+8 dta $4e,a(:1+$1400+#*40)
-	eif
-	ift PIC_HEIGHT > $70	
 	:+8 dta $4e,a(:1+$1540+#*40)
-	eif
-	ift PIC_HEIGHT > $78	
 	:+8 dta $4e,a(:1+$1680+#*40)
-	eif
-	ift PIC_HEIGHT > $80	
 	:+8 dta $4e,a(:1+$17C0+#*40)
-	eif
-	ift PIC_HEIGHT > $88	
 	:+8 dta $4e,a(:1+$1900+#*40)
-	eif
-	ift PIC_HEIGHT > $90	
 	:+8 dta $4e,a(:1+$1A40+#*40)
-	eif
-	ift PIC_HEIGHT > $98	
 	:+8 dta $4e,a(:1+$1B80+#*40)
-	eif
-	ift PIC_HEIGHT > $100	
 	:+8 dta $4e,a(:1+$1CC0+#*40)
-	eif
-	ift PIC_HEIGHT > $108	
 	:+8 dta $4e,a(:1+$1E00+#*40)
-	eif
-	ift PIC_HEIGHT > $110	
 	:+4 dta $4e,a(:1+$1F40+#*40)
-	eif
-	ift PIC_HEIGHT > $112	
 	:+4 dta $4e,a(:1+$1FF0+#*40)
-	eif
-	ift PIC_HEIGHT > $118	
 	:+8 dta $4e,a(:1+$2090+#*40)
-	eif
-	ift PIC_HEIGHT > $120	
 	:+8 dta $4e,a(:1+$21D0+#*40)
-	eif
-	ift PIC_HEIGHT > $128	
 	:+8 dta $4e,a(:1+$2310+#*40)
-	eif
-	ift PIC_HEIGHT > $130	
 	:+8 dta $4e,a(:1+$2450+#*40)
-	eif
 	dta $41,a(:2)
 .ENDM
 
 CL
+
+.MACRO	ZPINIT
+.ENDM
+
+ZCOLORS	= 0
 
 ;---
 	run main

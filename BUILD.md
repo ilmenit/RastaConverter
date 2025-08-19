@@ -75,6 +75,22 @@ build.bat -DENABLE_UNITY_BUILD=ON -DCOPY_ALL_RUNTIME_DLLS=ON
 # Verbose script debug:
 set debug_build=1
 build.bat
+
+# Optional compiler selection tokens (Windows):
+#   msvc | clang | clang-cl | gcc (mingw) | icx
+# The script will auto-use Ninja preset for non-MSVC compilers.
+
+# Intel oneAPI icx:
+build.bat release x64 icx
+
+# LLVM clang-cl:
+build.bat release x64 clang-cl
+
+# GNU clang driver:
+build.bat debug x64 clang
+
+# MinGW-w64 gcc (ensure MinGW toolchain and deps are on PATH):
+build.bat release x64 gcc
 ```
 
 macOS/Linux (bash)
@@ -95,11 +111,23 @@ macOS/Linux (bash)
 
 # Verbose:
 DEBUG_BUILD=1 ./build.sh
+
+# Optional compiler tokens (portable): clang | clang-cl | gcc | mingw | icx
+# These add -DCMAKE_{C,CXX}_COMPILER=... to the configure call.
+
+# Intel oneAPI icx example with Ninja preset:
+./build.sh linux-clang Release icx
+
+# GCC example:
+./build.sh linux-gcc Release gcc
 ```
 
 PowerShell cross-platform
 ```
 ./build.ps1 -Preset x64-release -Config Release -NoGui -Extra -DENABLE_UNITY_BUILD=ON
+
+# Optional: specify compiler (clang | clang-cl | gcc | mingw | icx)
+./build.ps1 -Preset ninja-release -Config Release -Compiler icx
 ```
 
 Build with CMake directly

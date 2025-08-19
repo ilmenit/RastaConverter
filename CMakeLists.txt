@@ -391,6 +391,37 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             endif()
         endif()
     endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    target_compile_options(RastaConverter PRIVATE
+        -Wall -Wextra -Wpedantic
+        $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+        $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
+        $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+    )
+    if(NOT WIN32)
+        if(ENABLE_LTO)
+            target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto>)
+        endif()
+        if(ENABLE_DEAD_STRIP)
+            target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
+        endif()
+    endif()
+    if(BUILD_NO_GUI)
+        target_compile_options(RastaConverter-NO_GUI PRIVATE
+            -Wall -Wextra -Wpedantic
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
+            $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+        )
+        if(NOT WIN32)
+            if(ENABLE_LTO)
+                target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto>)
+            endif()
+            if(ENABLE_DEAD_STRIP)
+                target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
+            endif()
+        endif()
+    endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(RastaConverter PRIVATE
         -Wall -Wextra -Wpedantic
@@ -467,6 +498,7 @@ set(RC_RUNTIME_COPY_DIR "$<TARGET_FILE_DIR:RastaConverter>")
 add_custom_command(TARGET RastaConverter POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Palettes" "${RC_RUNTIME_COPY_DIR}/Palettes"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Generator" "${RC_RUNTIME_COPY_DIR}/Generator"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/GeneratorDual" "${RC_RUNTIME_COPY_DIR}/GeneratorDual"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/clacon2.ttf" "${RC_RUNTIME_COPY_DIR}/clacon2.ttf"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/ChangeLog.md" "${RC_RUNTIME_COPY_DIR}/ChangeLog.md"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR}/help.txt"
@@ -477,6 +509,7 @@ if(BUILD_NO_GUI)
     add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Palettes" "${RC_RUNTIME_COPY_DIR_NO_GUI}/Palettes"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Generator" "${RC_RUNTIME_COPY_DIR_NO_GUI}/Generator"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/GeneratorDual" "${RC_RUNTIME_COPY_DIR_NO_GUI}/GeneratorDual"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/ChangeLog.md" "${RC_RUNTIME_COPY_DIR_NO_GUI}/ChangeLog.md"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR_NO_GUI}/help.txt"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR_NO_GUI}/README.md"

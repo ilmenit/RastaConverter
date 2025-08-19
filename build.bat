@@ -24,6 +24,7 @@ set BUILD_NO_GUI=0
 set CLEAN=0
 set CLEANONLY=0
 set EXTRA_CMAKE_ARGS=
+set COMPILER=
 
 REM Parse arguments
 :parse_args
@@ -42,6 +43,13 @@ if /I "%~1"=="ninja" (
     if /I "%CONFIG%"=="Debug" ( set PRESET=ninja-debug ) else ( set PRESET=ninja-release )
     shift & goto parse_args
 )
+REM Optional compiler selector (simple tokens)
+if /I "%~1"=="msvc" ( set COMPILER=msvc & shift & goto parse_args )
+if /I "%~1"=="clang" ( set COMPILER=clang & shift & goto parse_args )
+if /I "%~1"=="clang-cl" ( set COMPILER=clang-cl & shift & goto parse_args )
+if /I "%~1"=="gcc" ( set COMPILER=gcc & shift & goto parse_args )
+if /I "%~1"=="mingw" ( set COMPILER=gcc & shift & goto parse_args )
+if /I "%~1"=="icx" ( set COMPILER=icx & shift & goto parse_args )
 if /I "%~1"=="nogui" ( set BUILD_NO_GUI=1 & shift & goto parse_args )
 if /I "%~1"=="check" ( set CHECK_DEPS=1 & shift & goto parse_args )
 if /I "%~1"=="CLEAN" ( set CLEAN=1 & shift & goto parse_args )
@@ -58,6 +66,31 @@ shift
 goto parse_args
 
 :args_done
+
+REM If a non-MSVC compiler was requested, prefer Ninja presets automatically
+if defined COMPILER (
+    if /I not "%COMPILER%"=="msvc" (
+        if /I "%CONFIG%"=="Debug" (
+            set PRESET=ninja-debug
+        ) else (
+            set PRESET=ninja-release
+        )
+    )
+)
+
+REM Map COMPILER token to CMake compiler variables
+if /I "%COMPILER%"=="clang" (
+    set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
+)
+if /I "%COMPILER%"=="clang-cl" (
+    set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl"
+)
+if /I "%COMPILER%"=="gcc" (
+    set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++"
+)
+if /I "%COMPILER%"=="icx" (
+    set "EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx"
+)
 
 if %CHECK_DEPS% EQU 1 (
     echo [info] Checking dependencies...
@@ -87,7 +120,8 @@ if %CLEAN% EQU 1 (
 )
 
 echo [info] Configuring project...
-cmake %CFG_ARGS%
+REM Pin source dir to avoid stray args being interpreted as a source path
+cmake -S . %CFG_ARGS%
 if %errorlevel% neq 0 (
     echo [error] Configuration failed.
     echo [hint] Try one of the following:
@@ -124,6 +158,7 @@ goto end
 echo Usage: build.bat [options]
 echo   debug ^| release           Choose configuration (default: release)
 echo   x86 ^| x64 ^| ninja        Choose generator/arch preset
+echo   msvc ^| clang ^| clang-cl ^| gcc ^| icx  Optional compiler selector
 echo   nogui                      Also build console version
 echo   check                      Check dependencies
 echo   CLEAN ^| CLEANONLY         Clean build directory
@@ -131,6 +166,7 @@ echo   -DVAR=VALUE ...            Extra CMake cache options
 echo.
 echo Tips:
 echo   - Provide FREEIMAGE_DIR/SDL2_DIR/SDL2_TTF_DIR in config.env or env vars to hint discovery
+echo   - Selecting non-MSVC compiler auto-uses Ninja preset; ensure compilers are on PATH
 echo   - Or install via vcpkg/homebrew/apt and add the toolchain when desired
 echo   - Set debug_build=1 for verbose script debug
 

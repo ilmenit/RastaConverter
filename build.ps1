@@ -4,6 +4,7 @@ Param(
 	[switch]$NoGui,
 	[switch]$Clean,
 	[switch]$CleanOnly,
+	[string]$Compiler,
 	[string[]]$Extra
 )
 
@@ -31,9 +32,26 @@ switch -Wildcard ($Config.ToLower()) {
 	"minsizerel"     { $Config = "MinSizeRel" }
 }
 
+# If a non-MSVC compiler is requested, prefer Ninja presets when a VS preset would be used
+if ($Compiler -and ($Compiler.ToLower() -ne "msvc")) {
+	if ($Preset -match '^(win32|x64)-(debug|release)$') {
+		$Preset = if ($Config -eq 'Debug') { 'ninja-debug' } else { 'ninja-release' }
+	}
+}
+
 $binaryDir = Join-Path $PSScriptRoot "build/$Preset"
 $cfgArgs = @("--preset", $Preset)
 if ($NoGui) { $cfgArgs += "-DBUILD_NO_GUI=ON" }
+if ($Compiler) {
+    switch ($Compiler.ToLower()) {
+        "clang"     { $cfgArgs += @("-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++") }
+        "clang-cl"  { $cfgArgs += @("-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl") }
+        "gcc"       { $cfgArgs += @("-DCMAKE_C_COMPILER=gcc", "-DCMAKE_CXX_COMPILER=g++") }
+        "mingw"     { $cfgArgs += @("-DCMAKE_C_COMPILER=gcc", "-DCMAKE_CXX_COMPILER=g++") }
+        "icx"       { $cfgArgs += @("-DCMAKE_C_COMPILER=icx", "-DCMAKE_CXX_COMPILER=icx") }
+        default      { }
+    }
+}
 if ($Extra) { $cfgArgs += $Extra }
 
 if ($Clean) {
@@ -43,8 +61,8 @@ if ($Clean) {
 	}
 }
 
-Write-Host "[info] Configuring (preset=$Preset, config=$Config, nogui=$($NoGui.IsPresent)) ..."
-& cmake @cfgArgs
+Write-Host "[info] Configuring (preset=$Preset, config=$Config, nogui=$($NoGui.IsPresent)$(if($Compiler){", compiler=$Compiler"})) ..."
+& cmake -S . @cfgArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[error] Configuration failed." -ForegroundColor Red
     Write-Host "[hint] Try one of the following:" -ForegroundColor Yellow

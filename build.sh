@@ -20,6 +20,7 @@ clean=0
 cleanonly=0
 build_no_gui=0
 extra=( )
+compiler=""
 
 if [[ $# -gt 0 ]]; then preset="$1"; shift; fi
 if [[ $# -gt 0 ]]; then config="$1"; shift; fi
@@ -29,6 +30,7 @@ while [[ $# -gt 0 ]]; do
     nogui) build_no_gui=1 ; shift ;;
     clean) clean=1 ; shift ;;
     cleanonly) clean=1 ; cleanonly=1 ; shift ;;
+    msvc|clang|clang-cl|gcc|mingw|icx) compiler="$1" ; shift ;;
     *) extra+=("$1") ; shift ;;
   esac
 done
@@ -60,6 +62,18 @@ binary_dir="build/${preset}"
 cfg=("--preset" "$preset")
 [[ $build_no_gui -eq 1 ]] && cfg+=("-DBUILD_NO_GUI=ON")
 
+# Map compiler token to CMake CC/CXX
+case "$compiler" in
+  clang)
+    cfg+=("-DCMAKE_C_COMPILER=clang" "-DCMAKE_CXX_COMPILER=clang++") ;;
+  clang-cl)
+    cfg+=("-DCMAKE_C_COMPILER=clang-cl" "-DCMAKE_CXX_COMPILER=clang-cl") ;;
+  gcc|mingw)
+    cfg+=("-DCMAKE_C_COMPILER=gcc" "-DCMAKE_CXX_COMPILER=g++") ;;
+  icx)
+    cfg+=("-DCMAKE_C_COMPILER=icx" "-DCMAKE_CXX_COMPILER=icx") ;;
+esac
+
 # If VCPKG_ROOT provided, add toolchain (optional, not default)
 if [[ -n "${VCPKG_ROOT:-}" && -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ]]; then
   cfg+=("-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_FEATURE_FLAGS=manifests")
@@ -74,9 +88,9 @@ if [[ $clean -eq 1 && -d "$binary_dir" ]]; then
   rm -rf "$binary_dir"
 fi
 
-echo "[info] Configuring (preset=$preset, config=$config, nogui=$build_no_gui) ..."
+echo "[info] Configuring (preset=$preset, config=$config, nogui=$build_no_gui${compiler:+, compiler=$compiler}) ..."
 set +e
-cmake "${cfg[@]}"
+cmake -S . "${cfg[@]}"
 status=$?
 set -e
 if [[ $status -ne 0 ]]; then

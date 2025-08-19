@@ -1450,8 +1450,15 @@ void RastaConverter::ShowMutationStats()
 			gui.DisplayText(0, 230 + 20 * i, string(mutation_names[i]) + string("  ") + std::to_string(m_eval_gstate.m_mutation_stats[i]));
 	}
 
-	gui.DisplayText(320, 250, string("Evaluations: ") + std::to_string(m_eval_gstate.m_evaluations));
-	gui.DisplayText(320, 270, string("LastBest: ") + std::to_string(m_eval_gstate.m_last_best_evaluation) + string("                "));
+	// Helper to format integers with thousands separators (e.g., 1,234,567)
+	auto format_with_commas = [](unsigned long long value) -> std::string {
+		std::string s = std::to_string(value);
+		for (int i = (int)s.length() - 3; i > 0; i -= 3) s.insert((size_t)i, ",");
+		return s;
+	};
+
+	gui.DisplayText(320, 250, string("Evaluations: ") + format_with_commas(m_eval_gstate.m_evaluations));
+	gui.DisplayText(320, 270, string("LastBest: ") + format_with_commas(m_eval_gstate.m_last_best_evaluation) + string("                "));
 	gui.DisplayText(320, 290, string("Rate: ") + std::to_string((unsigned long long)m_rate) + string("                "));
 	gui.DisplayText(320, 310, string("Norm. Dist: ") + std::to_string(NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
 
