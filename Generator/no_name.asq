@@ -161,95 +161,89 @@ byt3	brk
 ;---
 
 .MACRO	ANTIC_PROGRAM
-	:+8 dta $4e,a(:1+$0000+#*40)
-	ift PIC_HEIGHT > $8	
+	:+8 dta $4e,a(:1+$0000+#*40)	
 	:+8 dta $4e,a(:1+$0140+#*40)
-	eif
-	ift PIC_HEIGHT > $10	
 	:+8 dta $4e,a(:1+$0280+#*40)
-	eif
-	ift PIC_HEIGHT > $18	
 	:+8 dta $4e,a(:1+$03C0+#*40)
-	eif
-	ift PIC_HEIGHT > $20	
+	ift PIC_HEIGHT > $8	
 	:+8 dta $4e,a(:1+$0500+#*40)
 	eif
-	ift PIC_HEIGHT > $28	
+	ift PIC_HEIGHT > $10
 	:+8 dta $4e,a(:1+$0640+#*40)
 	eif
-	ift PIC_HEIGHT > $30	
+	ift PIC_HEIGHT > $18	
 	:+8 dta $4e,a(:1+$0780+#*40)
 	eif
-	ift PIC_HEIGHT > $38	
+	ift PIC_HEIGHT > $20	
 	:+8 dta $4e,a(:1+$08C0+#*40)
 	eif
-	ift PIC_HEIGHT > $40	
+	ift PIC_HEIGHT > $28	
 	:+8 dta $4e,a(:1+$0A00+#*40)
 	eif
-	ift PIC_HEIGHT > $48	
+	ift PIC_HEIGHT > $30	
 	:+8 dta $4e,a(:1+$0B40+#*40)
 	eif
-	ift PIC_HEIGHT > $50	
+	ift PIC_HEIGHT > $38	
 	:+8 dta $4e,a(:1+$0C80+#*40)
 	eif
-	ift PIC_HEIGHT > $58	
+	ift PIC_HEIGHT > $40	
 	:+8 dta $4e,a(:1+$0DC0+#*40)
 	eif
-	ift PIC_HEIGHT > $60	
+	ift PIC_HEIGHT > $48	
 	:+8 dta $4e,a(:1+$0F00+#*40)
 	eif
-	ift PIC_HEIGHT > $68	
+	ift PIC_HEIGHT > $50	
 	:+8 dta $4e,a(:1+$1040+#*40)
 	eif
-	ift PIC_HEIGHT > $70	
+	ift PIC_HEIGHT > $58	
 	:+8 dta $4e,a(:1+$1180+#*40)
 	eif
-	ift PIC_HEIGHT > $78	
+	ift PIC_HEIGHT > $60	
 	:+8 dta $4e,a(:1+$12C0+#*40)
 	eif
-	ift PIC_HEIGHT > $80	
+	ift PIC_HEIGHT > $68	
 	:+8 dta $4e,a(:1+$1400+#*40)
 	eif
-	ift PIC_HEIGHT > $88	
+	ift PIC_HEIGHT > $70	
 	:+8 dta $4e,a(:1+$1540+#*40)
 	eif
-	ift PIC_HEIGHT > $90	
+	ift PIC_HEIGHT > $78	
 	:+8 dta $4e,a(:1+$1680+#*40)
 	eif
-	ift PIC_HEIGHT > $98	
+	ift PIC_HEIGHT > $80	
 	:+8 dta $4e,a(:1+$17C0+#*40)
 	eif
-	ift PIC_HEIGHT > $100	
+	ift PIC_HEIGHT > $88	
 	:+8 dta $4e,a(:1+$1900+#*40)
 	eif
-	ift PIC_HEIGHT > $108	
+	ift PIC_HEIGHT > $90	
 	:+8 dta $4e,a(:1+$1A40+#*40)
 	eif
-	ift PIC_HEIGHT > $110	
+	ift PIC_HEIGHT > $98	
 	:+8 dta $4e,a(:1+$1B80+#*40)
 	eif
-	ift PIC_HEIGHT > $118	
+	ift PIC_HEIGHT > $100	
 	:+8 dta $4e,a(:1+$1CC0+#*40)
 	eif
-	ift PIC_HEIGHT > $120	
+	ift PIC_HEIGHT > $108	
 	:+8 dta $4e,a(:1+$1E00+#*40)
 	eif
-	ift PIC_HEIGHT > $128	
+	ift PIC_HEIGHT > $110	
 	:+4 dta $4e,a(:1+$1F40+#*40)
 	eif
-	ift PIC_HEIGHT > $12C	
+	ift PIC_HEIGHT > $112	
 	:+4 dta $4e,a(:1+$1FF0+#*40)
 	eif
-	ift PIC_HEIGHT > $130	
+	ift PIC_HEIGHT > $118	
 	:+8 dta $4e,a(:1+$2090+#*40)
 	eif
-	ift PIC_HEIGHT > $138	
+	ift PIC_HEIGHT > $120	
 	:+8 dta $4e,a(:1+$21D0+#*40)
 	eif
-	ift PIC_HEIGHT > $140	
+	ift PIC_HEIGHT > $128	
 	:+8 dta $4e,a(:1+$2310+#*40)
 	eif
-	ift PIC_HEIGHT > $148	
+	ift PIC_HEIGHT > $130	
 	:+8 dta $4e,a(:1+$2450+#*40)
 	eif
 	dta $41,a(:2)
