@@ -157,6 +157,12 @@ void Configuration::Process(int argc, char *argv[])
 	parser.addOption("dual_blending", {"db"}, "yuv|rgb", "yuv",
 		"Blending color space for preview/export in dual mode.",
 		"Dual-frame mode");
+	parser.addOption("dual_luma", {"dl"}, "FLOAT", "0.2",
+		"Temporal luma penalty weight (higher reduces flicker).",
+		"Dual-frame mode");
+	parser.addOption("dual_chroma", {"dc"}, "FLOAT", "0.1",
+		"Temporal chroma penalty weight (higher reduces flicker).",
+		"Dual-frame mode");
 
 	// Parse now
 	parser.parse(argc, argv);
@@ -436,6 +442,16 @@ void Configuration::Process(int argc, char *argv[])
 			v = "yuv";
 		}
 		dual_blending = v;
+	}
+	{
+		std::string v = parser.getValue("dual_luma", "0.2");
+		dual_luma = String2Value<double>(v);
+		if (dual_luma < 0.0) dual_luma = 0.0; // clamp
+	}
+	{
+		std::string v = parser.getValue("dual_chroma", "0.1");
+		dual_chroma = String2Value<double>(v);
+		if (dual_chroma < 0.0) dual_chroma = 0.0; // clamp
 	}
 }
 

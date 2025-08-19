@@ -242,6 +242,14 @@ Dual-frame mode:
   Blending color space for preview/export in dual mode. Default: yuv
   Aliases: /db, --dual_blending
 
+/dual_luma=<FLOAT>
+  Temporal luma penalty weight in dual mode. Higher values reduce flicker by forcing A and B to be closer in brightness; lower values allow more alternation range. Default: 0.2
+  Aliases: /dl, --dual_luma
+
+/dual_chroma=<FLOAT>
+  Temporal chroma penalty weight in dual mode. Higher values reduce color flicker; lower values preserve more color variety. Default: 0.1
+  Aliases: /dc, --dual_chroma
+
 Example:
 RastaConverter.exe c64.png /threads=8 /s=5 /opt=lahc
 

@@ -161,6 +161,7 @@ public:
 
 	void SetDualTables(const float* paletteY, const float* paletteU, const float* paletteV,
 		const float* pairYsum, const float* pairUsum, const float* pairVsum,
+		const float* pairYdiff, const float* pairUdiff, const float* pairVdiff,
 		const float* targetY, const float* targetU, const float* targetV);
 
 	// Optional: set 8-bit quantized tables for accelerated dual distance
@@ -168,10 +169,16 @@ public:
 		const unsigned char* pairYsum8,
 		const unsigned char* pairUsum8,
 		const unsigned char* pairVsum8,
+		const unsigned char* pairYdiff8,
+		const unsigned char* pairUdiff8,
+		const unsigned char* pairVdiff8,
 		const unsigned char* targetY8,
 		const unsigned char* targetU8,
 		const unsigned char* targetV8
 	);
+
+	// Configure temporal penalty weights
+	void SetDualTemporalWeights(float luma, float chroma) { m_dual_lambda_luma = luma; m_dual_lambda_chroma = chroma; }
 
 	// Flush this evaluator's current mutation counters into the shared
 	// global stats and clear the local counters. Intended to be called
@@ -252,6 +259,9 @@ private:
 	const float* m_dual_pairYsum = nullptr;
 	const float* m_dual_pairUsum = nullptr;
 	const float* m_dual_pairVsum = nullptr;
+	const float* m_dual_pairYdiff = nullptr;
+	const float* m_dual_pairUdiff = nullptr;
+	const float* m_dual_pairVdiff = nullptr;
 	const float* m_dual_targetY = nullptr;
 	const float* m_dual_targetU = nullptr;
 	const float* m_dual_targetV = nullptr;
@@ -260,10 +270,15 @@ private:
 	const unsigned char* m_dual_pairYsum8 = nullptr;
 	const unsigned char* m_dual_pairUsum8 = nullptr;
 	const unsigned char* m_dual_pairVsum8 = nullptr;
+	const unsigned char* m_dual_pairYdiff8 = nullptr;
+	const unsigned char* m_dual_pairUdiff8 = nullptr;
+	const unsigned char* m_dual_pairVdiff8 = nullptr;
 	const unsigned char* m_dual_targetY8 = nullptr;
 	const unsigned char* m_dual_targetU8 = nullptr;
 	const unsigned char* m_dual_targetV8 = nullptr;
 	unsigned short m_sq_lut[256]; // squared difference LUT (0..255)
+	float m_dual_lambda_luma = 1.0f;
+	float m_dual_lambda_chroma = 0.25f;
 };
 
 #endif

@@ -5,6 +5,7 @@
 #include "TargetPicture.h"
 #include "debug_log.h"
 #include <cassert>
+#include <cmath>
 #include <cstring>
 #include <thread>
 #include <mutex>
@@ -103,13 +104,18 @@ void RastaConverter::PrecomputeDualTables()
 	}
 	// Pair YUV averages
 	m_pair_Ysum.resize(128*128); m_pair_Usum.resize(128*128); m_pair_Vsum.resize(128*128);
+	m_pair_Ydiff.resize(128*128); m_pair_Udiff.resize(128*128); m_pair_Vdiff.resize(128*128);
 	m_pair_Ysum8.resize(128*128); m_pair_Usum8.resize(128*128); m_pair_Vsum8.resize(128*128);
+	m_pair_Ydiff8.resize(128*128); m_pair_Udiff8.resize(128*128); m_pair_Vdiff8.resize(128*128);
 	for (int a=0;a<128;++a) {
 		for (int b=0;b<128;++b) {
 			int p=(a<<7)|b;
 			m_pair_Ysum[p] = 0.5f*(m_palette_y[a] + m_palette_y[b]);
 			m_pair_Usum[p] = 0.5f*(m_palette_u[a] + m_palette_u[b]);
 			m_pair_Vsum[p] = 0.5f*(m_palette_v[a] + m_palette_v[b]);
+			m_pair_Ydiff[p] = fabsf(m_palette_y[a] - m_palette_y[b]);
+			m_pair_Udiff[p] = fabsf(m_palette_u[a] - m_palette_u[b]);
+			m_pair_Vdiff[p] = fabsf(m_palette_v[a] - m_palette_v[b]);
 			auto q8 = [](float v, float offset, float scale)->unsigned char{
 				float t = (v + offset) * scale; if (t < 0.0f) t = 0.0f; if (t > 255.0f) t = 255.0f; return (unsigned char)(t + 0.5f);
 			};
@@ -117,6 +123,9 @@ void RastaConverter::PrecomputeDualTables()
 			m_pair_Ysum8[p] = q8(m_pair_Ysum[p], 0.0f, 1.0f);
 			m_pair_Usum8[p] = q8(m_pair_Usum[p], 160.0f, 1.0f);
 			m_pair_Vsum8[p] = q8(m_pair_Vsum[p], 200.0f, 1.0f);
+			m_pair_Ydiff8[p] = q8(m_pair_Ydiff[p], 0.0f, 1.0f);
+			m_pair_Udiff8[p] = q8(m_pair_Udiff[p], 0.0f, 1.0f);
+			m_pair_Vdiff8[p] = q8(m_pair_Vdiff[p], 0.0f, 1.0f);
 		}
 	}
 	// Quantize target YUV to 8-bit with same shifts
@@ -519,11 +528,14 @@ void RastaConverter::MainLoopDual()
 					  cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, 
 					  cfg.initial_seed + 9999, cfg.cache_size);
 		baselineEval.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
-							  m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
-							  m_target_y.data(), m_target_u.data(), m_target_v.data());
+						  m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
+						  m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
+						  m_target_y.data(), m_target_u.data(), m_target_v.data());
 		baselineEval.SetDualTables8(
 			m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
+			m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
 			m_target_y8.data(), m_target_u8.data(), m_target_v8.data());
+		baselineEval.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
 
 		// Ensure fixed-frame pointer buffer is initialized for baseline cost (B fixed initially)
 		if (m_eval_gstate.m_dual_fixed_rows_buf[0].empty()) {
@@ -573,11 +585,14 @@ void RastaConverter::MainLoopDual()
 			Evaluator ev;
 			ev.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 4242ULL + (unsigned long long)tid * 133ULL, cfg.cache_size, tid);
 			ev.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
-						 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
-						 m_target_y.data(), m_target_u.data(), m_target_v.data());
+					 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
+					 m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
+					 m_target_y.data(), m_target_u.data(), m_target_v.data());
 			ev.SetDualTables8(
 				m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
+				m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
 				m_target_y8.data(), m_target_u8.data(), m_target_v8.data());
+			ev.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
 
 			// Local working state for this thread (NO sharing between threads)
 			std::vector<const line_cache_result*> line_results(m_height, nullptr);

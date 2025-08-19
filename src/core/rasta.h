@@ -76,9 +76,12 @@ private:
 	float m_palette_y[128] = {0}, m_palette_u[128] = {0}, m_palette_v[128] = {0};
 	std::vector<float> m_target_y, m_target_u, m_target_v; // per-pixel target YUV (float)
 	std::vector<float> m_pair_Ysum, m_pair_Usum, m_pair_Vsum; // 128x128 tables (float)
+	// Temporal diffs between pairs (absolute component deltas)
+	std::vector<float> m_pair_Ydiff, m_pair_Udiff, m_pair_Vdiff; // 128x128 tables (float)
 	// Quantized 8-bit variants for LUT-based dual distance
 	std::vector<unsigned char> m_target_y8, m_target_u8, m_target_v8; // per-pixel target YUV (uint8)
 	std::vector<unsigned char> m_pair_Ysum8, m_pair_Usum8, m_pair_Vsum8; // 128x128 tables (uint8)
+	std::vector<unsigned char> m_pair_Ydiff8, m_pair_Udiff8, m_pair_Vdiff8; // 128x128 tables (uint8)
 	std::vector<unsigned char> m_pair_srgb; // 128x128x3 blended sRGB pairs (active blending mode)
 	enum class DualDisplayMode { A, B, MIX };
 	DualDisplayMode m_dual_display = DualDisplayMode::MIX;

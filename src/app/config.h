@@ -79,6 +79,9 @@ struct Configuration {
 	std::string after_dual_steps = "copy"; // /after_dual_steps=generate|copy
 	unsigned long long altering_dual_steps = 50000; // /altering_dual_steps
 	std::string dual_blending = "yuv"; // /dual_blending=rgb|yuv (default yuv)
+	// Temporal penalty weights to control flicker perception in dual mode
+	double dual_luma = 0.2;   // weight for (Ya - Yb)^2
+	double dual_chroma = 0.1; // weight for (Ua - Ub)^2 + (Va - Vb)^2
 
 	// --- Optimizer selection ---
 	enum e_optimizer { E_OPT_DLAS, E_OPT_LAHC };

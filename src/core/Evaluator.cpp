@@ -50,11 +50,13 @@ Evaluator::Evaluator()
 
 void Evaluator::SetDualTables(const float* paletteY, const float* paletteU, const float* paletteV,
 	const float* pairYsum, const float* pairUsum, const float* pairVsum,
+	const float* pairYdiff, const float* pairUdiff, const float* pairVdiff,
 	const float* targetY, const float* targetU, const float* targetV)
 {
 #ifdef _DEBUG
     assert(paletteY && paletteU && paletteV);
     assert(pairYsum && pairUsum && pairVsum);
+    assert(pairYdiff && pairUdiff && pairVdiff);
     assert(targetY && targetU && targetV);
 #endif
     m_dual_paletteY = paletteY;
@@ -63,6 +65,9 @@ void Evaluator::SetDualTables(const float* paletteY, const float* paletteU, cons
     m_dual_pairYsum = pairYsum;
     m_dual_pairUsum = pairUsum;
     m_dual_pairVsum = pairVsum;
+    m_dual_pairYdiff = pairYdiff;
+    m_dual_pairUdiff = pairUdiff;
+    m_dual_pairVdiff = pairVdiff;
     m_dual_targetY = targetY;
     m_dual_targetU = targetU;
     m_dual_targetV = targetV;
@@ -72,6 +77,9 @@ void Evaluator::SetDualTables8(
     const unsigned char* pairYsum8,
     const unsigned char* pairUsum8,
     const unsigned char* pairVsum8,
+    const unsigned char* pairYdiff8,
+    const unsigned char* pairUdiff8,
+    const unsigned char* pairVdiff8,
     const unsigned char* targetY8,
     const unsigned char* targetU8,
     const unsigned char* targetV8)
@@ -79,6 +87,9 @@ void Evaluator::SetDualTables8(
     m_dual_pairYsum8 = pairYsum8;
     m_dual_pairUsum8 = pairUsum8;
     m_dual_pairVsum8 = pairVsum8;
+    m_dual_pairYdiff8 = pairYdiff8;
+    m_dual_pairUdiff8 = pairUdiff8;
+    m_dual_pairVdiff8 = pairVdiff8;
     m_dual_targetY8 = targetY8;
     m_dual_targetU8 = targetU8;
     m_dual_targetV8 = targetV8;
@@ -275,6 +286,16 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
                             unsigned dU = (unsigned)((Uab8 > Tu) ? (Uab8 - Tu) : (Tu - Uab8));
                             unsigned dV = (unsigned)((Vab8 > Tv) ? (Vab8 - Tv) : (Tv - Vab8));
                             unsigned sum = (unsigned)m_sq_lut[dY] + (unsigned)m_sq_lut[dU] + (unsigned)m_sq_lut[dV];
+                            // Add temporal penalty using precomputed diffs between palette pair components
+                            if (m_dual_pairYdiff8 && m_dual_pairUdiff8 && m_dual_pairVdiff8) {
+                                unsigned dYt = m_dual_pairYdiff8[pair];
+                                unsigned dUt = m_dual_pairUdiff8[pair];
+                                unsigned dVt = m_dual_pairVdiff8[pair];
+                                // Scale by floats (weights). Cast to double for safety then back to distance_t
+                                double penalty = (double)m_dual_lambda_luma * (double)m_sq_lut[dYt]
+                                                + (double)m_dual_lambda_chroma * ((double)m_sq_lut[dUt] + (double)m_sq_lut[dVt]);
+                                sum += (unsigned)penalty;
+                            }
                             dist = (distance_t)sum;
                         } else {
                             float Yab = m_dual_pairYsum[pair];
@@ -285,6 +306,14 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
                             float du = Uab - m_dual_targetU[pix];
                             float dv = Vab - m_dual_targetV[pix];
                             double distd = (double)(dy*dy + du*du + dv*dv);
+                            // Temporal penalty
+                            if (m_dual_pairYdiff && m_dual_pairUdiff && m_dual_pairVdiff) {
+                                float dYt = m_dual_pairYdiff[pair];
+                                float dUt = m_dual_pairUdiff[pair];
+                                float dVt = m_dual_pairVdiff[pair];
+                                distd += (double)m_dual_lambda_luma * (double)(dYt * dYt)
+                                       + (double)m_dual_lambda_chroma * (double)(dUt * dUt + dVt * dVt);
+                            }
                             dist = (distance_t)distd;
                         }
                         if (spriterow[temp-E_COLPM0][sprite_bit] || sprite_leftover_pixel) {
@@ -310,6 +339,14 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
                         unsigned dU = (unsigned)((Uab8 > Tu) ? (Uab8 - Tu) : (Tu - Uab8));
                         unsigned dV = (unsigned)((Vab8 > Tv) ? (Vab8 - Tv) : (Tv - Vab8));
                         unsigned sum = (unsigned)m_sq_lut[dY] + (unsigned)m_sq_lut[dU] + (unsigned)m_sq_lut[dV];
+                        if (m_dual_pairYdiff8 && m_dual_pairUdiff8 && m_dual_pairVdiff8) {
+                            unsigned dYt = m_dual_pairYdiff8[pair];
+                            unsigned dUt = m_dual_pairUdiff8[pair];
+                            unsigned dVt = m_dual_pairVdiff8[pair];
+                            double penalty = (double)m_dual_lambda_luma * (double)m_sq_lut[dYt]
+                                            + (double)m_dual_lambda_chroma * ((double)m_sq_lut[dUt] + (double)m_sq_lut[dVt]);
+                            sum += (unsigned)penalty;
+                        }
                         if ((distance_t)sum < best_err) { best_err = (distance_t)sum; best_reg = (e_target)temp; }
                     } else {
                         float Yab = m_dual_pairYsum[pair];
@@ -320,6 +357,13 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
                         float du = Uab - m_dual_targetU[pix];
                         float dv = Vab - m_dual_targetV[pix];
                         double distd = (double)(dy*dy + du*du + dv*dv);
+                        if (m_dual_pairYdiff && m_dual_pairUdiff && m_dual_pairVdiff) {
+                            float dYt = m_dual_pairYdiff[pair];
+                            float dUt = m_dual_pairUdiff[pair];
+                            float dVt = m_dual_pairVdiff[pair];
+                            distd += (double)m_dual_lambda_luma * (double)(dYt * dYt)
+                                   + (double)m_dual_lambda_chroma * (double)(dUt * dUt + dVt * dVt);
+                        }
                         if ((distance_t)distd < best_err) { best_err = (distance_t)distd; best_reg = (e_target)temp; }
                     }
                 }
