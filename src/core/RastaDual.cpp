@@ -339,6 +339,7 @@ void RastaConverter::MainLoopDual()
 				auto now = std::chrono::steady_clock::now();
 				if ( now - m_previous_save_time > 30s ) { m_previous_save_time = now; SaveBestSolution(); }
 			}
+			else if (m_eval_gstate.m_update_autosave) { m_eval_gstate.m_update_autosave = false; SaveBestSolution(); }
 			// Periodic preview refresh of A for GUI
 			if (!quiet) {
 				raster_picture previewA;
@@ -462,6 +463,7 @@ void RastaConverter::MainLoopDual()
 					auto now = std::chrono::steady_clock::now();
 					if ( now - m_previous_save_time > 30s ) { m_previous_save_time = now; SaveBestSolution(); }
 				}
+				else if (m_eval_gstate.m_update_autosave) { m_eval_gstate.m_update_autosave = false; SaveBestSolution(); }
 				// Periodic preview refresh of B for GUI
 				if (!quiet) {
 					raster_picture previewB;
@@ -760,6 +762,14 @@ void RastaConverter::MainLoopDual()
 			m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) * (double)CLOCKS_PER_SEC / clock_delta;
 			last_rate_check_time = next_rate_check_time;
 			last_eval = m_eval_gstate.m_evaluations;
+			if (cfg.save_period == -1) {
+				using namespace std::literals::chrono_literals;
+				auto now = std::chrono::steady_clock::now();
+				if ( now - m_previous_save_time > 30s ) { m_previous_save_time = now; SaveBestSolution(); }
+			} else if (m_eval_gstate.m_update_autosave) {
+				m_eval_gstate.m_update_autosave = false;
+				SaveBestSolution();
+			}
 			if (!quiet) ShowMutationStats();
 		}
 

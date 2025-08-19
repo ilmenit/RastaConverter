@@ -47,8 +47,9 @@ if [[ -z "$preset" ]]; then
   esac
 fi
 
-# Normalize config casing
-case "${config,,}" in
+# Normalize config casing (portable, works with older bash)
+config_lower="$(printf '%s' "$config" | tr '[:upper:]' '[:lower:]')"
+case "$config_lower" in
   debug) config=Debug ;;
   release) config=Release ;;
   relwithdebinfo) config=RelWithDebInfo ;;

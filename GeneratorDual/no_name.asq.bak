@@ -13,30 +13,48 @@ byt2	.ds 1
 
 * ---	MAIN PROGRAM
 	org $2010
-	IFT PIC_HEIGHT>=204
-scr	ins "output.png.mic", 0, 8160
+	
+; SCREEN A memory
+	IFT frame_A.PIC_HEIGHT>=204
+scr_A	ins "output.png_A.mic", 0, 8160
 	:16 .byte 0
-	ins "output.png.mic" , +8160
+	ins "output.png_A.mic" , +8160
 	ELS
-scr	ins "output.png.mic"
+scr_A	ins "output.png_A.mic"
+	EIF
+
+; SCREEN B memory
+	.ALIGN $1000
+	org *+$10
+	IFT frame_B.PIC_HEIGHT>=204
+scr_B	ins "output.png_B.mic", 0, 8160
+	:16 .byte 0
+	ins "output.png_B.mic" , +8160
+	ELS
+scr_B	ins "output.png_B.mic"
 	EIF
 
 	.ALIGN $0400
-ant	ANTIC_PROGRAM scr,ant
+ant_A ANTIC_PROGRAM scr_A,ant_A
+	.ALIGN $0400
+ant_B ANTIC_PROGRAM scr_B,ant_B
 
 fnt
 
 	ift USESPRITES
 	.ALIGN $0800
 	.ds $0300
-pmg	SPRITES
+pmg_A SPRITES_A
+	.ALIGN $0800
+	.ds $0300
+pmg_B SPRITES_B
 	eif
 
 main
 * ---	init PMG
 
 	ift USESPRITES
-	mva >pmg pmbase		;missiles and players data address
+	mva >pmg_A pmbase		;missiles and players data address
 	mva #$03 pmcntl		;enable players and missiles
 	eif
 
@@ -50,18 +68,19 @@ main
 // RASTER PROGRAM //
 ////////////////////
 
-;	jmp line239
 	jmp raster_program_end
 
-LOOP	lda vcount		;synchronization for the first screen line
+LOOP	
+.local frame_A
+	lda vcount		;synchronization for the first screen line
 	cmp #$02
-	bne LOOP
+	bne frame_A
 
 	mva #%00111110 dmactl	;set new screen width
-	mva <ant dlptr
-	mva >ant dlptr+1
+	mva <ant_A dlptr
+	mva >ant_A dlptr+1
 
-  icl "output.png.rp.ini"
+  icl "output.png_A.rp.ini"
 
 ;--- wait 18 cycles
 	jsr _rts
@@ -75,8 +94,45 @@ LOOP	lda vcount		;synchronization for the first screen line
 	jsr wait54cycle
 	inc byt2
 
-;  icl "output.png.rp"
-  icl "output.png.opt"
+  icl "output.png_A.opt"
+
+.endl
+
+	; switch to frame B sprites
+	ift USESPRITES
+	mva >pmg_B pmbase		;missiles and players data address
+	eif
+
+.local frame_B
+	lda vcount		;synchronization for the first screen line
+	cmp #$02
+	bne frame_B
+
+	mva #%00111110 dmactl	;set new screen width
+	mva <ant_B dlptr
+	mva >ant_B dlptr+1
+
+  icl "output.png_B.rp.ini"
+
+;--- wait 18 cycles
+	jsr _rts
+	inc byt3
+
+;--- set global offset (23 cycles)
+	jsr _rts
+	cmp byt3\ pha:pla
+
+;--- empty line
+	jsr wait54cycle
+	inc byt2
+
+  icl "output.png_B.opt"
+.endl
+	
+	; switch to frame A sprites
+	ift USESPRITES
+	mva >pmg_A pmbase		;missiles and players data address
+	eif
 
 raster_program_end
 
@@ -162,96 +218,36 @@ byt3	brk
 
 .MACRO	ANTIC_PROGRAM
 	:+8 dta $4e,a(:1+$0000+#*40)
-	ift PIC_HEIGHT > $8	
 	:+8 dta $4e,a(:1+$0140+#*40)
-	eif
-	ift PIC_HEIGHT > $10	
 	:+8 dta $4e,a(:1+$0280+#*40)
-	eif
-	ift PIC_HEIGHT > $18	
 	:+8 dta $4e,a(:1+$03C0+#*40)
-	eif
-	ift PIC_HEIGHT > $20	
 	:+8 dta $4e,a(:1+$0500+#*40)
-	eif
-	ift PIC_HEIGHT > $28	
 	:+8 dta $4e,a(:1+$0640+#*40)
-	eif
-	ift PIC_HEIGHT > $30	
 	:+8 dta $4e,a(:1+$0780+#*40)
-	eif
-	ift PIC_HEIGHT > $38	
 	:+8 dta $4e,a(:1+$08C0+#*40)
-	eif
-	ift PIC_HEIGHT > $40	
 	:+8 dta $4e,a(:1+$0A00+#*40)
-	eif
-	ift PIC_HEIGHT > $48	
 	:+8 dta $4e,a(:1+$0B40+#*40)
-	eif
-	ift PIC_HEIGHT > $50	
 	:+8 dta $4e,a(:1+$0C80+#*40)
-	eif
-	ift PIC_HEIGHT > $58	
 	:+8 dta $4e,a(:1+$0DC0+#*40)
-	eif
-	ift PIC_HEIGHT > $60	
 	:+8 dta $4e,a(:1+$0F00+#*40)
-	eif
-	ift PIC_HEIGHT > $68	
 	:+8 dta $4e,a(:1+$1040+#*40)
-	eif
-	ift PIC_HEIGHT > $70	
 	:+8 dta $4e,a(:1+$1180+#*40)
-	eif
-	ift PIC_HEIGHT > $78	
 	:+8 dta $4e,a(:1+$12C0+#*40)
-	eif
-	ift PIC_HEIGHT > $80	
 	:+8 dta $4e,a(:1+$1400+#*40)
-	eif
-	ift PIC_HEIGHT > $88	
 	:+8 dta $4e,a(:1+$1540+#*40)
-	eif
-	ift PIC_HEIGHT > $90	
 	:+8 dta $4e,a(:1+$1680+#*40)
-	eif
-	ift PIC_HEIGHT > $98	
 	:+8 dta $4e,a(:1+$17C0+#*40)
-	eif
-	ift PIC_HEIGHT > $100	
 	:+8 dta $4e,a(:1+$1900+#*40)
-	eif
-	ift PIC_HEIGHT > $108	
 	:+8 dta $4e,a(:1+$1A40+#*40)
-	eif
-	ift PIC_HEIGHT > $110	
 	:+8 dta $4e,a(:1+$1B80+#*40)
-	eif
-	ift PIC_HEIGHT > $118	
 	:+8 dta $4e,a(:1+$1CC0+#*40)
-	eif
-	ift PIC_HEIGHT > $120	
 	:+8 dta $4e,a(:1+$1E00+#*40)
-	eif
-	ift PIC_HEIGHT > $128	
 	:+4 dta $4e,a(:1+$1F40+#*40)
-	eif
-	ift PIC_HEIGHT > $12C	
 	:+4 dta $4e,a(:1+$1FF0+#*40)
-	eif
-	ift PIC_HEIGHT > $130	
 	:+8 dta $4e,a(:1+$2090+#*40)
-	eif
-	ift PIC_HEIGHT > $138	
 	:+8 dta $4e,a(:1+$21D0+#*40)
-	eif
-	ift PIC_HEIGHT > $140	
 	:+8 dta $4e,a(:1+$2310+#*40)
-	eif
-	ift PIC_HEIGHT > $148	
 	:+8 dta $4e,a(:1+$2450+#*40)
-	eif
 	dta $41,a(:2)
 .ENDM
 
@@ -263,8 +259,11 @@ CL
 
 	opt l-
 
-.MACRO	SPRITES
-	icl "output.png.pmg"
+.MACRO	SPRITES_A
+	icl "output.png_A.pmg"
+.ENDM
+.MACRO	SPRITES_B
+	icl "output.png_B.pmg"
 .ENDM
 
 USESPRITES = 1
