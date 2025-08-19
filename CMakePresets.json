@@ -1,185 +1,45 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 21
-  },
+  "cmakeMinimumRequired": { "major": 3, "minor": 21 },
   "configurePresets": [
-    {
-      "name": "base-ninja-multi",
-      "hidden": true,
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
-      }
-    },
-    {
-      "name": "base-unix-make",
-      "hidden": true,
-      "generator": "Unix Makefiles",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
-      }
-    },
-    {
-      "name": "base-vcpkg",
-      "hidden": true,
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_FEATURE_FLAGS": "manifests"
-      }
-    },
-    
+    { "name": "win32-debug", "displayName": "Windows x86 Debug", "generator": "Visual Studio 17 2022", "architecture": "Win32", "binaryDir": "${sourceDir}/build/win32-debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "win32-release", "displayName": "Windows x86 Release", "generator": "Visual Studio 17 2022", "architecture": "Win32", "binaryDir": "${sourceDir}/build/win32-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } },
+    { "name": "x64-debug", "displayName": "Windows x64 Debug", "generator": "Visual Studio 17 2022", "architecture": "x64", "binaryDir": "${sourceDir}/build/x64-debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "x64-release", "displayName": "Windows x64 Release", "generator": "Visual Studio 17 2022", "architecture": "x64", "binaryDir": "${sourceDir}/build/x64-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ENABLE_AVX2": "ON", "ENABLE_MSVC_FAST_MATH": "ON", "ENABLE_FAST_MATH": "ON" } },
+    { "name": "x64-release-legacy", "displayName": "Windows x64 Release (Legacy ISA, precise math)", "generator": "Visual Studio 17 2022", "architecture": "x64", "binaryDir": "${sourceDir}/build/x64-release-legacy", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ENABLE_AVX2": "OFF", "ENABLE_MSVC_FAST_MATH": "OFF", "ENABLE_FAST_MATH": "OFF" } },
+    { "name": "ninja-debug", "displayName": "Ninja Debug", "generator": "Ninja", "binaryDir": "${sourceDir}/build/ninja-debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "ninja-release", "displayName": "Ninja Release", "generator": "Ninja", "binaryDir": "${sourceDir}/build/ninja-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ENABLE_AVX2": "ON", "ENABLE_MSVC_FAST_MATH": "ON", "ENABLE_FAST_MATH": "ON" } },
+    { "name": "ninja-release-legacy", "displayName": "Ninja Release (Legacy ISA, precise math)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/ninja-release-legacy", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ENABLE_AVX2": "OFF", "ENABLE_MSVC_FAST_MATH": "OFF", "ENABLE_FAST_MATH": "OFF" } },
 
-    { "name": "win-msvc",
-      "generator": "Visual Studio 17 2022",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "win-msvc-ninja", "inherits": "base-ninja-multi",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "cl",
-        "CMAKE_CXX_COMPILER": "cl",
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "win-clangcl",
-      "generator": "Visual Studio 17 2022",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_GENERATOR_TOOLSET": "ClangCL",
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "win-mingw-gcc",
-      "generator": "MinGW Makefiles",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_CXX_COMPILER": "g++",
-        "CMAKE_SH": "CMAKE_SH-NOTFOUND",
-        "NO_GUI": "OFF"
-      }
-    },
+    { "name": "linux-gcc", "displayName": "Linux GCC (Ninja)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/linux-gcc", "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++", "ENABLE_FAST_MATH": "ON" } },
+    { "name": "linux-clang", "displayName": "Linux Clang (Ninja)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/linux-clang", "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++", "ENABLE_FAST_MATH": "ON" } },
+    { "name": "linux-gcc-make", "displayName": "Linux GCC (Makefiles)", "generator": "Unix Makefiles", "binaryDir": "${sourceDir}/build/linux-gcc-make", "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++", "ENABLE_FAST_MATH": "ON" } },
+    { "name": "linux-clang-make", "displayName": "Linux Clang (Makefiles)", "generator": "Unix Makefiles", "binaryDir": "${sourceDir}/build/linux-clang-make", "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++", "ENABLE_FAST_MATH": "ON" } },
 
-    { "name": "linux-gcc", "inherits": "base-ninja-multi",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "linux-gcc-vcpkg", "inherits": ["linux-gcc", "base-vcpkg"],
-      "cacheVariables": { }
-    },
-    { "name": "linux-gcc-make", "inherits": "base-unix-make",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "linux-gcc-make-vcpkg", "inherits": ["linux-gcc-make", "base-vcpkg"],
-      "cacheVariables": { }
-    },
-    { "name": "linux-clang", "inherits": "base-ninja-multi",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "linux-clang-vcpkg", "inherits": ["linux-clang", "base-vcpkg"],
-      "cacheVariables": { }
-    },
-    { "name": "linux-clang-make", "inherits": "base-unix-make",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "linux-clang-make-vcpkg", "inherits": ["linux-clang-make", "base-vcpkg"],
-      "cacheVariables": { }
-    },
-
-    { "name": "macos-clang", "inherits": "base-ninja-multi",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "macos-clang-vcpkg", "inherits": ["macos-clang", "base-vcpkg"],
-      "cacheVariables": { }
-    },
-    { "name": "macos-clang-make", "inherits": "base-unix-make",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
-        "NO_GUI": "OFF"
-      }
-    },
-    { "name": "macos-clang-make-vcpkg", "inherits": ["macos-clang-make", "base-vcpkg"],
-      "cacheVariables": { }
-    },
-    { "name": "win-msvc-nogui", "inherits": "win-msvc",
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "win-msvc-vcpkg", "inherits": ["win-msvc", "base-vcpkg"],
-      "cacheVariables": { } },
-    { "name": "win-msvc-ninja-nogui", "inherits": "win-msvc-ninja",
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "win-msvc-ninja-vcpkg", "inherits": ["win-msvc-ninja", "base-vcpkg"],
-      "cacheVariables": { } },
-    { "name": "win-clangcl-nogui", "inherits": "win-clangcl",
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "win-clangcl-vcpkg", "inherits": ["win-clangcl", "base-vcpkg"],
-      "cacheVariables": { } },
-    { "name": "win-mingw-gcc-nogui", "inherits": "win-mingw-gcc",
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "win-mingw-gcc-vcpkg", "inherits": ["win-mingw-gcc", "base-vcpkg"],
-      "cacheVariables": { } },
-    { "name": "linux-gcc-nogui", "inherits": "linux-gcc",
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "linux-gcc-vcpkg-nogui", "inherits": ["linux-gcc-vcpkg", "linux-gcc"],
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "linux-gcc-make-nogui", "inherits": "linux-gcc-make",
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "linux-gcc-make-vcpkg-nogui", "inherits": ["linux-gcc-make-vcpkg", "linux-gcc-make"],
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "linux-clang-nogui", "inherits": "linux-clang",
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "linux-clang-vcpkg-nogui", "inherits": ["linux-clang-vcpkg", "linux-clang"],
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "linux-clang-make-nogui", "inherits": "linux-clang-make",
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "linux-clang-make-vcpkg-nogui", "inherits": ["linux-clang-make-vcpkg", "linux-clang-make"],
-      "cacheVariables": { "NO_GUI": "ON" } },
-    { "name": "macos-clang-nogui", "inherits": "macos-clang",
-      "cacheVariables": { "NO_GUI": "ON" } }
-
-    
+    { "name": "macos-clang", "displayName": "macOS Clang (Ninja)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/macos-clang", "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++", "ENABLE_FAST_MATH": "ON" } },
+    { "name": "macos-clang-make", "displayName": "macOS Clang (Makefiles)", "generator": "Unix Makefiles", "binaryDir": "${sourceDir}/build/macos-clang-make", "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++", "ENABLE_FAST_MATH": "ON" } }
   ],
-
   "buildPresets": [
-    { "name": "win-msvc-debug", "configurePreset": "win-msvc", "configuration": "Debug" },
-    { "name": "win-msvc-release", "configurePreset": "win-msvc", "configuration": "Release" },
-    { "name": "win-clangcl-debug", "configurePreset": "win-clangcl", "configuration": "Debug" },
-    { "name": "win-clangcl-release", "configurePreset": "win-clangcl", "configuration": "Release" },
-    { "name": "win-mingw-gcc-debug", "configurePreset": "win-mingw-gcc", "configuration": "Debug" },
-    { "name": "win-mingw-gcc-release", "configurePreset": "win-mingw-gcc", "configuration": "Release" },
+    { "name": "win32-debug", "configurePreset": "win32-debug", "configuration": "Debug" },
+    { "name": "win32-release", "configurePreset": "win32-release", "configuration": "Release" },
+    { "name": "x64-debug", "configurePreset": "x64-debug", "configuration": "Debug" },
+    { "name": "x64-release", "configurePreset": "x64-release", "configuration": "Release" },
+    { "name": "ninja-debug", "configurePreset": "ninja-debug", "configuration": "Debug" },
+    { "name": "ninja-release", "configurePreset": "ninja-release", "configuration": "Release" },
 
     { "name": "linux-gcc-debug", "configurePreset": "linux-gcc", "configuration": "Debug" },
     { "name": "linux-gcc-release", "configurePreset": "linux-gcc", "configuration": "Release" },
     { "name": "linux-clang-debug", "configurePreset": "linux-clang", "configuration": "Debug" },
     { "name": "linux-clang-release", "configurePreset": "linux-clang", "configuration": "Release" },
+    { "name": "linux-gcc-make-debug", "configurePreset": "linux-gcc-make", "configuration": "Debug" },
+    { "name": "linux-gcc-make-release", "configurePreset": "linux-gcc-make", "configuration": "Release" },
+    { "name": "linux-clang-make-debug", "configurePreset": "linux-clang-make", "configuration": "Debug" },
+    { "name": "linux-clang-make-release", "configurePreset": "linux-clang-make", "configuration": "Release" },
 
     { "name": "macos-clang-debug", "configurePreset": "macos-clang", "configuration": "Debug" },
-    { "name": "macos-clang-release", "configurePreset": "macos-clang", "configuration": "Release" }
+    { "name": "macos-clang-release", "configurePreset": "macos-clang", "configuration": "Release" },
+    { "name": "macos-clang-make-debug", "configurePreset": "macos-clang-make", "configuration": "Debug" },
+    { "name": "macos-clang-make-release", "configurePreset": "macos-clang-make", "configuration": "Release" }
   ]
 }
 

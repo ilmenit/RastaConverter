@@ -4,21 +4,10 @@ Rasta Converter
 RastaConverter is a graphics converter from modern computers to old [8bit Atari computers](http://en.wikipedia.org/wiki/Atari_8-bit_family).
 The tool uses [SDL2](https://www.libsdl.org/) and [FreeImage](http://freeimage.sourceforge.net/) graphics libraries.
 
-Building
---------
-
-Use CMake presets for a simple cross-platform build:
-
-```
-cmake --preset win-clangcl
-cmake --build --preset win-clangcl-release
-```
-
-See `BUILD.md` for detailed instructions and alternative compilers/platforms.
-
 The conversion process is optimization of the [Kernel Program](http://www.atariarchives.org/dere/chapt05.php#H5_7).
-It uses most of the Atari graphics capabilities including sprites, midline color changes and sprite multiplication.
+It uses most of the Atari graphics capabilities including sprites, midline color changes and sprite multiplication. 
 
+The converter uses [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29) algorithm.
 
 Screenshot
 ----------

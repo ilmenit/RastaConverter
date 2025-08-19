@@ -1,7 +1,6 @@
 {
-  "name": "rastaconverter",
-  "version-string": "1.0.0",
-  "description": "Cross-platform Atari 8-bit raster image converter",
+  "name": "rasta-converter",
+  "version": "0.0.1",
   "dependencies": [
     "freeimage",
     "sdl2",

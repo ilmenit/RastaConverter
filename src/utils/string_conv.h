@@ -30,5 +30,3 @@ T String2HexValue(const std::string &s)
 	ss >> (hex) >> result;
 	return result;
 }
-
-

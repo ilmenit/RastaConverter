@@ -27,9 +27,9 @@ struct rgb_hash
 
 struct Lab
 {
-    double L;
-    double a;
-    double b;
+	double L;
+	double a;
+	double b;
 };
 
 
@@ -55,3 +55,5 @@ struct rgb_error {
 bool operator<(const rgb &l, const rgb &r);
 
 #endif
+
+

@@ -49,7 +49,7 @@ double cbrt(double d) {
 typedef std::unordered_map < rgb, Lab, rgb_hash > rgb_lab_map_t;
 rgb_lab_map_t rgb_lab_map;
 
-void RGB2LAB(const rgb &c, Lab &result)
+static void RGB2LAB(const rgb &c, Lab &result)
 {
 	static std::shared_mutex rwlock{};
 	rwlock.lock_shared();
@@ -72,56 +72,56 @@ void RGB2LAB(const rgb &c, Lab &result)
 	}
 	else
 	{
-                int ir = c.r;
-                int ig = c.g;
-                int ib = c.b;
+				int ir = c.r;
+				int ig = c.g;
+				int ib = c.b;
 
-                float fr = ((float) ir) / 255.0f;
-                float fg = ((float) ig) / 255.0f;
-                float fb = ((float) ib) / 255.0f;
+				float fr = ((float) ir) / 255.0f;
+				float fg = ((float) ig) / 255.0f;
+				float fb = ((float) ib) / 255.0f;
 
-                if (fr > 0.04045f)
-                        fr = powf((fr + 0.055f) / 1.055f, 2.4f);
-                else
-                        fr = fr / 12.92f;
+				if (fr > 0.04045f)
+						fr = powf((fr + 0.055f) / 1.055f, 2.4f);
+				else
+						fr = fr / 12.92f;
 
-                if (fg > 0.04045f)
-                        fg = powf((fg + 0.055f) / 1.055f, 2.4f);
-                else
-                        fg = fg / 12.92f;
+				if (fg > 0.04045f)
+						fg = powf((fg + 0.055f) / 1.055f, 2.4f);
+				else
+						fg = fg / 12.92f;
 
-                if (fb > 0.04045f)
-                        fb = powf((fb + 0.055f) / 1.055f, 2.4f);
-                else
-                        fb = fb / 12.92f;
+				if (fb > 0.04045f)
+						fb = powf((fb + 0.055f) / 1.055f, 2.4f);
+				else
+						fb = fb / 12.92f;
 
-                // Use white = D65
-                const float x = fr * 0.4124f + fg * 0.3576f + fb * 0.1805f;
-                const float y = fr * 0.2126f + fg * 0.7152f + fb * 0.0722f;
-                const float z = fr * 0.0193f + fg * 0.1192f + fb * 0.9505f;
+				// Use white = D65
+				const float x = fr * 0.4124f + fg * 0.3576f + fb * 0.1805f;
+				const float y = fr * 0.2126f + fg * 0.7152f + fb * 0.0722f;
+				const float z = fr * 0.0193f + fg * 0.1192f + fb * 0.9505f;
 
-                float vx = x / 0.95047f;
-                float vy = y;
-                float vz = z / 1.08883f;
+				float vx = x / 0.95047f;
+				float vy = y;
+				float vz = z / 1.08883f;
 
-                if (vx > 0.008856f)
-                        vx = (float) cbrt(vx);
-                else
-                        vx = (7.787f * vx) + (16.0f / 116.0f);
+				if (vx > 0.008856f)
+						vx = (float) cbrt(vx);
+				else
+						vx = (7.787f * vx) + (16.0f / 116.0f);
 
-                if (vy > 0.008856f)
-                        vy = (float) cbrt(vy);
-                else
-                        vy = (7.787f * vy) + (16.0f / 116.0f);
+				if (vy > 0.008856f)
+						vy = (float) cbrt(vy);
+				else
+						vy = (7.787f * vy) + (16.0f / 116.0f);
 
-                if (vz > 0.008856f)
-                        vz = (float) cbrt(vz);
-                else
-                        vz = (7.787f * vz) + (16.0f / 116.0f);
+				if (vz > 0.008856f)
+						vz = (float) cbrt(vz);
+				else
+						vz = (7.787f * vz) + (16.0f / 116.0f);
 
-                result.L = 116.0f * vy - 16.0f;
-                result.a = 500.0f * (vx - vy);
-                result.b = 200.0f * (vy - vz);
+				result.L = 116.0f * vy - 16.0f;
+				result.a = 500.0f * (vx - vy);
+				result.b = 200.0f * (vy - vz);
 				r.first->second = result;
 	}
 }
@@ -157,7 +157,7 @@ double CIE94(const double L1,const double a1,const double b1,
 
 
 double CIEDE2000(const double L1,const double a1,const double b1, 
-                const double L2,const double a2,const double b2) 
+				const double L2,const double a2,const double b2) 
 { 
 	double Lmean = (L1 + L2) / 2.0; 
 	double C1 =  sqrt(a1*a1 + b1*b1); 
@@ -171,11 +171,11 @@ double CIEDE2000(const double L1,const double a1,const double b1,
 	double C1prime =  sqrt(a1prime*a1prime + b1*b1); 
 	double C2prime =  sqrt(a2prime*a2prime + b2*b2); 
 	double Cmeanprime = (C1prime + C2prime) / 2;  
-	  		
+			
 	double h1prime =  atan2(b1, a1prime) + 2*M_PI * (atan2(b1, a1prime)<0 ? 1 : 0);
 	double h2prime =  atan2(b2, a2prime) + 2*M_PI * (atan2(b2, a2prime)<0 ? 1 : 0);
 	double Hmeanprime =  ((abs(h1prime - h2prime) > M_PI) ? (h1prime + h2prime + 2*M_PI) / 2 : (h1prime + h2prime) / 2); 
-	  		
+			
 	double T =  1.0 - 0.17 * cos(Hmeanprime - M_PI/6.0) + 0.24 * cos(2*Hmeanprime) + 0.32 * cos(3*Hmeanprime + M_PI/30) - 0.2 * cos(4*Hmeanprime - 21*M_PI/60); 
 
 	double deltahprime =  ((abs(h1prime - h2prime) <= M_PI) ? h2prime - h1prime : (h2prime <= h1prime) ? h2prime - h1prime + 2*M_PI : h2prime - h1prime - 2*M_PI); 
@@ -212,7 +212,7 @@ distance_t RGBCIE94Distance(const rgb &col1, const rgb &col2)
 	RGB2LAB(col2,second);
 
 	double dist= CIE94(first.L,first.a,first.b, 
-		               second.L,second.a,second.b);
+			       second.L,second.a,second.b);
 	return (distance_t)dist;
 }
 
@@ -224,13 +224,13 @@ distance_t RGBCIEDE2000Distance(const rgb &col1, const rgb &col2)
 	RGB2LAB(col2,second);
 
 	double dist= CIEDE2000(first.L,first.a,first.b, 
-                second.L,second.a,second.b);
+				second.L,second.a,second.b);
 	return (distance_t)dist;
 }
 
 distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2)
 {
-    int distance=0; (void)distance; // avoid unused warning
+	int distance=0;
 
 	// euclidian distance
 	int dr = col1.r - col2.r;
@@ -239,8 +239,10 @@ distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2)
 
 	int d = dr*dr + dg*dg + db*db;
 
-    if ((unsigned int)d > DISTANCE_MAX)
+	if (d > DISTANCE_MAX)
 		d = DISTANCE_MAX;
 
 	return (distance_t)d;
 }
+
+

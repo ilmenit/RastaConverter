@@ -1,6 +1,14 @@
 ChangeLog
 =========
 
+RastaConverterBeta14      2025-08-?? [AI RELEASE]
+* Revert to codebase of Beta12
+  - too much indirections and extra layers introduced non-fixable performance drop
+* Move to CMake for more modern and cross platform building
+* Returning LAHC algorithm and making it default one (better for long-runs than DLAS)
+* Removed new mutation operators - they did not positively impact conversion rate nor reaching quality
+* Dual-frame mode (CRT blending) - not finished, work in progress    
+
 RastaConverterBeta13.1    2025-08-15 [AI RELEASE]
 Fixing regression:
 * Added /mutation_base=best|current (default: best) to control mutation baseline
@@ -15,7 +23,7 @@ RastaConverterBeta13      2025-08-14 [AI RELEASE]
 * Returning LAHC algorithm as it provides better results than DLAS in very long runs
 * New mutation operators
 * Further caching improvements
-* Dual-frame mode (CRT blending) - not finished, work in progress
+* Dual-frame mode (CRT blending) - not finished, work in progress    
 
 RastaConverterBeta12      2025-03-06
 * Improved multi-threaded performance with region-based work distribution
@@ -27,10 +35,10 @@ RastaConverterBeta12      2025-03-06
 * Improved cache coordination between threads
 * Better work distribution to minimize thread contention
 
-RastaConverterBeta11 2025-03-05
+RastaConverterBeta11      2025-03-05
 * Implemented Diversified Late Acceptance Search (DLAS) algorithm replacing LAHC
 * Much faster convergence to quality solutions
-* Better quality results with fewer solutions 
+* Better quality results with fewer solutions (5-10 solutions work well)
 
 RastaConverterBeta10      
 * Added command line parameter to window title
