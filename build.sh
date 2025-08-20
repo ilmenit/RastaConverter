@@ -99,6 +99,7 @@ if [[ $status -ne 0 ]]; then
   echo "  - Provide paths in config.env: FREEIMAGE_DIR, SDL2_DIR, SDL2_TTF_DIR" >&2
   echo "  - OR install system packages:" >&2
   echo "      Ubuntu:   sudo apt install libfreeimage-dev libsdl2-dev libsdl2-ttf-dev" >&2
+  echo "                sudo apt install ninja-build build-essential cmake" >&2
   echo "      macOS:    brew install freeimage sdl2 sdl2_ttf" >&2
   echo "      Windows:  use vcpkg or vendor SDKs" >&2
   echo "  - With vcpkg: set VCPKG_ROOT then pass toolchain, e.g.:" >&2
