@@ -1,7 +1,7 @@
 #ifndef LINEAR_ALLOCATOR_H
 #define LINEAR_ALLOCATOR_H
 
-#include <malloc.h>
+#include <stdlib.h>
 
 class linear_allocator
 {
