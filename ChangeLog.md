@@ -1,9 +1,10 @@
 ChangeLog
 =========
 
-RastaConverterBeta15      2025-08-?? [AI RELEASE]
-* Dual mode - first official version
-* Fixing SDL2 window handling on Linux                                     
+RastaConverterBeta15      2025-08-23 [AI RELEASE]
+* Dual mode - first official version, check documentation
+* Fixing SDL2 window handling on Linux
+* Improved performance with Intel C++ compiler                                     
 
 RastaConverterBeta14      2025-08-20 [AI RELEASE]
 * Revert to codebase of Beta12

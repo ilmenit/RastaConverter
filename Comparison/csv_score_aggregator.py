@@ -64,7 +64,7 @@ def aggregate_csv_scores(input_directory, output_filename="aggregated_scores.csv
                 first_seconds = df['Seconds'].iloc[0]
                 last_seconds = df['Seconds'].iloc[-1]
                 time_diff = last_seconds - first_seconds
-                column_name = f"{filename} ({time_diff})"
+                column_name = f"{filename} ({time_diff} seconds)"
                 print(f"   - Time difference: {time_diff} seconds (from {first_seconds} to {last_seconds})")
             elif len(df) == 1:
                 column_name = f"{filename} (0)"
