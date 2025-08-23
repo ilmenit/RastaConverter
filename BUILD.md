@@ -176,4 +176,163 @@ Notes
 - GUI target is always built; the console target `RastaConverter-NO_GUI` is added when `-DBUILD_NO_GUI=ON`.
 - Clear build summaries are printed with dependency resolution info.
 
+Profile-guided optimization (PGO)
+---------------------------------
+Two minimal, non-intrusive flows are supported:
+
+- Preset-based (recommended, no command flags to remember)
+- Ad‑hoc via `-Extra` flags (no repo changes required)
+
+PGO for MSVC (Windows)
+======================
+
+Using presets (recommended)
+```
+# One-time: create profile dir
+# PowerShell
+New-Item -ItemType Directory -Force pgo\msvc | Out-Null
+# cmd.exe
+if not exist pgo\msvc mkdir pgo\msvc
+
+# Phase 1 – Generate profile (instrumented build)
+cmake --preset x64-pgo-msvc-gen
+cmake --build build/x64-pgo-msvc-gen --config Release
+
+# Run representative scenarios to produce .pgc files
+# (Use the GUI or the console target if built with -DBUILD_NO_GUI=ON.)
+build/x64-pgo-msvc-gen/Release/RastaConverter.exe
+
+# Optional: split profiles between scenarios
+# pgosweep
+
+# Phase 3 – Use profile (optimized build)
+cmake --preset x64-pgo-msvc-use
+cmake --build build/x64-pgo-msvc-use --config Release
+```
+
+Details:
+- The `.pgd` file lives at `pgo/msvc/Rasta.pgd` (under the repo root).
+- Presets set `/GL` for compilation and `/LTCG /GENPROFILE` (phase 1) or `/LTCG /USEPROFILE` (phase 3) at link.
+- You can re-run the instrumented executable to collect more `.pgc` files and rebuild the "use" preset again.
+- Alternative with wrapper (PowerShell):
+```
+./build.ps1 -Preset x64-pgo-msvc-gen -Config Release
+build/x64-pgo-msvc-gen/Release/RastaConverter.exe
+./build.ps1 -Preset x64-pgo-msvc-use -Config Release
+```
+
+- Alternative with batch (cmd.exe):
+```
+rem One-time: create profile dir
+if not exist pgo\msvc mkdir pgo\msvc
+
+rem Phase 1 – Generate profile
+build.bat release x64 msvc "-DCMAKE_C_FLAGS_RELEASE=/GL" "-DCMAKE_CXX_FLAGS_RELEASE=/GL" "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/LTCG /GENPROFILE PGD=%CD%\pgo\msvc\Rasta.pgd"
+
+rem Run representative scenarios (.pgc files will be created)
+build\x64-release\Release\RastaConverter.exe
+
+rem Phase 3 – Use profile
+build.bat release x64 msvc "-DCMAKE_C_FLAGS_RELEASE=/GL" "-DCMAKE_CXX_FLAGS_RELEASE=/GL" "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/LTCG /USEPROFILE PGD=%CD%\pgo\msvc\Rasta.pgd"
+```
+
+Ad‑hoc flags (no presets)
+```
+# Generate profile
+./build.ps1 -Preset x64-release -Config Release -Compiler msvc -Extra \
+  '-DCMAKE_C_FLAGS_RELEASE=/GL' \
+  '-DCMAKE_CXX_FLAGS_RELEASE=/GL' \
+  '-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/LTCG /GENPROFILE:PGD=${PWD}/pgo/msvc/Rasta.pgd'
+
+# Run scenarios to produce .pgc files
+build/x64-release/Release/RastaConverter.exe
+
+# Use profile
+./build.ps1 -Preset x64-release -Config Release -Compiler msvc -Extra \
+  '-DCMAKE_C_FLAGS_RELEASE=/GL' \
+  '-DCMAKE_CXX_FLAGS_RELEASE=/GL' \
+  '-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/LTCG /USEPROFILE:PGD=${PWD}/pgo/msvc/Rasta.pgd'
+```
+
+Tips for MSVC:
+- Use `pgosweep` to end a scenario and start a new `.pgc` during the same process, or `PgoAutoSweep` in code.
+- Keep compiler and sources the same between phases.
+
+PGO for Intel oneAPI icx (Windows) – LLVM-style (recommended)
+=============================================================
+
+Using presets (recommended)
+```
+# One-time: create profile dir
+# PowerShell
+New-Item -ItemType Directory -Force pgo\icx | Out-Null
+# cmd.exe
+if not exist pgo\icx mkdir pgo\icx
+
+# Phase 1 – Generate profile (instrumented build)
+cmake --preset ninja-pgo-icx-gen
+cmake --build build/ninja-pgo-icx-gen --config Release
+
+# Run representative scenarios to produce .profraw files
+set LLVM_PROFILE_FILE=pgo\icx\rasta-%p.profraw  &  build/ninja-pgo-icx-gen/RastaConverter.exe
+
+# Merge raw profiles into a single .profdata (requires llvm-profdata in PATH; installed with oneAPI LLVM tools)
+llvm-profdata merge -output=pgo/icx/merged.profdata pgo/icx/*.profraw
+
+# Phase 3 – Use profile (optimized build)
+cmake --preset ninja-pgo-icx-use
+cmake --build build/ninja-pgo-icx-use --config Release
+```
+
+Details:
+- Phase 1 uses `-fprofile-generate` to emit `.profraw` files at runtime; `LLVM_PROFILE_FILE` controls naming/location.
+- The `merged.profdata` is consumed by `-fprofile-use=<path>` in the "use" preset.
+- Alternative with wrapper (PowerShell):
+```
+./build.ps1 -Preset ninja-pgo-icx-gen -Config Release
+$env:LLVM_PROFILE_FILE = "pgo/icx/rasta-%p.profraw"
+build/ninja-pgo-icx-gen/RastaConverter.exe
+llvm-profdata merge -output=pgo/icx/merged.profdata pgo/icx/*.profraw
+./build.ps1 -Preset ninja-pgo-icx-use -Config Release
+```
+
+- Alternative with batch (cmd.exe):
+```
+if not exist pgo\icx mkdir pgo\icx
+
+rem Phase 1 – Generate profile (Ninja preset auto-selected for non-MSVC compilers)
+build.bat release x64 icx "-DCMAKE_C_FLAGS_RELEASE=-fprofile-generate" "-DCMAKE_CXX_FLAGS_RELEASE=-fprofile-generate"
+
+rem Run representative scenarios (.profraw files will be created)
+set LLVM_PROFILE_FILE=%CD%\pgo\icx\rasta-%%p.profraw & build\ninja-release\RastaConverter.exe
+
+rem Merge profiles (ensure llvm-profdata is on PATH)
+llvm-profdata merge -output=pgo/icx/merged.profdata pgo/icx/*.profraw
+
+rem Phase 3 – Use profile
+build.bat release x64 icx "-DCMAKE_C_FLAGS_RELEASE=-fprofile-use=%CD%\pgo\icx\merged.profdata -fprofile-instr-use" "-DCMAKE_CXX_FLAGS_RELEASE=-fprofile-use=%CD%\pgo\icx\merged.profdata -fprofile-instr-use"
+```
+
+Ad‑hoc flags (no presets)
+```
+# Generate profile
+./build.ps1 -Preset ninja-release -Config Release -Compiler icx -Extra \
+  '-DCMAKE_C_FLAGS_RELEASE=/Qprof-gen /Qprof-dir:${PWD}/pgo/icx' \
+  '-DCMAKE_CXX_FLAGS_RELEASE=/Qprof-gen /Qprof-dir:${PWD}/pgo/icx'
+
+# Run scenarios (.dyn files appear in pgo/icx)
+build/ninja-release/RastaConverter.exe
+
+# Use profile
+./build.ps1 -Preset ninja-release -Config Release -Compiler icx -Extra \
+  '-DCMAKE_C_FLAGS_RELEASE=/Qprof-use /Qipo /Qprof-dir:${PWD}/pgo/icx' \
+  '-DCMAKE_CXX_FLAGS_RELEASE=/Qprof-use /Qipo /Qprof-dir:${PWD}/pgo/icx' \
+  '-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/Qipo'
+```
+
+General guidance
+- Prefer training the console binary for automation: add `-Extra -DBUILD_NO_GUI=ON` at configure time, then run `RastaConverter-NO_GUI` with realistic CLI options.
+- Store profiles under `pgo/` in the repo root for easy cleanup and repeatability.
+- Do not mix compilers or change major compile options between phases.
+
 

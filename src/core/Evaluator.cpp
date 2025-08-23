@@ -585,10 +585,10 @@ void Evaluator::Run() {
 					m_gstate->m_cost_max = result; // not used by LAHC, kept for completeness
 					m_gstate->m_N = m_solutions;
 				} else {
-					const double init_margin = result * 0.1; // 10% margin
-					m_gstate->m_cost_max = result + init_margin;
+					// DLAS initialization per paper: fill history with F, set Φmax = F, N = L
+					m_gstate->m_cost_max = result;
 					m_gstate->m_current_cost = result;
-					m_gstate->m_previous_results.resize(m_solutions, m_gstate->m_cost_max);
+					m_gstate->m_previous_results.resize(m_solutions, result);
 					m_gstate->m_N = m_solutions;
 				}
 			}
@@ -636,7 +636,7 @@ void Evaluator::Run() {
 			++m_gstate->m_previous_results_index;
 		} else {
 			// DLAS acceptance criteria (existing behavior)
-			if (result == m_gstate->m_current_cost || result < m_gstate->m_cost_max) {
+			if (result <= m_gstate->m_current_cost || result < m_gstate->m_cost_max) {
 				// Accept the candidate solution
 				m_gstate->m_current_cost = result;
 				// Update best solution if better 
@@ -662,27 +662,56 @@ void Evaluator::Run() {
 					}
 					m_gstate->m_condvar_update.notify_one();
 				}
-				// DLAS replacement strategy 
-				if (m_gstate->m_current_cost > m_gstate->m_previous_results[l]) {
-					m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
-				}
-				else if (m_gstate->m_current_cost < m_gstate->m_previous_results[l] &&
-					m_gstate->m_current_cost < prev_cost) {
-					if (m_gstate->m_previous_results[l] == m_gstate->m_cost_max) {
+			}
+			// DLAS replacement strategy (outside acceptance): always evaluate replacement
+			double old_value = m_gstate->m_previous_results[l];
+			double currentF = m_gstate->m_current_cost; // may be unchanged if not accepted
+			if (currentF > old_value) {
+				// Case 1: Always replace when current cost is larger than slot
+				m_gstate->m_previous_results[l] = currentF;
+				// Update max tracking carefully
+				if (currentF > m_gstate->m_cost_max) {
+					m_gstate->m_cost_max = currentF;
+					m_gstate->m_N = 1;
+				} else if (currentF == m_gstate->m_cost_max) {
+					// Replaced with another maximum; only increment if old wasn't maximum
+					if (old_value != m_gstate->m_cost_max) {
+						++m_gstate->m_N;
+					}
+				} else { // new value < current max
+					// If we overwrote a previous maximum with a non-maximum
+					if (old_value == m_gstate->m_cost_max) {
 						--m_gstate->m_N;
+						if (m_gstate->m_N <= 0) {
+							m_gstate->m_cost_max = *std::max_element(
+								m_gstate->m_previous_results.begin(),
+								m_gstate->m_previous_results.end()
+							);
+							m_gstate->m_N = std::count(
+								m_gstate->m_previous_results.begin(),
+								m_gstate->m_previous_results.end(),
+								m_gstate->m_cost_max
+							);
+						}
 					}
-					m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
-					if (m_gstate->m_N <= 0) {
-						m_gstate->m_cost_max = *std::max_element(
-							m_gstate->m_previous_results.begin(),
-							m_gstate->m_previous_results.end()
-						);
-						m_gstate->m_N = std::count(
-							m_gstate->m_previous_results.begin(),
-							m_gstate->m_previous_results.end(),
-							m_gstate->m_cost_max
-						);
-					}
+				}
+			}
+			else if (currentF < old_value && currentF < prev_cost) {
+				// Case 2: Replace only if also improving from previous iteration
+				if (old_value == m_gstate->m_cost_max) {
+					--m_gstate->m_N;
+				}
+				m_gstate->m_previous_results[l] = currentF;
+				if (m_gstate->m_N <= 0) {
+					m_gstate->m_cost_max = *std::max_element(
+						m_gstate->m_previous_results.begin(),
+						m_gstate->m_previous_results.end()
+					);
+					m_gstate->m_N = std::count(
+						m_gstate->m_previous_results.begin(),
+						m_gstate->m_previous_results.end(),
+						m_gstate->m_cost_max
+					);
 				}
 			}
 			// Always increment index for DLAS
@@ -1233,11 +1262,8 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 			{
 				prog.cycles -= c;
 
-				// Legacy erase - swap with last and pop_back (original behavior)
-				if (i1 < (int)prog.instructions.size() - 1) {
-					prog.instructions[i1] = prog.instructions.back();
-				}
-				prog.instructions.pop_back();
+				// Preserve order: erase at position i1
+				prog.instructions.erase(prog.instructions.begin() + i1);
 
 				prog.cache_key = NULL;
 				assert(prog.cycles > 0);
@@ -1262,6 +1288,30 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 		prog.instructions[i1].loose.target = (e_target)(Random(E_TARGET_MAX));
 		prog.cache_key = NULL;
 		m_current_mutations[E_MUTATION_CHANGE_TARGET]++;
+		m_mutation_success_count[mutation]++;
+		break;
+	case E_MUTATION_CHANGE_VALUE:
+		if (Random(10) == 0)
+		{
+			if (Random(2))
+				prog.instructions[i1].loose.value = (Random(128) * 2);
+			else
+			{
+				const std::vector<unsigned char>& possible_colors = m_gstate->m_possible_colors_for_each_line[m_currently_mutated_y];
+				prog.instructions[i1].loose.value = possible_colors[Random(possible_colors.size())];
+			}
+		}
+		else
+		{
+			c = 1;
+			if (Random(2))
+				c *= -1;
+			if (Random(2))
+				c *= 16;
+			prog.instructions[i1].loose.value += c;
+		}
+		prog.cache_key = NULL;
+		m_current_mutations[E_MUTATION_CHANGE_VALUE]++;
 		m_mutation_success_count[mutation]++;
 		break;
 	case E_MUTATION_CHANGE_VALUE_TO_COLOR:

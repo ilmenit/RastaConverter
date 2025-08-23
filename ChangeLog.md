@@ -1,6 +1,11 @@
 ChangeLog
 =========
 
+RastaConverterBeta15.1      2025-08-23 [AI RELEASE]
+* Fix to ommited Change Value mutation - should reach better Norm. Distance.
+* Fix to DLAS optimization algorithm - should also reach better Norm. Distance.
+* Added Profile Guided Optimization to build system to improve performance even more.
+
 RastaConverterBeta15      2025-08-23 [AI RELEASE]
 * Dual mode - first official version, check documentation
 * Fixing SDL2 window handling on Linux

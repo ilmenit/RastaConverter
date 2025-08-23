@@ -27,7 +27,7 @@ The converter uses Late Acceptance Hill Climbing (LAHC) and [Diversified Late Ac
 
 Screenshot
 ----------
-![Rasta Converter screenshot](https://github.com/ilmenit/RastaConverter/raw/master/examples/screenshot.png "Rasta Converter screenshot")
+![Rasta Converter screenshot](https://github.com/ilmenit/RastaConverter/raw/master/examples/screenshot.jpg "Rasta Converter screenshot")
 
 Examples
 --------
