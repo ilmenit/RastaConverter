@@ -109,7 +109,7 @@ void Configuration::Process(int argc, char *argv[])
 	parser.addOption("h", {}, "HEIGHT", "-1",
 		"Target height (max 240; default: auto).",
 		"Image processing");
-	parser.addOption("cache", {}, "MB", "16",
+	parser.addOption("cache", {}, "MB", "64",
 		"Line cache size per thread in MB.",
 		"Image processing");
 	parser.addOption("details", {}, "FILE", "",

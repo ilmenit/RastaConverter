@@ -216,7 +216,7 @@ HPOSP1 OFF 0 239
 Image processing:
 
 /cache=number
-  Default: 16
+  Default: 64
   Sets number of megabytes per thread to use as memory buffer to speed up conversion.
   Aliases: --cache
    

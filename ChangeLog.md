@@ -1,10 +1,11 @@
 ChangeLog
 =========
 
-RastaConverterBeta15.1      2025-08-23 [AI RELEASE]
+RastaConverterBeta16      2025-08-24 [AI RELEASE]
 * Fix to ommited Change Value mutation - should reach better Norm. Distance.
 * Fix to DLAS optimization algorithm - should also reach better Norm. Distance.
 * Added Profile Guided Optimization to build system to improve performance even more.
+* Increased default thread cache size from 16MB to 64MB. Lower with /cache if taking too much RAM.
 
 RastaConverterBeta15      2025-08-23 [AI RELEASE]
 * Dual mode - first official version, check documentation
