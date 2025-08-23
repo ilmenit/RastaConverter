@@ -4,52 +4,31 @@
 /***************************************/
 
 	icl "no_name.h"
+	icl "out_dual_A.opt.h"
+
+USESPRITES = 1
+ 
+BASE_ADDRESS equ $1000 + $1000 * (PIC_HEIGHT < 204)
 
 	org $00
+
 byt2	.ds 1
 
 * ---	BASIC switch OFF
 	org $2000\ mva #$ff portb\ rts\ ini $2000
-
-* ---	MAIN PROGRAM
-	org $2010
 	
-; SCREEN A memory
-	IFT frame_A.PIC_HEIGHT>=204
-scr_A	ins "output.png_A.mic", 0, 8160
-	:16 .byte 0
-	ins "output.png_A.mic" , +8160
-	ELS
-scr_A	ins "output.png_A.mic"
-	EIF
 
-; SCREEN B memory
-	.ALIGN $1000
-	org *+$10
-	IFT frame_B.PIC_HEIGHT>=204
-scr_B	ins "output.png_B.mic", 0, 8160
-	:16 .byte 0
-	ins "output.png_B.mic" , +8160
-	ELS
-scr_B	ins "output.png_B.mic"
-	EIF
+; ANTIC A PROGRAM  
+	org BASE_ADDRESS
+ant_A:
+	.print "Antic A addr: ",ant_A
+	ANTIC_PROGRAM scr_A,ant_A
+ant_A_end: 
+	.print "Antic A size: ",*-ant_A
+	.print "Antic A end: ",*
 
-	.ALIGN $0400
-ant_A ANTIC_PROGRAM scr_A,ant_A
-	.ALIGN $0400
-ant_B ANTIC_PROGRAM scr_B,ant_B
-
-fnt
-
-	ift USESPRITES
-	.ALIGN $0800
-	.ds $0300
-pmg_A SPRITES_A
-	.ALIGN $0800
-	.ds $0300
-pmg_B SPRITES_B
-	eif
-
+; MAIN code, still in first $400 of SPRITE A 
+	.print "Main start: ", *
 main
 * ---	init PMG
 
@@ -63,85 +42,17 @@ main
 	sei			;stop interrups
 	mva #$00 nmien		;stop all interrupts
 	mva #$fe portb		;switch off ROM to get 16k more ram
-
-////////////////////
-// RASTER PROGRAM //
-////////////////////
-
-	jmp raster_program_end
-
-LOOP	
-.local frame_A
-	lda vcount		;synchronization for the first screen line
-	cmp #$02
-	bne frame_A
-
-	mva #%00111110 dmactl	;set new screen width
-	mva <ant_A dlptr
-	mva >ant_A dlptr+1
-
-  icl "output.png_A.rp.ini"
-
-;--- wait 18 cycles
-	jsr _rts
-	inc byt3
-
-;--- set global offset (23 cycles)
-	jsr _rts
-	cmp byt3\ pha:pla
-
-;--- empty line
-	jsr wait54cycle
-	inc byt2
-
-  icl "output.png_A.opt"
-
-.endl
-
-	; switch to frame B sprites
-	ift USESPRITES
-	mva >pmg_B pmbase		;missiles and players data address
-	eif
 	
-	RASTER_PROGRAM_END_MACRO
-
-.local frame_B
-	lda vcount		;synchronization for the first screen line
-	cmp #$02
-	bne frame_B
-
-	mva #%00111110 dmactl	;set new screen width
-	mva <ant_B dlptr
-	mva >ant_B dlptr+1
-
-  icl "output.png_B.rp.ini"
-
-;--- wait 18 cycles
-	jsr _rts
-	inc byt3
-
-;--- set global offset (23 cycles)
-	jsr _rts
-	cmp byt3\ pha:pla
-
-;--- empty line
-	jsr wait54cycle
-	inc byt2
-
-  icl "output.png_B.opt"
-.endl
-	
+raster_program_end:
 	; switch to frame A sprites
 	ift USESPRITES
 	mva >pmg_A pmbase		;missiles and players data address
 	eif
 
-raster_program_end:
 	RASTER_PROGRAM_END_MACRO
 
-//--------------------
-//	EXIT
-//--------------------
+; EXIT check
+exit_check:
 
 	lda trig0		; FIRE #0
 	beq stop
@@ -167,12 +78,9 @@ stop	mva #$00 pmcntl		;PMG disabled
 
 	rts			;return to ... DOS
 skp
-
-//--------------------
-
 	jmp LOOP
 
-;---
+; Extra sync code
 
 wait54cycle
 	:2 inc byt2
@@ -187,21 +95,156 @@ wait18cycle
 _rts	rts
 
 byt3	brk
+	
+	.print "Main code end: ", *
+gap_used = *-ant_A
+	.print "Gap in SPRITE A used: ", gap_used 
+	
+	IFT gap_used >= $400
+		.error "Too much space tried to be used in SPRITE A gap: ", gap_used
+	EIF
+
+; SPRITES A	
+	ift USESPRITES
+	org BASE_ADDRESS
+	.print "Sprites A: ",*
+	.ds $300 ; needed for PMG in single line mode, we use it for Antic Program A + non-raster code
+pmg_A SPRITES_A
+	.print "Sprites A end: ",*
+	eif
+
+; ANTIC PROGRAM B
+	org BASE_ADDRESS + $800	
+ant_B:
+	.print "Antic B addr: ",ant_B
+	ANTIC_PROGRAM scr_B,ant_B
+ant_B_end:
+	.print "Antic B size: ",*-ant_B
+	.print "Antic B end: ",*
 
 
+; SPRITES B	
+	ift USESPRITES
+	org BASE_ADDRESS + $800
+	.print "Sprites B: ",*	
+	.ds $300 ; needed for PMG in single line mode, we use it for Antic Program B
+pmg_B SPRITES_B
+	.print "Sprites B end: ",*
+	eif
+
+	
+; SCREEN A memory
+	.align $1000
+	org *+$10
+	.print "Screen A start: ",*
+
+	IFT PIC_HEIGHT>=204
+scr_A	ins "out_dual_A.mic", 0, 8160
+	:16 .byte 0
+	ins "out_dual_A.mic" , +8160
+	ELS
+scr_A	ins "out_dual_A.mic"
+	EIF
+
+	.print "Screen A end: ",*
+
+////////////////////
+// RASTER PROGRAM //
+////////////////////
+
+LOOP	
+	.print "Raster A addr: ", *
+
+.local frame_A
+	lda vcount		;synchronization for the first screen line
+	cmp #$02
+	bne frame_A
+
+	mva #%00111110 dmactl	;set new screen width
+	mva <ant_A dlptr
+	mva >ant_A dlptr+1
+
+  icl "out_dual_A.rp.ini"
+
+;--- wait 18 cycles
+	jsr _rts
+	inc byt3
+
+;--- set global offset (23 cycles)
+	jsr _rts
+	cmp byt3\ pha:pla
+
+;--- empty line
+	jsr wait54cycle
+	inc byt2
+
+  icl "out_dual_A.opt"
+
+.endl
+
+	; switch to frame B sprites
+	ift USESPRITES
+	mva >pmg_B pmbase		;missiles and players data address
+	eif
+	
+	RASTER_PROGRAM_END_MACRO
+
+.print "Raster A size: ", *-frame_A
+.print "Raster B addr: ", *
+
+.local frame_B
+	lda vcount		;synchronization for the first screen line
+	cmp #$02
+	bne frame_B
+
+	mva #%00111110 dmactl	;set new screen width
+	mva <ant_B dlptr
+	mva >ant_B dlptr+1
+
+  icl "out_dual_B.rp.ini"
+
+;--- wait 18 cycles
+	jsr _rts
+	inc byt3
+
+;--- set global offset (23 cycles)
+	jsr _rts
+	cmp byt3\ pha:pla
+
+;--- empty line
+	jsr wait54cycle
+	inc byt2
+
+  icl "out_dual_B.opt"
+.endl
+
+.print "Raster B size: ", *-frame_B
+
+	jmp raster_program_end
+	
+.print "End program addr: ", *
+
+; SCREEN B memory
+	.align $1000
+	org *+$10
+	.print "Screen B start: ",*
+	IFT PIC_HEIGHT>=204
+scr_B	ins "out_dual_B.mic", 0, 8160
+	:16 .byte 0
+	ins "out_dual_B.mic" , +8160
+	ELS
+scr_B	ins "out_dual_B.mic"
+	EIF
+	.print "Screen B end: ",*
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;---
 	.MACRO RASTER_PROGRAM_END_MACRO
-	lda >fnt+$400*$00
-	sta chbase
 c0	lda #$00
 	sta colbak
-c1	lda #$00
 	sta color0
-c2	lda #$00
 	sta color1
-c3	lda #$00
 	sta color2
-c4	lda #$00
 	sta color3
 s0	lda #$03
 	sta sizep0
@@ -255,6 +298,45 @@ s0	lda #$03
 	dta $41,a(:2)
 .ENDM
 
+// .MACRO	ANTIC_PROGRAM
+// .rept 25
+	// ?y=#
+	// .rept 8
+		// ?x=#
+		// ?line_number=?y*8+?x
+		// ift ?line_number<PIC_HEIGHT
+			// dta $4e,a(:1+?y*8*40+?x*40)
+		// eif
+	// .endr
+// .endr
+	
+// .rept 2
+	// ?y=#
+	// .rept 4
+		// ?x=#
+		// ?offset=25*8*40 ; 1F40
+		// ?line_number=?y*4+?x + 25*8
+		// ift ?line_number<PIC_HEIGHT
+			// dta $4e,a(:1+?offset+?y*40*4+?x*40)
+		// eif
+	// .endr
+// .endr
+
+// .rept 4
+	// ?y=#
+	// .rept 8
+		// ?x=#
+		// ?offset=$2090
+		// ?line_number=?y*8+?x + 25*8 + 4*2
+		// ift ?line_number<PIC_HEIGHT
+			// dta $4e,a(:1+?offset+?y*40*8+?x*40)
+		// eif
+	// .endr
+// .endr
+
+	// dta $41,a(:2)
+// .ENDM
+
 
 CL
 
@@ -265,11 +347,10 @@ CL
 	opt l-
 
 .MACRO	SPRITES_A
-	icl "output.png_A.pmg"
+	icl "out_dual_A.pmg"
 .ENDM
 .MACRO	SPRITES_B
-	icl "output.png_B.pmg"
+	icl "out_dual_B.pmg"
 .ENDM
 
-USESPRITES = 1
 

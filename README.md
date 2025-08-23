@@ -9,6 +9,7 @@ It uses most of the Atari graphics capabilities including sprites, midline color
 
 Key capabilities
 ----------------
+- Extremely optimized emulator of subset of [6502 CPU](https://en.wikipedia.org/wiki/MOS_Technology_6502) and [ANTIC](https://en.wikipedia.org/wiki/ANTIC) to simulate execution on real machine.
 - Optimization: Late Acceptance Hill Climbing (LAHC) and Diversified Late Acceptance Search (DLAS), with support for reproducible runs, evaluation limits, auto-save and resume.
 - Dithering: chess, Floyd–Steinberg, random-Floyd, line, line2, 2D, Jarvis, simple, and Knoll; tunable strength and randomness.
 - Color distance: YUV (default), RGB Euclidean, CIEDE2000, and CIE94; independently selectable for preprocessing and optimization.

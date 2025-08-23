@@ -5,7 +5,7 @@ RastaConverter.exe InputFile [options]
 
 To save the output during the optimization process, press the 's' key.
 
-Copy created output files to the Generator directory and run 'build.bat' to create executable file.
+Copy created output files to the directory Generator or GeneratorDual (for dual mode) and run 'build.bat' to create executable file.
 
 The application displays three images:
 - the left one is the original picture resized to Atari width.
@@ -33,7 +33,7 @@ Command line options (accept '/', '-' or '--' prefixes; aliases included under e
 General options:
 
 /o=Output File
-  Output file name. The default name is 'output.png'. 
+  Output file names. The default names are 'output.*' and 'out_dual.*' in dual mode.
   Using a different name you have to change the file names used in the Generator.
   Aliases: -o, --output
 

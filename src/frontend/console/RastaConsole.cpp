@@ -27,6 +27,10 @@ void RastaConsole::DisplayBitmap(int x, int y, FIBITMAP* fiBitmap)
 {
 }
 
+void RastaConsole::Present()
+{
+}
+
 GUI_command RastaConsole::NextFrame()
 {
 	return GUI_command::CONTINUE;

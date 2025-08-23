@@ -1499,29 +1499,37 @@ void RastaConverter::SaveBestSolution()
 	// Dual-mode saving: save A, B, and blended
 	ShowLastCreatedPictureDual();
 
+	// Build directory prefix from cfg.output_file so dual outputs go to the same folder
+	std::string __out_dir_prefix;
+	{
+		std::string __of = cfg.output_file;
+		size_t __pos = __of.find_last_of("/\\");
+		__out_dir_prefix = (__pos == std::string::npos) ? std::string() : __of.substr(0, __pos + 1);
+	}
+
 	// A
 	{
 		raster_picture picA = m_eval_gstate.m_best_pic;
-		SaveRasterProgram(string(cfg.output_file+"_A.rp"), &picA);
+		SaveRasterProgram(__out_dir_prefix + string("out_dual_A.rp"), &picA);
 		OptimizeRasterProgram(&picA);
-		SaveRasterProgram(string(cfg.output_file+"_A.opt"), &picA);
-		SavePMGWithSprites(string(cfg.output_file+"_A.pmg"), m_eval_gstate.m_sprites_memory);
-		SaveScreenDataFromTargets(string(cfg.output_file+"_A.mic").c_str(), m_eval_gstate.m_created_picture_targets);
-		if (output_bitmap_A) SavePicture(cfg.output_file+"_A.png", output_bitmap_A);
+		SaveRasterProgram(__out_dir_prefix + string("out_dual_A.opt"), &picA);
+		SavePMGWithSprites(__out_dir_prefix + string("out_dual_A.pmg"), m_eval_gstate.m_sprites_memory);
+		SaveScreenDataFromTargets((__out_dir_prefix + string("out_dual_A.mic")).c_str(), m_eval_gstate.m_created_picture_targets);
+		if (output_bitmap_A) SavePicture(__out_dir_prefix + string("out_dual_A.png"), output_bitmap_A);
 	}
 	// B
 	{
 		raster_picture picB = m_best_pic_B.raster_lines.empty() ? m_eval_gstate.m_best_pic : m_best_pic_B;
-		SaveRasterProgram(string(cfg.output_file+"_B.rp"), &picB);
+		SaveRasterProgram(__out_dir_prefix + string("out_dual_B.rp"), &picB);
 		OptimizeRasterProgram(&picB);
-		SaveRasterProgram(string(cfg.output_file+"_B.opt"), &picB);
-		SavePMGWithSprites(string(cfg.output_file+"_B.pmg"), m_sprites_memory_B);
+		SaveRasterProgram(__out_dir_prefix + string("out_dual_B.opt"), &picB);
+		SavePMGWithSprites(__out_dir_prefix + string("out_dual_B.pmg"), m_sprites_memory_B);
 		if (m_created_picture_targets_B.empty()) m_created_picture_targets_B = m_eval_gstate.m_created_picture_targets; // fallback
-		SaveScreenDataFromTargets  (string(cfg.output_file+"_B.mic").c_str(), m_created_picture_targets_B);
-		if (output_bitmap_B) SavePicture(cfg.output_file+"_B.png", output_bitmap_B);
+		SaveScreenDataFromTargets  ((__out_dir_prefix + string("out_dual_B.mic")).c_str(), m_created_picture_targets_B);
+		if (output_bitmap_B) SavePicture(__out_dir_prefix + string("out_dual_B.png"), output_bitmap_B);
 	}
 	// Blended
-	if (output_bitmap_blended) SavePicture(cfg.output_file+"_blended.png", output_bitmap_blended);
+	if (output_bitmap_blended) SavePicture(__out_dir_prefix + string("out_dual_blended.png"), output_bitmap_blended);
 
 	// Stats
 	SaveStatistics((cfg.output_file+".csv").c_str());
@@ -1613,6 +1621,7 @@ void RastaConverter::MainLoop()
 					if (destination_bitmap) ShowDestinationBitmap();
 					if (cfg.dual_mode) ShowLastCreatedPictureDual(); else ShowLastCreatedPicture();
 					ShowMutationStats();
+					gui.Present();
 					break;
 				case GUI_command::SHOW_A:
 					if (cfg.dual_mode) { m_dual_display = DualDisplayMode::A; ShowLastCreatedPictureDual(); }
@@ -1983,10 +1992,15 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	fprintf(fp,"\n; Set proper count of wsyncs \n");
 	fprintf(fp,"\n\t:2 sta wsync\n");
 
-	fprintf(fp,"\n; Set proper picture height\n");
-	fprintf(fp,"\n\nPIC_HEIGHT = %d\n",m_height);
-
 	fclose(fp);
+
+	// Save picture height into a separate header file
+	FILE *fh=fopen(string(name+".h").c_str(),"wt+");
+	if (!fh)
+		Error("Error saving picture height header file");
+	fprintf(fh,"; Set proper picture height\n");
+	fprintf(fh,"PIC_HEIGHT = %d\n",m_height);
+	fclose(fh);
 
 	fp=fopen(name.c_str(),"wt+");
 	if (!fp)

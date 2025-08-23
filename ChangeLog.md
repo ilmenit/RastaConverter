@@ -1,7 +1,11 @@
 ChangeLog
 =========
 
-RastaConverterBeta14      2025-08-?? [AI RELEASE]
+RastaConverterBeta15      2025-08-?? [AI RELEASE]
+* Dual mode - first official version
+* Fixing SDL2 window handling on Linux                                     
+
+RastaConverterBeta14      2025-08-20 [AI RELEASE]
 * Revert to codebase of Beta12
   - too much indirections and extra layers introduced non-fixable performance drop
 * Move to CMake for more modern and cross platform building

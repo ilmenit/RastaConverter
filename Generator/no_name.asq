@@ -4,6 +4,7 @@
 /***************************************/
 
 	icl "no_name.h"
+	icl "output.png.opt.h"
 
 	org $00
 
@@ -77,7 +78,7 @@ LOOP	lda vcount		;synchronization for the first screen line
 	mva <ant dlptr
 	mva >ant dlptr+1
 
-  icl "output.png.rp.ini"
+  icl "output.png.opt.ini"
 
 ;--- wait 18 cycles
 	jsr _rts
@@ -91,7 +92,7 @@ LOOP	lda vcount		;synchronization for the first screen line
 	jsr wait54cycle
 	inc byt2
 
-  icl "output.png.rp"
+  icl "output.png.opt"
 
 raster_program_end
 

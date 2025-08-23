@@ -20,6 +20,10 @@ bool RastaSDL::Init(std::string command_line)
 	renderer = SDL_CreateRenderer(window, -1, 0);
 	DBG_PRINT("[SDL] Window=%p Renderer=%p", (void*)window, (void*)renderer);
 
+	// Set up scaling behavior so content renders at logical size and SDL handles stretching
+	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+	SDL_RenderSetLogicalSize(renderer, window_width, window_height);
+
 	// load font
 	TTF_Init();
 	string font_path = SDL_GetBasePath();
@@ -117,8 +121,6 @@ void RastaSDL::DisplayBitmapLine(int x, int y, int line_y, FIBITMAP* fiBitmap) {
 	// Clean up
 	SDL_DestroyTexture(lineTexture);
 	SDL_FreeSurface(lineSurface);
-
-	SDL_RenderPresent(renderer);
 }
 
 // Function to convert FIBITMAP to SDL_Surface
@@ -150,6 +152,11 @@ void RastaSDL::DisplayBitmap(int x, int y, FIBITMAP* fiBitmap)
 	SDL_FreeSurface(surface);
 
 //	SDL_RenderPresent(renderer);
+}
+
+void RastaSDL::Present()
+{
+	SDL_RenderPresent(renderer);
 }
 
 void Wait(int t)
@@ -230,20 +237,11 @@ GUI_command RastaSDL::NextFrame()
 			}
 			break;
 		case SDL_WINDOWEVENT:
-			if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
-				int newWidth = e.window.data1;
-				int newHeight = e.window.data2;
-
-				// Adjust the viewport to the new window size
-
-				SDL_Rect new_rect = { 0, 0, newWidth, newHeight };
-				SDL_RenderSetViewport(renderer, &new_rect );
-
-				// Optionally, you can also adjust the scale to stretch the content
-				float scaleX = (float)newWidth / (float)window_width; // originalWidth is the width of your content
-				float scaleY = (float)newHeight / (float)window_height; // originalHeight is the height of your content
-				SDL_RenderSetScale(renderer, scaleX, scaleY);
-
+			if (e.window.event == SDL_WINDOWEVENT_RESIZED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || e.window.event == SDL_WINDOWEVENT_EXPOSED) {
+				// On resize, clear current backbuffer and request a redraw; scaling handled by logical size
+				SDL_RenderSetViewport(renderer, NULL);
+				SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+				SDL_RenderClear(renderer);
 				return GUI_command::REDRAW;
 			}
 		}
