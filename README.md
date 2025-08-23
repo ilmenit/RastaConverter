@@ -20,7 +20,7 @@ Key capabilities
 - Details mask: provide a mask image to emphasize selected regions and bring out fine details in the result.
 - Interfaces: SDL2 GUI and headless console modes.
 - Palette selection: choose target palette files via Adobe ACT to match different monitors and CRT settings.
-- Cross-platform: CMake-based builds for Windows and Linux; 
+- Cross-platform: CMake-based builds for Windows, MacOS and Linux, with scripted Profile Guided Optimization.
 - Extras: scripts and generators to assemble Atari executables.
 
 The converter uses Late Acceptance Hill Climbing (LAHC) and [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29).

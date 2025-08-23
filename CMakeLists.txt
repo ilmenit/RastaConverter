@@ -504,6 +504,16 @@ add_custom_command(TARGET RastaConverter POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR}/help.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR}/README.md"
 )
+if(EXISTS "${CMAKE_SOURCE_DIR}/dlls")
+    add_custom_command(TARGET RastaConverter POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dlls" "${RC_RUNTIME_COPY_DIR}"
+    )
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/test.jpg")
+    add_custom_command(TARGET RastaConverter POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test.jpg" "${RC_RUNTIME_COPY_DIR}/test.jpg"
+    )
+endif()
 if(BUILD_NO_GUI)
     set(RC_RUNTIME_COPY_DIR_NO_GUI "$<TARGET_FILE_DIR:RastaConverter-NO_GUI>")
     add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
@@ -514,6 +524,16 @@ if(BUILD_NO_GUI)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR_NO_GUI}/help.txt"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR_NO_GUI}/README.md"
     )
+    if(EXISTS "${CMAKE_SOURCE_DIR}/dlls")
+        add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dlls" "${RC_RUNTIME_COPY_DIR_NO_GUI}"
+        )
+    endif()
+    if(EXISTS "${CMAKE_SOURCE_DIR}/test.jpg")
+        add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test.jpg" "${RC_RUNTIME_COPY_DIR_NO_GUI}/test.jpg"
+        )
+    endif()
 endif()
 
 # Optionally copy all runtime DLLs for convenience on Windows (can be noisy under vcpkg)

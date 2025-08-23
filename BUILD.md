@@ -261,6 +261,12 @@ Tips for MSVC:
 PGO for Intel oneAPI icx (Windows) – LLVM-style (recommended)
 =============================================================
 
+Prerequisites
+- Run from an Intel oneAPI Developer Command Prompt (so that `icx` and `llvm-profdata` are on PATH), or run the oneAPI environment script first:
+  - `"C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64`
+- On Windows (Ninja), ensure required runtime DLLs are next to the executable. The build can copy them automatically if you pass `-DCOPY_ALL_RUNTIME_DLLS=ON` or if you maintain a `dlls/` directory at the repo root containing `FreeImage.dll`, `SDL2.dll`, `SDL2_ttf.dll` (copied post-build).
+- If you keep a `test.jpg` in the repo root, it will be copied to the run directory as well.
+
 Using presets (recommended)
 ```
 # One-time: create profile dir
@@ -273,8 +279,8 @@ if not exist pgo\icx mkdir pgo\icx
 cmake --preset ninja-pgo-icx-gen
 cmake --build build/ninja-pgo-icx-gen --config Release
 
-# Run representative scenarios to produce .profraw files
-set LLVM_PROFILE_FILE=pgo\icx\rasta-%p.profraw  &  build/ninja-pgo-icx-gen/RastaConverter.exe
+# Run representative scenarios to produce .profraw files (note Release subdir)
+set LLVM_PROFILE_FILE=pgo\icx\rasta-%p.profraw  &  build/ninja-pgo-icx-gen/Release/RastaConverter.exe
 
 # Merge raw profiles into a single .profdata (requires llvm-profdata in PATH; installed with oneAPI LLVM tools)
 llvm-profdata merge -output=pgo/icx/merged.profdata pgo/icx/*.profraw
@@ -289,9 +295,9 @@ Details:
 - The `merged.profdata` is consumed by `-fprofile-use=<path>` in the "use" preset.
 - Alternative with wrapper (PowerShell):
 ```
-./build.ps1 -Preset ninja-pgo-icx-gen -Config Release
+./build.ps1 -Preset ninja-pgo-icx-gen -Config Release -Extra -DCOPY_ALL_RUNTIME_DLLS=ON
 $env:LLVM_PROFILE_FILE = "pgo/icx/rasta-%p.profraw"
-build/ninja-pgo-icx-gen/RastaConverter.exe
+build/ninja-pgo-icx-gen/Release/RastaConverter.exe
 llvm-profdata merge -output=pgo/icx/merged.profdata pgo/icx/*.profraw
 ./build.ps1 -Preset ninja-pgo-icx-use -Config Release
 ```
@@ -301,33 +307,46 @@ llvm-profdata merge -output=pgo/icx/merged.profdata pgo/icx/*.profraw
 if not exist pgo\icx mkdir pgo\icx
 
 rem Phase 1 – Generate profile (Ninja preset auto-selected for non-MSVC compilers)
-build.bat release x64 icx "-DCMAKE_C_FLAGS_RELEASE=-fprofile-generate" "-DCMAKE_CXX_FLAGS_RELEASE=-fprofile-generate"
+build.bat release x64 icx "-DCMAKE_C_FLAGS_RELEASE=-fprofile-instr-generate" "-DCMAKE_CXX_FLAGS_RELEASE=-fprofile-instr-generate" "-DCOPY_ALL_RUNTIME_DLLS=ON"
 
 rem Run representative scenarios (.profraw files will be created)
-set LLVM_PROFILE_FILE=%CD%\pgo\icx\rasta-%%p.profraw & build\ninja-release\RastaConverter.exe
+set LLVM_PROFILE_FILE=%CD%\pgo\icx\rasta-%%p.profraw & build\ninja-release\Release\RastaConverter.exe
 
 rem Merge profiles (ensure llvm-profdata is on PATH)
 llvm-profdata merge -output=pgo/icx/merged.profdata pgo/icx/*.profraw
 
 rem Phase 3 – Use profile
-build.bat release x64 icx "-DCMAKE_C_FLAGS_RELEASE=-fprofile-use=%CD%\pgo\icx\merged.profdata -fprofile-instr-use" "-DCMAKE_CXX_FLAGS_RELEASE=-fprofile-use=%CD%\pgo\icx\merged.profdata -fprofile-instr-use"
+build.bat release x64 icx "-DCMAKE_C_FLAGS_RELEASE=-fprofile-instr-use=%CD%\pgo\icx\merged.profdata" "-DCMAKE_CXX_FLAGS_RELEASE=-fprofile-instr-use=%CD%\pgo\icx\merged.profdata"
 ```
+
+Fully automated script (Windows)
+--------------------------------
+Use the provided automation to run the entire flow:
+```
+# From an Intel oneAPI Developer Command Prompt
+build-pgo.bat                 # uses test.jpg from repo root by default
+build-pgo.bat examples\test.jpg  # or specify a custom input image
+```
+It will build instrumented, run multiple scenarios (writing distinct .profraw files), merge to `pgo\icx\merged.profdata`, then build the optimized binary.
 
 Ad‑hoc flags (no presets)
 ```
-# Generate profile
+# Generate profile (configure with -fprofile-instr-generate)
 ./build.ps1 -Preset ninja-release -Config Release -Compiler icx -Extra \
-  '-DCMAKE_C_FLAGS_RELEASE=/Qprof-gen /Qprof-dir:${PWD}/pgo/icx' \
-  '-DCMAKE_CXX_FLAGS_RELEASE=/Qprof-gen /Qprof-dir:${PWD}/pgo/icx'
+  '-DCMAKE_C_FLAGS_RELEASE=-fprofile-instr-generate' \
+  '-DCMAKE_CXX_FLAGS_RELEASE=-fprofile-instr-generate'
 
-# Run scenarios (.dyn files appear in pgo/icx)
-build/ninja-release/RastaConverter.exe
+# Run scenarios (set LLVM_PROFILE_FILE to control .profraw location)
+$env:LLVM_PROFILE_FILE = "pgo/icx/rasta-%p.profraw"
+build/ninja-release/Release/RastaConverter.exe
 
-# Use profile
+# Merge
+llvm-profdata merge -output=pgo/icx/merged.profdata pgo/icx/*.profraw
+
+# Use profile (configure with -fprofile-instr-use)
 ./build.ps1 -Preset ninja-release -Config Release -Compiler icx -Extra \
-  '-DCMAKE_C_FLAGS_RELEASE=/Qprof-use /Qipo /Qprof-dir:${PWD}/pgo/icx' \
-  '-DCMAKE_CXX_FLAGS_RELEASE=/Qprof-use /Qipo /Qprof-dir:${PWD}/pgo/icx' \
-  '-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/Qipo'
+  '-DCMAKE_C_FLAGS_RELEASE=-fprofile-instr-use=${PWD}/pgo/icx/merged.profdata' \
+  '-DCMAKE_CXX_FLAGS_RELEASE=-fprofile-instr-use=${PWD}/pgo/icx/merged.profdata'
 ```
 
 General guidance

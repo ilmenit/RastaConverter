@@ -150,9 +150,6 @@ $RECYCLE.BIN/
 
 # Mac crap
 .DS_Store
-allegro-4.4.2-mt.dll
-allegro-4.4.2-mt-debug.dll
-FreeImage.dll
 pthreadVC2.dll
 output.png
 output.png-dst.png
