@@ -44,6 +44,13 @@ void Configuration::ProcessCmdLine()
 
 void Configuration::Process(int argc, char *argv[])
 {
+    // Reset parser and diagnostics to allow multiple invocations (e.g., resume path)
+    parser = CommandLineParser();
+    error_messages.clear();
+    warning_messages.clear();
+	show_help = false;
+	bad_arguments = false;
+
 	// Define CLI specification (names are case-insensitive)
 	// Groups: Input, General options, Image processing, Dual-frame mode
 	parser.addFlag("help", {"?"},
@@ -185,13 +192,8 @@ void Configuration::Process(int argc, char *argv[])
 		bad_arguments = true;
 	}
 
-	if (parser.switchExists("continue"))
-	{
-		continue_processing=true;
-		return;
-	}
-	else
-		continue_processing=false;
+	// Set continue flag but do not return early; we still need defaults initialized
+	continue_processing = parser.switchExists("continue");
 
 	command_line=parser.mn_command_line;
 
@@ -267,7 +269,7 @@ void Configuration::Process(int argc, char *argv[])
 	dither_val2 = parser.getValue("dither_rand","0");
 	dither_randomness=String2Value<double>(dither_val2);
 
-	string cache_string = parser.getValue("cache", "16");
+	string cache_string = parser.getValue("cache", "64");
 	cache_size = 1024*1024*String2Value<double>(cache_string);
 
 	string seed_val;
