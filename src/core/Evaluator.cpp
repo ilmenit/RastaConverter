@@ -114,6 +114,59 @@ void Evaluator::FlushMutationStatsToGlobal()
 	}
 }
 
+Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
+{
+	AcceptanceOutcome out{false, false, m_gstate ? m_gstate->m_current_cost : result};
+	if (!m_gstate) return out;
+
+	if (m_gstate->m_previous_results.empty()) {
+		m_gstate->m_current_cost = result;
+		m_gstate->m_previous_results.resize(m_solutions, result);
+		m_gstate->m_cost_max = result;
+		m_gstate->m_N = m_solutions;
+	}
+
+	const size_t l = m_gstate->m_previous_results_index % (size_t)m_solutions;
+	double prev_cost = m_gstate->m_current_cost;
+
+	if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {
+		bool accept = (result <= m_gstate->m_current_cost) || (result <= m_gstate->m_previous_results[l]);
+		if (accept) m_gstate->m_current_cost = result;
+		m_gstate->m_previous_results[l] = prev_cost;
+		++m_gstate->m_previous_results_index;
+		out.accepted = accept;
+	} else {
+		if (result <= m_gstate->m_current_cost || result < m_gstate->m_cost_max) {
+			m_gstate->m_current_cost = result;
+		}
+		double old_value = m_gstate->m_previous_results[l];
+		double currentF = m_gstate->m_current_cost;
+		if (currentF > old_value) {
+			m_gstate->m_previous_results[l] = currentF;
+			if (currentF > m_gstate->m_cost_max) { m_gstate->m_cost_max = currentF; m_gstate->m_N = 1; }
+			else if (currentF == m_gstate->m_cost_max) { if (old_value != m_gstate->m_cost_max) ++m_gstate->m_N; }
+			else if (old_value == m_gstate->m_cost_max) {
+				--m_gstate->m_N;
+				if (m_gstate->m_N <= 0) {
+					m_gstate->m_cost_max = *std::max_element(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end());
+					m_gstate->m_N = std::count(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end(), m_gstate->m_cost_max);
+				}
+			}
+		} else if (currentF < old_value && currentF < prev_cost) {
+			if (old_value == m_gstate->m_cost_max) --m_gstate->m_N;
+			m_gstate->m_previous_results[l] = currentF;
+			if (m_gstate->m_N <= 0) {
+				m_gstate->m_cost_max = *std::max_element(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end());
+				m_gstate->m_N = std::count(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end(), m_gstate->m_cost_max);
+			}
+		}
+		++m_gstate->m_previous_results_index;
+		out.accepted = (m_gstate->m_current_cost == result);
+	}
+
+	out.improved = (result < m_gstate->m_best_result);
+	return out;
+}
 distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const line_cache_result **results_array, const std::vector<const unsigned char*>& other_rows, bool mutateB)
 {
 #ifdef _DEBUG

@@ -16,13 +16,36 @@ bool RastaSDL::Init(std::string command_line)
 	}
 
 	std::string title = "Rasta Converter " + command_line;
-	window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
-	renderer = SDL_CreateRenderer(window, -1, 0);
+	window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+	// Prefer accelerated renderer with vsync; gracefully fall back
+#ifdef __linux__
+	SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+#endif
+	renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+	if (!renderer) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+	if (!renderer) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
 	DBG_PRINT("[SDL] Window=%p Renderer=%p", (void*)window, (void*)renderer);
 
 	// Set up scaling behavior so content renders at logical size and SDL handles stretching
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
 	SDL_RenderSetLogicalSize(renderer, window_width, window_height);
+	SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+	SDL_RenderClear(renderer);
+	// Create retained framebuffer texture that persists across presents
+	// This avoids relying on undefined backbuffer contents on some Linux drivers
+	int lw, lh; SDL_RenderGetLogicalSize(renderer, &lw, &lh);
+	if (lw <= 0 || lh <= 0) { lw = window_width; lh = window_height; }
+	if (!framebufferTexture) {
+		framebufferTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, lw, lh);
+		if (framebufferTexture) {
+			SDL_SetTextureBlendMode(framebufferTexture, SDL_BLENDMODE_NONE);
+			SDL_SetRenderTarget(renderer, framebufferTexture);
+			SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+			SDL_RenderClear(renderer);
+			SDL_SetRenderTarget(renderer, NULL);
+		}
+	}
 
 	// load font
 	TTF_Init();
@@ -71,7 +94,10 @@ void RastaSDL::DisplayText(int x, int y, const std::string& text)
 	SDL_Rect textRect = { x, y, textSurface->w, textSurface->h };
 
 	// Copy the texture to the renderer at the designated position
+	if (framebufferTexture) SDL_SetRenderTarget(renderer, framebufferTexture);
 	SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
+	if (framebufferTexture) SDL_SetRenderTarget(renderer, NULL);
+	frameDirty = true;
 
 	// Clean up the surface and texture
 	SDL_DestroyTexture(textTexture);
@@ -116,7 +142,10 @@ void RastaSDL::DisplayBitmapLine(int x, int y, int line_y, FIBITMAP* fiBitmap) {
 
 	// Set the position and size for the line
 	SDL_Rect destRect = { x*2, y, lineSurface->w*2, 1 };
+	if (framebufferTexture) SDL_SetRenderTarget(renderer, framebufferTexture);
 	SDL_RenderCopy(renderer, lineTexture, NULL, &destRect);
+	if (framebufferTexture) SDL_SetRenderTarget(renderer, NULL);
+	frameDirty = true;
 
 	// Clean up
 	SDL_DestroyTexture(lineTexture);
@@ -146,7 +175,10 @@ void RastaSDL::DisplayBitmap(int x, int y, FIBITMAP* fiBitmap)
 
 	// Set the position and size for the stretched bitmap
 	SDL_Rect destRect = { x*2, y, surface->w * 2, surface->h }; // Double the width
+	if (framebufferTexture) SDL_SetRenderTarget(renderer, framebufferTexture);
 	SDL_RenderCopy(renderer, texture, NULL, &destRect);
+	if (framebufferTexture) SDL_SetRenderTarget(renderer, NULL);
+	frameDirty = true;
 	// Clean up
 	SDL_DestroyTexture(texture);
 	SDL_FreeSurface(surface);
@@ -156,7 +188,17 @@ void RastaSDL::DisplayBitmap(int x, int y, FIBITMAP* fiBitmap)
 
 void RastaSDL::Present()
 {
-	SDL_RenderPresent(renderer);
+	if (frameDirty) {
+		if (framebufferTexture) {
+			SDL_SetRenderTarget(renderer, NULL);
+			int lw, lh; SDL_RenderGetLogicalSize(renderer, &lw, &lh);
+			SDL_Rect dst = { 0, 0, lw, lh };
+			if (dst.w == 0 || dst.h == 0) { dst.w = window_width; dst.h = window_height; }
+			SDL_RenderCopy(renderer, framebufferTexture, NULL, &dst);
+		}
+		SDL_RenderPresent(renderer);
+		frameDirty = false;
+	}
 }
 
 void Wait(int t)
@@ -246,7 +288,18 @@ GUI_command RastaSDL::NextFrame()
 			}
 		}
 	}
-	SDL_RenderPresent(renderer);
+	// Only present if something was drawn this frame
+	if (frameDirty) {
+		if (framebufferTexture) {
+			SDL_SetRenderTarget(renderer, NULL);
+			int lw, lh; SDL_RenderGetLogicalSize(renderer, &lw, &lh);
+			SDL_Rect dst = { 0, 0, lw, lh };
+			if (dst.w == 0 || dst.h == 0) { dst.w = window_width; dst.h = window_height; }
+			SDL_RenderCopy(renderer, framebufferTexture, NULL, &dst);
+		}
+		SDL_RenderPresent(renderer);
+		frameDirty = false;
+	}
 	return GUI_command::CONTINUE;
 }
 

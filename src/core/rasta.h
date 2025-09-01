@@ -42,7 +42,7 @@ private:
 
 #ifdef NO_GUI
 	RastaConsole gui;
-#else;
+#else
 	RastaSDL gui;
 #endif
 
@@ -132,6 +132,8 @@ private:
 
 	void LoadRegInits(string name);
 	void LoadRasterProgram(string name);
+	// Helpers to load A/B into appropriate members for dual resume
+	bool LoadRasterProgramInto(raster_picture& dst, const std::string& rp_path, const std::string& ini_path);
 	void LoadPMG(string name);
 	void LoadOptimizerState(string name);
 
@@ -146,6 +148,8 @@ private:
 	static void *KnollDitheringParallelHelper(void *arg);
 	void ParallelFor(int from, int to, void *(*start_routine)(void*));
 	bool GetInstructionFromString(const string& line, SRasterInstruction& instr);
+
+    // (removed) legacy dual acceptance helper – logic centralized in Evaluator::ApplyAcceptanceCore
 
 public:
 	// configuration

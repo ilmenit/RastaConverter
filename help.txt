@@ -27,6 +27,7 @@ Dual-frame mode (two frames A/B alternating):
   - A, B, or Mixed (blended) — toggle with keys: [A], [B], [M]
   - Status lines under stats: Optimizing: A|B; Showing: A|B|M; Press [A] [B] [M]ix
 - Note: Mutation statistics are shown only in single-frame mode (hidden in dual mode)
+  - Optimizer and history: /opt (lahc|dlas) and /s (history length) work exactly the same as in single-frame mode; dual mode uses the same acceptance logic and history
 
 Command line options (accept '/', '-' or '--' prefixes; aliases included under each option):
 
@@ -56,6 +57,10 @@ General options:
   Continue previously stopped process. Currently it uses previously generated files (output*.*) therefore
   be careful not to overwrite them with other instance of RastaConverter. 
   Aliases: --continue
+  Notes:
+  - Respects the current /output value. If you used /o=custom.png earlier, resume will look for
+    custom.png.rp[.ini]/.optstate (single) or out_dual_A/B.rp[.ini] in the same directory (dual).
+  - In dual mode, resume automatically loads A and B if present; otherwise falls back to single-frame.
 
 /preprocess
   If this switch exists then RastaConverter generates and saves only destination picture.
@@ -160,9 +165,9 @@ Input:
   Aliases: /s, --solutions
  
  /opt or --optimizer=lahc|dlas
-  Select optimization algorithm. Default: dlas
-  - dlas: Diversified Late Acceptance Search (current default)
-  - lahc: Late Acceptance Hill Climbing (classic LAHC)
+  Select optimization algorithm. Default: lahc
+  - lahc: Late Acceptance Hill Climbing (default)
+  - dlas: Diversified Late Acceptance Search
   Aliases: --opt, --optimizer
   
 /distance=Color distance function

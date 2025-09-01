@@ -185,6 +185,23 @@ public:
 	// only on accepted improvements to minimize overhead.
 	void FlushMutationStatsToGlobal();
 
+	// Shared acceptance core (LAHC/DLAS + /s history) used by single and dual modes.
+	// Assumes caller holds m_gstate->m_mutex and has incremented m_evaluations.
+	struct AcceptanceOutcome {
+		bool accepted;
+		bool improved;
+		double previousCost;
+	};
+	AcceptanceOutcome ApplyAcceptanceCore(double result);
+
+	// Thin wrappers for clarity (no extra runtime cost expected)
+	inline distance_accum_t EvaluateSingle(raster_picture* pic, const line_cache_result** line_results) {
+		return ExecuteRasterProgram(pic, line_results);
+	}
+	inline distance_accum_t EvaluateDual(raster_picture* pic, const line_cache_result** line_results, const std::vector<const unsigned char*>& other_rows, bool mutateB) {
+		return ExecuteRasterProgramDual(pic, line_results, other_rows, mutateB);
+	}
+
 private:
 	int m_thread_id;
 	// LRU tracking

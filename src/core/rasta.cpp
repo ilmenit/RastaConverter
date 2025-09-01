@@ -1616,6 +1616,8 @@ void RastaConverter::MainLoop()
 				case GUI_command::STOP:
 					running = false;
 					break;
+				case GUI_command::CONTINUE:
+					break;
 				case GUI_command::REDRAW:
 					ShowInputBitmap();
 					if (destination_bitmap) ShowDestinationBitmap();
@@ -1953,12 +1955,81 @@ void RastaConverter::LoadRasterProgram(string name)
 	}
 }
 
+bool RastaConverter::LoadRasterProgramInto(raster_picture& dst, const std::string& rp_path, const std::string& ini_path)
+{
+	// Reset target
+	dst = raster_picture();
+	dst.raster_lines.clear();
+	// Temporarily load into global best, then copy to dst; reuse existing parsing logic
+	LoadRegInits(ini_path);
+	LoadRasterProgram(rp_path);
+	dst = m_eval_gstate.m_best_pic;
+	return !dst.raster_lines.empty();
+}
+
 bool RastaConverter::Resume()
 {
-	LoadRegInits("output.png.rp.ini");
-	LoadRasterProgram("output.png.rp");
-	LoadOptimizerState("output.png.optstate");
+	// Derive base from cfg.output_file and directory
+	std::string base = cfg.output_file.empty() ? std::string("output.png") : cfg.output_file;
+	// Split dir and filename
+	std::string dir;
+	{
+		size_t pos = base.find_last_of("/\\");
+		if (pos != std::string::npos) { dir = base.substr(0, pos + 1); }
+	}
+	// Expected single-frame paths
+	std::string sf_rp = base + ".rp";
+	std::string sf_ini = base + ".rp.ini";
+	std::string sf_opt = base + ".optstate";
+	// Expected dual-frame paths
+	std::string df_a_rp = dir + "out_dual_A.rp";
+	std::string df_a_ini = dir + "out_dual_A.rp.ini";
+	std::string df_b_rp = dir + "out_dual_B.rp";
+	std::string df_b_ini = dir + "out_dual_B.rp.ini";
+
+	// Prefer dual if both A and B exist; fallback to single-frame
+	auto file_exists = [](const std::string& path) -> bool {
+		FILE* f = fopen(path.c_str(), "rb"); if (f) { fclose(f); return true; } return false;
+	};
+
+	bool has_dual = file_exists(df_a_rp) && file_exists(df_b_rp);
+	bool has_single = file_exists(sf_rp);
+
+	if (has_dual)
+	{
+		// Enable dual mode if not already
+		cfg.dual_mode = true;
+		// Load into locals then assign to avoid clobbering A with B during parse
+		raster_picture picA;
+		raster_picture picB;
+		if (!LoadRasterProgramInto(picA, df_a_rp, df_a_ini))
+			Error(std::string("Error loading dual resume A: ") + df_a_rp);
+		if (!LoadRasterProgramInto(picB, df_b_rp, df_b_ini))
+			Error(std::string("Error loading dual resume B: ") + df_b_rp);
+		m_eval_gstate.m_best_pic = picA;
+		m_best_pic_B = picB;
+	}
+	else if (has_single)
+	{
+		// Single-frame resume
+		LoadRegInits(sf_ini);
+		LoadRasterProgram(sf_rp);
+	}
+	else
+	{
+		Error("/continue: no saved program found for resume (looked for single and dual outputs)");
+	}
+
+	// Load optimizer state if present
+	if (file_exists(sf_opt)) {
+		LoadOptimizerState(sf_opt);
+	}
+
+	// Re-parse saved command line to restore other options, but keep current CLI /output if set
+	std::string cli_out = cfg.output_file;
+	bool keep_cli_out = !cli_out.empty();
 	cfg.ProcessCmdLine();
+	if (keep_cli_out) cfg.output_file = cli_out;
 	return true;
 }
 

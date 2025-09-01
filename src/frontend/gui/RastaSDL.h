@@ -16,6 +16,11 @@ private:
     SDL_Window* window;
     SDL_Renderer* renderer;
     TTF_Font* font;
+    bool frameDirty = false;
+    SDL_Texture* framebufferTexture = nullptr; // retained backbuffer to avoid flicker
+    int logical_w = 0;
+    int logical_h = 0;
+    void EnsureFramebuffer();
     SDL_Surface* FIBitmapToSDLSurface(FIBITMAP* fiBitmap);
     SDL_Surface* FIBitmapLineToSDLSurface(FIBITMAP* fiBitmap, int line_y);
 public:

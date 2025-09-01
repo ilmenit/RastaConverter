@@ -85,7 +85,7 @@ struct Configuration {
 
 	// --- Optimizer selection ---
 	enum e_optimizer { E_OPT_DLAS, E_OPT_LAHC };
-	e_optimizer optimizer = E_OPT_DLAS; // /opt dlas|lahc (default dlas)
+	e_optimizer optimizer = E_OPT_LAHC; // /opt dlas|lahc (default lahc)
 
 
 	CommandLineParser parser; 

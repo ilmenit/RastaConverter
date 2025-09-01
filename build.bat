@@ -101,7 +101,7 @@ if %CHECK_DEPS% EQU 1 (
 echo [info] Preset: %PRESET%
 echo [info] Config: %CONFIG%
 if %BUILD_NO_GUI% EQU 1 (
-    echo [info] Building GUI + Console (NO_GUI)
+    echo [info] Building GUI + Console
 ) else (
     echo [info] Building GUI only
 )

@@ -57,6 +57,10 @@ int main(int argc, char *argv[])
 	if (cfg.continue_processing)
 	{
 		quiet=true;
+		// Respect current CLI (e.g., /output) during resume
+		// Populate output_file from parsed args even though Process returned early
+		cfg.output_file = cfg.parser.getValue("output", "output.png");
+		rasta.SetConfig(cfg);
 		rasta.Resume();
 		rasta.cfg.continue_processing=true;
 		quiet = cfg.quiet;

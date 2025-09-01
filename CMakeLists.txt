@@ -18,7 +18,7 @@ option(ENABLE_LTO "Enable interprocedural optimization (Release/RelWithDebInfo)"
 option(ENABLE_FAST_MATH "Enable fast math in Release/RelWithDebInfo (non-MSVC)" ON)
 option(ENABLE_DEAD_STRIP "Enable function/data section and linker GC (non-MSVC)" ON)
 option(ENABLE_MSVC_FAST_MATH "Use /fp:fast on MSVC/clang-cl in Release/RelWithDebInfo" ON)
-option(ENABLE_AVX2 "Enable AVX2 for MSVC/clang-cl in Release/RelWithDebInfo" ON)
+option(ENABLE_AVX2 "Enable AVX2 in Release/RelWithDebInfo" OFF)
 option(ENABLE_UNITY_BUILD "Enable unity build for faster compiles" OFF)
 option(COPY_ALL_RUNTIME_DLLS "Copy all dependent runtime DLLs on Windows" OFF)
 
@@ -314,17 +314,29 @@ else()
     endif()
 endif()
 
+# Determine if we are targeting an x86_64 architecture (used to guard AVX2)
+set(IS_X86_64 FALSE)
+if(CMAKE_SYSTEM_PROCESSOR)
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _proc)
+    if(_proc MATCHES "x86_64|amd64|x64")
+        set(IS_X86_64 TRUE)
+    endif()
+endif()
+
 # Config-specific defines
 target_compile_definitions(RastaConverter PRIVATE
     $<$<CONFIG:Debug>:_DEBUG>
     $<$<CONFIG:Release>:NDEBUG;_SCL_SECURE=0>
     $<$<CONFIG:RelWithDebInfo>:NDEBUG;_SCL_SECURE=0>
+    $<$<CONFIG:MinSizeRel>:NDEBUG;_SCL_SECURE=0>
 )
 if(BUILD_NO_GUI)
     target_compile_definitions(RastaConverter-NO_GUI PRIVATE
+        NO_GUI
         $<$<CONFIG:Debug>:_DEBUG>
         $<$<CONFIG:Release>:NDEBUG;_SCL_SECURE=0>
         $<$<CONFIG:RelWithDebInfo>:NDEBUG;_SCL_SECURE=0>
+        $<$<CONFIG:MinSizeRel>:NDEBUG;_SCL_SECURE=0>
     )
 endif()
 
@@ -334,7 +346,7 @@ if(MSVC)
         /W3 /wd4819
         $<$<CONFIG:Debug>:/MDd;/Od;/RTC1>
         $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/MT;/O2;/Ob2;/Oi;/Ot;/Gy;/Gw;$<IF:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,/fp:fast,>>
-        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:/arch:AVX2>
+        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:/arch:AVX2>
     )
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
@@ -345,27 +357,18 @@ if(MSVC)
         )
     endif()
 
-    if(ENABLE_LTO)
-        target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/LTCG;/OPT:REF;/OPT:ICF>)
-        if(BUILD_NO_GUI)
-            target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/LTCG;/OPT:REF;/OPT:ICF>)
-        endif()
-    else()
-        target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
-        if(BUILD_NO_GUI)
-            target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
-        endif()
+    target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
+    if(BUILD_NO_GUI)
+        target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_compile_options(RastaConverter PRIVATE
-        -Wall -Wextra -Wpedantic
+        $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
         $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
         $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
         $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
     )
-    if(ENABLE_LTO)
-        target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto=thin>)
-    endif()
     if(ENABLE_DEAD_STRIP)
         if(APPLE)
             target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,-dead_strip>)
@@ -375,14 +378,12 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     endif()
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
-            -Wall -Wextra -Wpedantic
+            $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
             $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+            $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
         )
-        if(ENABLE_LTO)
-            target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto=thin>)
-        endif()
         if(ENABLE_DEAD_STRIP)
             if(APPLE)
                 target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,-dead_strip>)
@@ -393,30 +394,26 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     target_compile_options(RastaConverter PRIVATE
-        -Wall -Wextra -Wpedantic
+        $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
         $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
         $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
         $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
     )
     if(NOT WIN32)
-        if(ENABLE_LTO)
-            target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto>)
-        endif()
         if(ENABLE_DEAD_STRIP)
             target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
         endif()
     endif()
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
-            -Wall -Wextra -Wpedantic
+            $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
             $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+            $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
         )
         if(NOT WIN32)
-            if(ENABLE_LTO)
-                target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto>)
-            endif()
             if(ENABLE_DEAD_STRIP)
                 target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
             endif()
@@ -424,20 +421,22 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(RastaConverter PRIVATE
-        -Wall -Wextra -Wpedantic
+        $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
         $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
         $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
         $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
     )
     if(ENABLE_DEAD_STRIP)
         target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
     endif()
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
-            -Wall -Wextra -Wpedantic
+            $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
             $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+            $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
         )
         if(ENABLE_DEAD_STRIP)
             target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
@@ -449,6 +448,22 @@ if(ENABLE_UNITY_BUILD)
     set_target_properties(RastaConverter PROPERTIES UNITY_BUILD ON)
     if(BUILD_NO_GUI)
         set_target_properties(RastaConverter-NO_GUI PROPERTIES UNITY_BUILD ON)
+    endif()
+endif()
+
+# Enable interprocedural optimization (LTO) via CMake IPO if supported
+if(ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT ipo_supported OUTPUT ipo_output)
+    if(ipo_supported)
+        set_property(TARGET RastaConverter PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        set_property(TARGET RastaConverter PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+        if(BUILD_NO_GUI)
+            set_property(TARGET RastaConverter-NO_GUI PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+            set_property(TARGET RastaConverter-NO_GUI PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+        endif()
+    else()
+        message(WARNING "IPO/LTO not supported by this toolchain: ${ipo_output}")
     endif()
 endif()
 

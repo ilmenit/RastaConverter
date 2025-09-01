@@ -18,6 +18,7 @@ extern OnOffMap on_off;
 extern int solutions;
 extern bool quiet;
 unsigned char ConvertColorRegisterToRawData(e_target t);
+// Removed; logic moved into Evaluator::ApplyAcceptanceCore
 
 void RastaConverter::ShowLastCreatedPictureDual()
 {
@@ -286,39 +287,32 @@ void RastaConverter::MainLoopDual()
 			Evaluator& ev = m_evaluators[tid];
 			std::vector<const line_cache_result*> line_results(m_height, nullptr);
 			raster_picture localBest = bestA;
-			distance_accum_t localCost = bestCostA;
 			while (true) {
 				// Early stop check (lock free read)
 				if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_A) break;
 				raster_picture cand = localBest;
 				ev.MutateRasterProgram(&cand);
 				distance_accum_t cost = ev.ExecuteRasterProgram(&cand, line_results.data());
-				bool improved_flag = false;
 				{
 					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 					if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_A) break;
 					++m_eval_gstate.m_evaluations;
-					if (cost < bestCostA) {
-						bestCostA = cost; localBest = cand; cand.uncache_insns();
-						m_eval_gstate.m_best_pic = cand;
-						m_eval_gstate.m_best_result = (double)bestCostA;
+					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost);
+					if (out.improved) {
 						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
-						improved_flag = true;
-						// Throttle heavy copies to reduce overhead during bootstrap
-						if ((m_eval_gstate.m_evaluations & 0x7FFULL) == 0ULL) {
-							UpdateCreatedFromResults(line_results, m_eval_gstate.m_created_picture);
-							UpdateTargetsFromResults(line_results, m_eval_gstate.m_created_picture_targets);
-							memcpy(&m_eval_gstate.m_sprites_memory, &ev.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
-							m_eval_gstate.m_update_improvement = true;
-							m_eval_gstate.m_condvar_update.notify_one();
-						}
+						m_eval_gstate.m_best_pic = cand; m_eval_gstate.m_best_pic.uncache_insns();
+						UpdateCreatedFromResults(line_results, m_eval_gstate.m_created_picture);
+						UpdateTargetsFromResults(line_results, m_eval_gstate.m_created_picture_targets);
+						memcpy(&m_eval_gstate.m_sprites_memory, &ev.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
+						m_eval_gstate.m_update_improvement = true;
+						m_eval_gstate.m_condvar_update.notify_one();
+						localBest = cand;
 					}
 					if (m_eval_gstate.m_save_period > 0 && (m_eval_gstate.m_evaluations % (unsigned long long)m_eval_gstate.m_save_period) == 0ULL) {
 						m_eval_gstate.m_update_autosave = true;
 						m_eval_gstate.m_condvar_update.notify_one();
 					}
 				}
-				// Skip mutation stats aggregation in dual mode bootstrap
 			}
 		});
 	}
@@ -417,32 +411,27 @@ void RastaConverter::MainLoopDual()
 					raster_picture cand = localB;
 					ev.MutateRasterProgram(&cand);
 					distance_accum_t cost = ev.ExecuteRasterProgram(&cand, line_results.data());
-					bool improved_flag = false;
 					{
 						std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 						if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_B) break;
 						++m_eval_gstate.m_evaluations;
-						if (cost < bestCostB) {
-							bestCostB = cost;
+						Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost);
+						if (out.improved) {
+							m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
-							localB = cand;
+							UpdateCreatedFromResults(line_results, m_created_picture_B);
+							UpdateTargetsFromResults(line_results, m_created_picture_targets_B);
+							memcpy(&m_sprites_memory_B, &ev.GetSpritesMemory(), sizeof m_sprites_memory_B);
 							m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
-							improved_flag = true;
-							// Throttle heavy copies to reduce overhead during bootstrap
-							if ((m_eval_gstate.m_evaluations & 0x7FFULL) == 0ULL) {
-								UpdateCreatedFromResults(line_results, m_created_picture_B);
-								UpdateTargetsFromResults(line_results, m_created_picture_targets_B);
-								memcpy(&m_sprites_memory_B, &ev.GetSpritesMemory(), sizeof m_sprites_memory_B);
-								m_eval_gstate.m_update_improvement = true;
-								m_eval_gstate.m_condvar_update.notify_one();
-							}
+							m_eval_gstate.m_update_improvement = true;
+							m_eval_gstate.m_condvar_update.notify_one();
+							localB = m_best_pic_B;
 						}
 						if (m_eval_gstate.m_save_period > 0 && (m_eval_gstate.m_evaluations % (unsigned long long)m_eval_gstate.m_save_period) == 0ULL) {
 							m_eval_gstate.m_update_autosave = true;
 							m_eval_gstate.m_condvar_update.notify_one();
 						}
 					}
-					// Skip mutation stats aggregation in dual mode bootstrap
 				}
 			});
 		}
@@ -697,60 +686,36 @@ void RastaConverter::MainLoopDual()
 				ev.MutateRasterProgram(&cand);
 				distance_accum_t cost = ev.ExecuteRasterProgramDual(&cand, line_results.data(), other_rows, mutateB);
 
-				// STAGE 5: MINIMAL critical section for shared state updates only
+				// STAGE 5: Shared acceptance core (under lock)
 				{
 					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
-					
-					// Early termination check
 					if (m_eval_gstate.m_finished || (cfg.max_evals > 0 && m_eval_gstate.m_evaluations >= m_eval_gstate.m_max_evals)) {
 						break;
 					}
-					
 					++m_eval_gstate.m_evaluations;
-					
-					// Proper acceptance logic (not just improvements) - matches fork pattern
-					bool accept = (cost <= localAcceptedCost); // For now, use simple acceptance (can be enhanced later)
-					bool improved = (cost < m_eval_gstate.m_best_result);
-					
-					if (accept) {
-						localAcceptedCost = cost; // Update local accepted cost
-					}
-					
-					if (improved) {
-						// OPTIMAL: Update only the mutated frame (keep fixed frame frozen during phase)
+					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost);
+					if (out.improved) {
+						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						if (mutateB) {
 							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
-							currentB = cand; // Update local copy
-							m_genB++;
-							m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
 							UpdateCreatedFromResults(line_results, m_created_picture_B);
 							UpdateTargetsFromResults(line_results, m_created_picture_targets_B);
 							memcpy(&m_sprites_memory_B, &ev.GetSpritesMemory(), sizeof m_sprites_memory_B);
-							// NO snapshot update during phase - frame A stays fixed!
+							m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
+							currentB = m_best_pic_B;
 						} else {
 							m_eval_gstate.m_best_pic = cand; m_eval_gstate.m_best_pic.uncache_insns();
-							currentA = cand; // Update local copy
-							m_genA++;
-							m_eval_gstate.m_dual_generation_A.fetch_add(1, std::memory_order_acq_rel);
 							UpdateCreatedFromResults(line_results, m_eval_gstate.m_created_picture);
 							UpdateTargetsFromResults(line_results, m_eval_gstate.m_created_picture_targets);
 							memcpy(&m_eval_gstate.m_sprites_memory, &ev.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
-							// NO snapshot update during phase - frame B stays fixed!
+							m_eval_gstate.m_dual_generation_A.fetch_add(1, std::memory_order_acq_rel);
+							currentA = m_eval_gstate.m_best_pic;
 						}
-						// Skip mutation stats aggregation in dual alternation per request
-						m_eval_gstate.m_best_result = cost;
-						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						m_eval_gstate.m_update_improvement = true;
 						m_eval_gstate.m_condvar_update.notify_one();
 					}
-					
-					// Check autosave and termination
 					if (m_eval_gstate.m_save_period > 0 && (m_eval_gstate.m_evaluations % (unsigned long long)m_eval_gstate.m_save_period) == 0ULL) {
 						m_eval_gstate.m_update_autosave = true;
-						m_eval_gstate.m_condvar_update.notify_one();
-					}
-					if (cfg.max_evals > 0 && m_eval_gstate.m_evaluations >= m_eval_gstate.m_max_evals) {
-						m_eval_gstate.m_finished = true;
 						m_eval_gstate.m_condvar_update.notify_one();
 					}
 				}
