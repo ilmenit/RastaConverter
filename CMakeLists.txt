@@ -83,6 +83,10 @@ set(COMMON_SOURCE_FILES
     src/core/Cycles.cpp
     src/core/rasta.cpp
     src/core/RastaDual.cpp
+    src/core/dual/RastaDual_Display.cpp
+    src/core/dual/RastaDual_Tables.cpp
+    src/core/dual/RastaDual_DataIO.cpp
+    src/core/dual/RastaDual_MainLoop.cpp
     src/frontend/console/RastaConsole.cpp
     src/color/rgb.cpp
     src/core/TargetPicture.cpp

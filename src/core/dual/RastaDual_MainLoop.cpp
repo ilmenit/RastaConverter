@@ -1,243 +1,17 @@
-// For performance reasons (inlining etc.) we keep everythign in one big RastaConverter class
+// Dual-mode main loop extracted from RastaDual.cpp
 #include "rasta.h"
 #include "Program.h"
 #include "Evaluator.h"
 #include "TargetPicture.h"
 #include "debug_log.h"
-#include <cassert>
-#include <cmath>
-#include <cstring>
 #include <thread>
 #include <mutex>
 #include <chrono>
-#include <cstdio>
 
-// Externs and forward declarations from other translation units
 extern const char *program_version;
 extern OnOffMap on_off;
 extern int solutions;
 extern bool quiet;
-unsigned char ConvertColorRegisterToRawData(e_target t);
-// Removed; logic moved into Evaluator::ApplyAcceptanceCore
-
-#if 0
-void RastaConverter::ShowLastCreatedPictureDual()
-{
-#ifdef _DEBUG
-	assert(cfg.dual_mode && "ShowLastCreatedPictureDual called while dual_mode is off");
-#endif
-	if (!cfg.dual_mode) { ShowLastCreatedPicture(); return; }
-
-	// Ensure bitmaps exist
-	if (!output_bitmap_A) output_bitmap_A = FreeImage_Allocate(cfg.width, cfg.height, 24);
-	if (!output_bitmap_B) output_bitmap_B = FreeImage_Allocate(cfg.width, cfg.height, 24);
-	if (!output_bitmap_blended) output_bitmap_blended = FreeImage_Allocate(cfg.width, cfg.height, 24);
-
-	// Render A and B outputs from created pictures
-	for (int y = 0; y < m_height; ++y)
-	{
-		for (int x = 0; x < m_width; ++x)
-		{
-			unsigned char idxA = (y < (int)m_eval_gstate.m_created_picture.size() && x < (int)m_eval_gstate.m_created_picture[y].size()) ? m_eval_gstate.m_created_picture[y][x] : 0;
-			unsigned char idxB = (y < (int)m_created_picture_B.size() && x < (int)m_created_picture_B[y].size()) ? m_created_picture_B[y][x] : 0;
-			rgb colA = atari_palette[idxA];
-			rgb colB = atari_palette[idxB];
-			RGBQUAD qa = { colA.b, colA.g, colA.r, 0 };
-			RGBQUAD qb = { colB.b, colB.g, colB.r, 0 };
-			FreeImage_SetPixelColor(output_bitmap_A, x, y, &qa);
-			FreeImage_SetPixelColor(output_bitmap_B, x, y, &qb);
-
-			// Blended: use precomputed pair sRGB if available; else simple 50/50 rgb
-			RGBQUAD qm;
-			if (m_dual_tables_ready && !m_pair_srgb.empty()) {
-				size_t pairIdx = ((size_t)idxA * 128 + (size_t)idxB) * 3;
-#ifdef _DEBUG
-				assert(pairIdx + 2 < m_pair_srgb.size());
-#endif
-				qm.rgbRed   = m_pair_srgb[pairIdx + 0];
-				qm.rgbGreen = m_pair_srgb[pairIdx + 1];
-				qm.rgbBlue  = m_pair_srgb[pairIdx + 2];
-			} else {
-				qm.rgbRed   = (unsigned char)((colA.r + colB.r) >> 1);
-				qm.rgbGreen = (unsigned char)((colA.g + colB.g) >> 1);
-				qm.rgbBlue  = (unsigned char)((colA.b + colB.b) >> 1);
-			}
-			FreeImage_SetPixelColor(output_bitmap_blended, x, y, &qm);
-		}
-	}
-
-	// Display according to current dual display mode
-	int w = FreeImage_GetWidth(input_bitmap);
-	switch (m_dual_display) {
-		case DualDisplayMode::A: gui.DisplayBitmap(w, 0, output_bitmap_A); break;
-		case DualDisplayMode::B: gui.DisplayBitmap(w, 0, output_bitmap_B); break;
-		case DualDisplayMode::MIX: default: gui.DisplayBitmap(w, 0, output_bitmap_blended); break;
-	}
-}
-
-void RastaConverter::PrecomputeDualTables()
-{
-#ifdef _DEBUG
-	assert(cfg.dual_mode);
-#endif
-	if (m_dual_tables_ready) return;
-	// Palette
-	auto rgb_to_yuv = [](const rgb& c, float& y, float& u, float& v){
-		float r=(float)c.r, g=(float)c.g, b=(float)c.b;
-		y = 0.299f*r + 0.587f*g + 0.114f*b;
-		u = (b - y) * 0.565f;
-		v = (r - y) * 0.713f;
-	};
-	for (int i=0;i<128;++i) {
-		float y,u,v; rgb_to_yuv(atari_palette[i], y,u,v);
-		m_palette_y[i]=y; m_palette_u[i]=u; m_palette_v[i]=v;
-	}
-	// Target YUV per pixel
-	const unsigned total = (unsigned)(m_width*m_height);
-	m_target_y.resize(total); m_target_u.resize(total); m_target_v.resize(total);
-	m_target_y8.resize(total); m_target_u8.resize(total); m_target_v8.resize(total);
-	unsigned idx=0;
-	for (int y=0;y<m_height;++y) {
-		const screen_line& row = m_picture[y];
-		for (int x=0;x<m_width;++x) {
-			float Y,U,V; rgb_to_yuv(row[x], Y,U,V);
-			m_target_y[idx]=Y; m_target_u[idx]=U; m_target_v[idx]=V; ++idx;
-		}
-	}
-	// Pair YUV averages
-	m_pair_Ysum.resize(128*128); m_pair_Usum.resize(128*128); m_pair_Vsum.resize(128*128);
-	m_pair_Ydiff.resize(128*128); m_pair_Udiff.resize(128*128); m_pair_Vdiff.resize(128*128);
-	m_pair_Ysum8.resize(128*128); m_pair_Usum8.resize(128*128); m_pair_Vsum8.resize(128*128);
-	m_pair_Ydiff8.resize(128*128); m_pair_Udiff8.resize(128*128); m_pair_Vdiff8.resize(128*128);
-	for (int a=0;a<128;++a) {
-		for (int b=0;b<128;++b) {
-			int p=(a<<7)|b;
-			m_pair_Ysum[p] = 0.5f*(m_palette_y[a] + m_palette_y[b]);
-			m_pair_Usum[p] = 0.5f*(m_palette_u[a] + m_palette_u[b]);
-			m_pair_Vsum[p] = 0.5f*(m_palette_v[a] + m_palette_v[b]);
-			m_pair_Ydiff[p] = fabsf(m_palette_y[a] - m_palette_y[b]);
-			m_pair_Udiff[p] = fabsf(m_palette_u[a] - m_palette_u[b]);
-			m_pair_Vdiff[p] = fabsf(m_palette_v[a] - m_palette_v[b]);
-			auto q8 = [](float v, float offset, float scale)->unsigned char{
-				float t = (v + offset) * scale; if (t < 0.0f) t = 0.0f; if (t > 255.0f) t = 255.0f; return (unsigned char)(t + 0.5f);
-			};
-			// Y is 0..255 already; U ~ [-144,144], V ~ [-182,182] roughly for Atari palette; use conservative ranges
-			m_pair_Ysum8[p] = q8(m_pair_Ysum[p], 0.0f, 1.0f);
-			m_pair_Usum8[p] = q8(m_pair_Usum[p], 160.0f, 1.0f);
-			m_pair_Vsum8[p] = q8(m_pair_Vsum[p], 200.0f, 1.0f);
-			m_pair_Ydiff8[p] = q8(m_pair_Ydiff[p], 0.0f, 1.0f);
-			m_pair_Udiff8[p] = q8(m_pair_Udiff[p], 0.0f, 1.0f);
-			m_pair_Vdiff8[p] = q8(m_pair_Vdiff[p], 0.0f, 1.0f);
-		}
-	}
-	// Quantize target YUV to 8-bit with same shifts
-	for (unsigned i=0;i<total;++i) {
-		auto q8 = [](float v, float offset, float scale)->unsigned char{
-			float t = (v + offset) * scale; if (t < 0.0f) t = 0.0f; if (t > 255.0f) t = 255.0f; return (unsigned char)(t + 0.5f);
-		};
-		m_target_y8[i] = q8(m_target_y[i], 0.0f, 1.0f);
-		m_target_u8[i] = q8(m_target_u[i], 160.0f, 1.0f);
-		m_target_v8[i] = q8(m_target_v[i], 200.0f, 1.0f);
-	}
-	// Blended sRGB pair table for output (3 bytes per pair)
-	m_pair_srgb.resize(128*128*3);
-	for (int a=0;a<128;++a) {
-		for (int b=0;b<128;++b) {
-			int p=(a<<7)|b; int off = p*3;
-			if (cfg.dual_blending == "rgb") {
-				// average in sRGB
-				m_pair_srgb[off+0] = (unsigned char)((atari_palette[a].r + atari_palette[b].r)>>1);
-				m_pair_srgb[off+1] = (unsigned char)((atari_palette[a].g + atari_palette[b].g)>>1);
-				m_pair_srgb[off+2] = (unsigned char)((atari_palette[a].b + atari_palette[b].b)>>1);
-			} else {
-				// yuv blend -> convert back to sRGB with simple inverse (approx)
-				float Y = m_pair_Ysum[p], U = m_pair_Usum[p], V = m_pair_Vsum[p];
-				float R = Y + 1.403f*V;
-				float B = Y + 1.773f*U;
-				float G = (Y - 0.299f*R - 0.114f*B)/0.587f;
-				auto clamp255 = [](float v)->unsigned char{ if (v<0) v=0; if (v>255) v=255; return (unsigned char)(v+0.5f); };
-				m_pair_srgb[off+0] = clamp255(R);
-				m_pair_srgb[off+1] = clamp255(G);
-				m_pair_srgb[off+2] = clamp255(B);
-			}
-		}
-	}
-	m_dual_tables_ready = true;
-}
-
-void RastaConverter::UpdateCreatedFromResults(const std::vector<const line_cache_result*>& results,
-	std::vector< std::vector<unsigned char> >& out_created)
-{
-	out_created.resize(m_height);
-	for (int y=0;y<m_height;++y) {
-		const line_cache_result* lr = results[y];
-		if (lr && lr->color_row) {
-			out_created[y].assign(lr->color_row, lr->color_row + m_width);
-		} else {
-			out_created[y].assign(m_width, 0);
-		}
-	}
-}
-
-void RastaConverter::UpdateTargetsFromResults(const std::vector<const line_cache_result*>& results,
-	std::vector< std::vector<unsigned char> >& out_targets)
-{
-	out_targets.resize(m_height);
-	for (int y=0;y<m_height;++y) {
-		const line_cache_result* lr = results[y];
-		if (lr && lr->target_row) {
-			out_targets[y].assign(lr->target_row, lr->target_row + m_width);
-		} else {
-			out_targets[y].assign(m_width, (unsigned char)E_COLBAK);
-		}
-	}
-}
-
-bool RastaConverter::SaveScreenDataFromTargets(const char *filename, const std::vector< std::vector<unsigned char> >& targets)
-{
-	int x,y,a=0,b=0,c=0,d=0;
-	FILE *fp=fopen(filename,"wb+");
-	if (!fp) return false;
-	for(y=0;y<m_height;++y)
-	{
-		for (x=0;x<m_width;x+=4)
-		{
-			unsigned char pix=0;
-			a=ConvertColorRegisterToRawData((e_target)targets[y][x]);
-			b=ConvertColorRegisterToRawData((e_target)targets[y][x+1]);
-			c=ConvertColorRegisterToRawData((e_target)targets[y][x+2]);
-			d=ConvertColorRegisterToRawData((e_target)targets[y][x+3]);
-			pix |= a<<6; pix |= b<<4; pix |= c<<2; pix |= d;
-			fwrite(&pix,1,1,fp);
-		}
-	}
-	fclose(fp);
-	return true;
-}
-
-void RastaConverter::SavePMGWithSprites(std::string name, const sprites_memory_t& sprites)
-{
-	size_t sprite,y,bit; unsigned char b;
-	FILE *fp=fopen(name.c_str(),"wt+"); if (!fp) return;
-	fprintf(fp,"; ---------------------------------- \n");
-	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
-	fprintf(fp,"; ---------------------------------- \n");
-	fprintf(fp,"missiles\n");
-	fprintf(fp,"\t.ds $100\n");
-	for(sprite=0;sprite<4;++sprite)
-	{
-		fprintf(fp,"player%zu\n",sprite);
-		fprintf(fp,"\t.he 00 00 00 00 00 00 00 00");
-		for (y=0;y<240;++y)
-		{
-			b=0; for (bit=0;bit<8;++bit) { b|=(sprites[y][sprite][bit])<<(7-bit); }
-			fprintf(fp," %02X",b);
-			if (y%16==7) fprintf(fp,"\n\t.he");
-		}
-		fprintf(fp," 00 00 00 00 00 00 00 00\n");
-	}
-	fclose(fp);
-}
 
 void RastaConverter::MainLoopDual()
 {
@@ -603,9 +377,9 @@ void RastaConverter::MainLoopDual()
 			Evaluator ev;
 			ev.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 4242ULL + (unsigned long long)tid * 133ULL, cfg.cache_size, tid);
 			ev.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
-					 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
-					 m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
-					 m_target_y.data(), m_target_u.data(), m_target_v.data());
+				 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
+				 m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
+				 m_target_y.data(), m_target_u.data(), m_target_v.data());
 			ev.SetDualTables8(
 				m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
 				m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
@@ -807,6 +581,5 @@ void RastaConverter::MainLoopDual()
 
 	for (auto &t : workers) { if (t.joinable()) t.join(); }
 }
-#endif
 
 
