@@ -148,6 +148,14 @@ void Configuration::Process(int argc, char *argv[])
 		"Select optimization algorithm: lahc (late acceptance, default) or dlas (delayed acceptance).",
 		"General options");
 
+	// Aggressive search threshold (0 = never escalate)
+	parser.addOption("unstuck_after", {"ua"}, "N", "1000000",
+		"Escalate exploration after this many evaluations without improvement (0=never).",
+		"General options");
+	parser.addOption("unstuck_drift_norm", {"ud"}, "FLOAT", "0",
+		"When stuck, add this normalized drift per evaluation to acceptance thresholds (0=off).",
+		"General options");
+
 	// Dual mode
 	parser.addOption("dual", {}, "on|off", "off",
 		"Enable dual-frame mode. If specified without value, behaves as 'on'.",
@@ -322,6 +330,23 @@ void Configuration::Process(int argc, char *argv[])
 			warning_messages.push_back("Unknown optimizer='" + opt + "', using 'lahc'.");
 			optimizer = E_OPT_LAHC;
 		}
+	}
+
+	// Parse aggressive search threshold
+	{
+		std::string ua = parser.getValue("unstuck_after", "1000000");
+		std::string ua2 = parser.getValue("ua", "");
+		if (!ua2.empty()) ua = ua2;
+		unstuck_after = String2Value<unsigned long long>(ua);
+	}
+
+	// Parse normalized drift per evaluation when stuck
+	{
+		std::string ud = parser.getValue("unstuck_drift_norm", "0");
+		std::string ud2 = parser.getValue("ud", "");
+		if (!ud2.empty()) ud = ud2;
+		unstuck_drift_norm = String2Value<double>(ud);
+		if (unstuck_drift_norm < 0) unstuck_drift_norm = 0;
 	}
 
 	if (parser.switchExists("preprocess"))

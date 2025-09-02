@@ -119,6 +119,28 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
 	AcceptanceOutcome out{false, false, m_gstate ? m_gstate->m_current_cost : result};
 	if (!m_gstate) return out;
 
+	// Apply normalized drift to acceptance thresholds if stuck beyond /unstuck_after
+	// This emulates slowly raising the baseline to allow accepting slightly worse solutions.
+	double drift = 0.0;
+	if (m_gstate->m_unstuck_drift_norm > 0.0 && m_gstate->m_unstuck_after > 0) {
+		if (m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
+			unsigned long long plateau = m_gstate->m_evaluations - m_gstate->m_last_best_evaluation;
+			if (plateau >= m_gstate->m_unstuck_after) {
+				// Accumulate normalized drift per evaluation since threshold
+				unsigned long long evals_since_threshold = plateau - m_gstate->m_unstuck_after + 1ULL;
+				double norm_drift_total = m_gstate->m_unstuck_drift_norm * (double)evals_since_threshold;
+				// Convert normalized drift to raw distance scale using current width/height and MAX_COLOR_DISTANCE
+				// NormalizeScore(raw) = raw / (w*h*(MAX_COLOR_DISTANCE/10000)). So raw = norm * w*h*(MAX_COLOR_DISTANCE/10000).
+				double scale = (double)m_width * (double)m_height * (MAX_COLOR_DISTANCE/10000.0);
+				drift = norm_drift_total * scale;
+				m_gstate->m_current_norm_drift = norm_drift_total;
+			}
+		}
+	}
+	else {
+		m_gstate->m_current_norm_drift = 0.0;
+	}
+
 	if (m_gstate->m_previous_results.empty()) {
 		m_gstate->m_current_cost = result;
 		m_gstate->m_previous_results.resize(m_solutions, result);
@@ -130,13 +152,13 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
 	double prev_cost = m_gstate->m_current_cost;
 
 	if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {
-		bool accept = (result <= m_gstate->m_current_cost) || (result <= m_gstate->m_previous_results[l]);
+		bool accept = (result <= m_gstate->m_current_cost + drift) || (result <= m_gstate->m_previous_results[l] + drift);
 		if (accept) m_gstate->m_current_cost = result;
 		m_gstate->m_previous_results[l] = prev_cost;
 		++m_gstate->m_previous_results_index;
 		out.accepted = accept;
 	} else {
-		if (result <= m_gstate->m_current_cost || result < m_gstate->m_cost_max) {
+		if (result <= m_gstate->m_current_cost + drift || result < m_gstate->m_cost_max + drift) {
 			m_gstate->m_current_cost = result;
 		}
 		double old_value = m_gstate->m_previous_results[l];
@@ -496,6 +518,15 @@ int Evaluator::SelectMutation()
 	double weights[E_MUTATION_MAX];
 	double total_weight = 0.0;
 
+	// Determine if we are stuck based on /unstuck_after
+	bool stuck = false;
+	if (m_gstate) {
+		unsigned long long thr = m_gstate->m_unstuck_after;
+		if (thr > 0 && m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
+			stuck = (m_gstate->m_evaluations - m_gstate->m_last_best_evaluation) >= thr;
+		}
+	}
+
 	for (int i = 0; i < active_mutations; i++) {
 		// Use success rate if we have enough samples, otherwise use default weight
 		double success_rate = (m_mutation_attempt_count[i] > 10) ?
@@ -507,12 +538,26 @@ int Evaluator::SelectMutation()
 			if (!dual_ok) { weights[i] = 0.0; continue; }
 		}
 
-		// Balance exploration vs exploitation - never let probability go to zero
-		weights[i] = 0.1 + 0.9 * success_rate;
-		total_weight += weights[i];
+		double w = 0.1 + 0.9 * success_rate; // base weight
+
+		// When stuck, slightly favor bigger-impact operations
+		if (stuck) {
+			if (i == E_MUTATION_ADD_INSTRUCTION ||
+				i == E_MUTATION_REMOVE_INSTRUCTION ||
+				i == E_MUTATION_CHANGE_VALUE_TO_COLOR ||
+				i == E_MUTATION_COMPLEMENT_VALUE_DUAL ||
+				i == E_MUTATION_SWAP_LINE_WITH_PREV_ONE ||
+				i == E_MUTATION_COPY_LINE_TO_NEXT_ONE) {
+				w *= 2.0;
+			}
+		}
+
+		weights[i] = w;
+		total_weight += w;
 	}
 
 	// Select based on weights using a fair distribution
+	if (total_weight <= 0.0) return Random(active_mutations);
 	double r = (double)Random(10000) / 10000.0 * total_weight;
 	double sum = 0;
 
@@ -656,125 +701,29 @@ void Evaluator::Run() {
 			m_gstate->m_condvar_update.notify_one();
 		}
 
-		// Store previous cost before potential update 
-		double prev_cost = m_gstate->m_current_cost;
-
-		// Calculate index for circular array
-		size_t l = m_gstate->m_previous_results_index % m_solutions;
-
-		if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {
-			// LAHC acceptance: accept if better than current or better than history slot l
-			bool accept = (result <= m_gstate->m_current_cost) || (result <= m_gstate->m_previous_results[l]);
-			if (accept) {
-				m_gstate->m_current_cost = result;
-				if (result < m_gstate->m_best_result) {
-					m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
-					m_gstate->m_best_pic = new_picture;
-					m_gstate->m_best_pic.uncache_insns();
-					m_gstate->m_best_result = result;
-					m_gstate->m_created_picture.resize(m_height);
-					m_gstate->m_created_picture_targets.resize(m_height);
-					for (int y = 0; y < (int)m_height; ++y) {
-						const line_cache_result& lcr = *line_results[y];
-						m_gstate->m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
-						m_gstate->m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
-					}
-					memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
-					m_gstate->m_update_improvement = true;
-					for (int i = 0; i < E_MUTATION_MAX; ++i) {
-						if (m_current_mutations[i]) {
-							m_gstate->m_mutation_stats[i] += m_current_mutations[i];
-							m_current_mutations[i] = 0;
-						}
-					}
-					m_gstate->m_condvar_update.notify_one();
+		// Unified acceptance with drift via core helper
+		Evaluator::AcceptanceOutcome out = ApplyAcceptanceCore(result);
+		if (out.improved) {
+			m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
+			m_gstate->m_best_pic = new_picture;
+			m_gstate->m_best_pic.uncache_insns();
+			m_gstate->m_best_result = result;
+			m_gstate->m_created_picture.resize(m_height);
+			m_gstate->m_created_picture_targets.resize(m_height);
+			for (int y = 0; y < (int)m_height; ++y) {
+				const line_cache_result& lcr = *line_results[y];
+				m_gstate->m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
+				m_gstate->m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
+			}
+			memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
+			m_gstate->m_update_improvement = true;
+			for (int i = 0; i < E_MUTATION_MAX; ++i) {
+				if (m_current_mutations[i]) {
+					m_gstate->m_mutation_stats[i] += m_current_mutations[i];
+					m_current_mutations[i] = 0;
 				}
 			}
-			// LAHC overwrites history with previous current cost (not necessarily result)
-			m_gstate->m_previous_results[l] = prev_cost;
-			++m_gstate->m_previous_results_index;
-		} else {
-			// DLAS acceptance criteria (existing behavior)
-			if (result <= m_gstate->m_current_cost || result < m_gstate->m_cost_max) {
-				// Accept the candidate solution
-				m_gstate->m_current_cost = result;
-				// Update best solution if better 
-				if (result < m_gstate->m_best_result) {
-					m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
-					m_gstate->m_best_pic = new_picture;
-					m_gstate->m_best_pic.uncache_insns();
-					m_gstate->m_best_result = result;
-					m_gstate->m_created_picture.resize(m_height);
-					m_gstate->m_created_picture_targets.resize(m_height);
-					for (int y = 0; y < (int)m_height; ++y) {
-						const line_cache_result& lcr = *line_results[y];
-						m_gstate->m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
-						m_gstate->m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
-					}
-					memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
-					m_gstate->m_update_improvement = true;
-					for (int i = 0; i < E_MUTATION_MAX; ++i) {
-						if (m_current_mutations[i]) {
-							m_gstate->m_mutation_stats[i] += m_current_mutations[i];
-							m_current_mutations[i] = 0;
-						}
-					}
-					m_gstate->m_condvar_update.notify_one();
-				}
-			}
-			// DLAS replacement strategy (outside acceptance): always evaluate replacement
-			double old_value = m_gstate->m_previous_results[l];
-			double currentF = m_gstate->m_current_cost; // may be unchanged if not accepted
-			if (currentF > old_value) {
-				// Case 1: Always replace when current cost is larger than slot
-				m_gstate->m_previous_results[l] = currentF;
-				// Update max tracking carefully
-				if (currentF > m_gstate->m_cost_max) {
-					m_gstate->m_cost_max = currentF;
-					m_gstate->m_N = 1;
-				} else if (currentF == m_gstate->m_cost_max) {
-					// Replaced with another maximum; only increment if old wasn't maximum
-					if (old_value != m_gstate->m_cost_max) {
-						++m_gstate->m_N;
-					}
-				} else { // new value < current max
-					// If we overwrote a previous maximum with a non-maximum
-					if (old_value == m_gstate->m_cost_max) {
-						--m_gstate->m_N;
-						if (m_gstate->m_N <= 0) {
-							m_gstate->m_cost_max = *std::max_element(
-								m_gstate->m_previous_results.begin(),
-								m_gstate->m_previous_results.end()
-							);
-							m_gstate->m_N = std::count(
-								m_gstate->m_previous_results.begin(),
-								m_gstate->m_previous_results.end(),
-								m_gstate->m_cost_max
-							);
-						}
-					}
-				}
-			}
-			else if (currentF < old_value && currentF < prev_cost) {
-				// Case 2: Replace only if also improving from previous iteration
-				if (old_value == m_gstate->m_cost_max) {
-					--m_gstate->m_N;
-				}
-				m_gstate->m_previous_results[l] = currentF;
-				if (m_gstate->m_N <= 0) {
-					m_gstate->m_cost_max = *std::max_element(
-						m_gstate->m_previous_results.begin(),
-						m_gstate->m_previous_results.end()
-					);
-					m_gstate->m_N = std::count(
-						m_gstate->m_previous_results.begin(),
-						m_gstate->m_previous_results.end(),
-						m_gstate->m_cost_max
-					);
-				}
-			}
-			// Always increment index for DLAS
-			++m_gstate->m_previous_results_index;
+			m_gstate->m_condvar_update.notify_one();
 		}
 
 		// Handle saving and termination checks
@@ -794,9 +743,9 @@ void Evaluator::Run() {
 			m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
 		}
 
-		if (m_gstate->m_evaluations % 10000 == 0) {
+		if (m_gstate->m_evaluations % 10000ULL == 0ULL) {
 			statistics_point stats;
-			stats.evaluations = (unsigned)m_gstate->m_evaluations;
+			stats.evaluations = m_gstate->m_evaluations;
 			stats.seconds = (unsigned)(time(NULL) - m_gstate->m_time_start);
 			stats.distance = m_gstate->m_current_cost;
 
@@ -1204,6 +1153,15 @@ void Evaluator::MutateLine(raster_line& prog, raster_picture& pic)
 	// Apply a batch of mutations based on line complexity
 	int mutation_count = std::min(3 + (int)(prog.instructions.size() / 5), 8);
 
+	// Escalate only if stuck beyond threshold (/unstuck_after)
+	if (m_gstate) {
+		unsigned long long thr = m_gstate->m_unstuck_after;
+		if (thr > 0 && m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
+			unsigned long long plateau = m_gstate->m_evaluations - m_gstate->m_last_best_evaluation;
+			if (plateau >= thr) mutation_count = std::min(mutation_count + 6, 16);
+		}
+	}
+
 	// Call the batch mutation method instead of doing individual mutations
 	BatchMutateLine(prog, pic, mutation_count);
 }
@@ -1552,6 +1510,15 @@ void Evaluator::MutateRasterProgram(raster_picture* pic)
 {
 	memset(m_current_mutations, 0, sizeof m_current_mutations);
 
+	// Determine if we are stuck based on /unstuck_after
+	bool stuck = false;
+	if (m_gstate) {
+		unsigned long long thr = m_gstate->m_unstuck_after;
+		if (thr > 0 && m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
+			stuck = (m_gstate->m_evaluations - m_gstate->m_last_best_evaluation) >= thr;
+		}
+	}
+
 	// Calculate this thread's assigned region
 	int thread_count = m_gstate->m_thread_count;
 	int lines_per_thread = m_height / thread_count;
@@ -1571,8 +1538,9 @@ void Evaluator::MutateRasterProgram(raster_picture* pic)
 		m_currently_mutated_y = pic->raster_lines.size() - 1;
 	}
 
-	// Batch memory register mutations
-	if (Random(10) == 0) // mutate random init mem reg
+	// Batch memory register mutations (more frequent when stuck)
+	int mem_prob = stuck ? 3 : 10;
+	if (Random(mem_prob) == 0) // mutate random init mem reg
 	{
 		int c = 1;
 		if (Random(2))
@@ -1591,9 +1559,12 @@ void Evaluator::MutateRasterProgram(raster_picture* pic)
 	raster_line& current_line = pic->raster_lines[m_currently_mutated_y];
 	MutateLine(current_line, *pic);
 
-	if (Random(20) == 0)
+	// Longer multi-line chains when stuck
+	int chain_prob = stuck ? 5 : 20;
+	int steps = stuck ? 30 : 10;
+	if (Random(chain_prob) == 0)
 	{
-		for (int t = 0; t < 10; ++t)
+		for (int t = 0; t < steps; ++t)
 		{
 			// When jumping, prefer to stay within this thread's region
 			if (Random(2) && m_currently_mutated_y > region_start)

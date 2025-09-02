@@ -26,7 +26,7 @@ struct OnOffMap
 };
 
 struct statistics_point {
-	unsigned evaluations;
+	unsigned long long evaluations;
 	unsigned seconds;
 	double distance;
 };
@@ -93,6 +93,12 @@ struct EvalGlobalState
 	std::atomic<bool> m_dual_stage_focus_B{false}; // true = focus on B, false = focus on A
 	std::atomic<unsigned long long> m_dual_stage_counter{0}; // evaluations within current stage
 
+	// Dual-mode phases for clearer UI: bootstrap A, bootstrap B, alternating
+	enum DualPhase { DUAL_PHASE_NONE=0, DUAL_PHASE_BOOTSTRAP_A=1, DUAL_PHASE_BOOTSTRAP_B=2, DUAL_PHASE_ALTERNATING=3 };
+	std::atomic<DualPhase> m_dual_phase{DUAL_PHASE_NONE};
+	// True when B bootstrap is via copy-from-A; false when generated randomly
+	std::atomic<bool> m_dual_bootstrap_b_copied{false};
+
 	// SIMPLE: Fixed frame snapshots - updated only on phase switches, not improvements
 	std::vector<std::vector<unsigned char>> m_dual_fixed_frame_A; // Fixed A pixel data  
 	std::vector<std::vector<unsigned char>> m_dual_fixed_frame_B; // Fixed B pixel data
@@ -108,6 +114,13 @@ struct EvalGlobalState
 	// Optimizer selector (DLAS or LAHC)
 	enum Optimizer { OPT_DLAS, OPT_LAHC };
 	Optimizer m_optimizer = OPT_LAHC;
+
+	// Aggressive search trigger threshold (0 = never)
+	unsigned long long m_unstuck_after = 1000000ULL;
+	// Normalized drift per evaluation added to acceptance thresholds when stuck
+	double m_unstuck_drift_norm = 0.0;
+	// Current normalized drift applied (for UI/reporting)
+	double m_current_norm_drift = 0.0;
 
 
 	EvalGlobalState();

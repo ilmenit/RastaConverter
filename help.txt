@@ -170,6 +170,16 @@ Input:
   - dlas: Diversified Late Acceptance Search
   Aliases: --opt, --optimizer
   
+/unstuck_after=<N>
+  Escalate exploration only after N evaluations without improvement (0=never). Default: 1000000
+  When triggered, the search uses larger mutation batches and more exploratory edits
+  to escape local minima, especially useful in dual mode with anti-flicker. Aliases: /ua, --unstuck_after
+  
+/unstuck_drift_norm=<FLOAT>
+  When stuck (as per /unstuck_after), slowly relax acceptance by adding FLOAT to the normalized
+  distance threshold per evaluation (0=off). Typical small value: 0.00001. This allows accepting
+  slightly worse, but different, solutions to escape deep local minima. Aliases: /ud, --unstuck_drift_norm
+  
 /distance=Color distance function
   Default: yuv, other options: euclid, ciede
  

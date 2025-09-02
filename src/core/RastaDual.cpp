@@ -254,6 +254,7 @@ void RastaConverter::MainLoopDual()
 	DBG_PRINT("[RASTA] MainLoopDual: tables ready");
 
 	// Dedicated evaluator for preview/initial calculations during bootstrap
+	m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_BOOTSTRAP_A, std::memory_order_relaxed);
 	Evaluator bootstrapEval; bootstrapEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed+101, cfg.cache_size);
 
 	// Bootstrap A using single-frame evaluation for first_dual_steps
@@ -388,6 +389,7 @@ void RastaConverter::MainLoopDual()
 	for (auto &t : bootWorkersA) { if (t.joinable()) t.join(); }
 
 	// Bootstrap B
+	m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_BOOTSTRAP_B, std::memory_order_relaxed);
 	if (cfg.after_dual_steps == "copy") {
 		// Copy the latest best A into B
 		{
@@ -400,7 +402,9 @@ void RastaConverter::MainLoopDual()
 		m_created_picture_targets_B = m_eval_gstate.m_created_picture_targets; // copy targets
 		memcpy(&m_sprites_memory_B, &m_eval_gstate.m_sprites_memory, sizeof m_sprites_memory_B); // copy sprites
 		// REMOVED: Old snapshot system - using efficient fixed frame system in alternation phase
+		m_eval_gstate.m_dual_bootstrap_b_copied.store(true, std::memory_order_relaxed);
 	} else {
+		m_eval_gstate.m_dual_bootstrap_b_copied.store(false, std::memory_order_relaxed);
 		// fresh random init for B and run single-frame for first_dual_steps evaluations
 		m_best_pic_B = raster_picture(m_height);
 		CreateRandomRasterPicture(&m_best_pic_B);
@@ -578,52 +582,6 @@ void RastaConverter::MainLoopDual()
 		m_eval_gstate.m_dual_fixed_frame_is_A.store(false, std::memory_order_relaxed); // B is initially fixed
 	}
 
-	// Alternating Stage - Calculate initial baseline cost before workers start
-	DBG_PRINT("[RASTA] Alternating: calculating initial baseline cost");
-	{
-		Evaluator baselineEval;
-		baselineEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), 
-					  cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, 
-					  cfg.initial_seed + 9999, cfg.cache_size);
-		baselineEval.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
-						  m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
-						  m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
-						  m_target_y.data(), m_target_u.data(), m_target_v.data());
-		baselineEval.SetDualTables8(
-			m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
-			m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
-			m_target_y8.data(), m_target_u8.data(), m_target_v8.data());
-		baselineEval.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
-
-		// Ensure fixed-frame pointer buffer is initialized for baseline cost (B fixed initially)
-		if (m_eval_gstate.m_dual_fixed_rows_buf[0].empty()) {
-			m_eval_gstate.m_dual_fixed_rows_buf[0].resize(m_height);
-		}
-		for (int y = 0; y < m_height; ++y) {
-			if (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) {
-				m_eval_gstate.m_dual_fixed_rows_buf[0][y] = m_created_picture_B[y].data();
-			} else {
-				if ((int)m_eval_gstate.m_dual_fixed_frame_B.size() != m_height) {
-					m_eval_gstate.m_dual_fixed_frame_B.resize(m_height);
-				}
-				m_eval_gstate.m_dual_fixed_frame_B[y].assign(m_width, 0);
-				m_eval_gstate.m_dual_fixed_rows_buf[0][y] = m_eval_gstate.m_dual_fixed_frame_B[y].data();
-			}
-		}
-		m_eval_gstate.m_dual_fixed_rows_active_index.store(0, std::memory_order_release);
-		const auto& other_rows_init = m_eval_gstate.m_dual_fixed_rows_buf[0];
-		
-		std::vector<const line_cache_result*> line_results_init(m_height, nullptr);
-		raster_picture tmpA = m_eval_gstate.m_best_pic;
-		distance_accum_t baseCost = baselineEval.ExecuteRasterProgramDual(&tmpA, line_results_init.data(), other_rows_init, false);
-		
-		DBG_PRINT("[RASTA] Alternating: initial blended cost=%g", (double)baseCost);
-		std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
-		m_eval_gstate.m_best_result = (double)baseCost;
-		m_eval_gstate.m_update_improvement = true;
-		m_eval_gstate.m_condvar_update.notify_one();
-	}
-
 	// Immediately show initial frame to ensure output is visible in dual mode
 	if (!quiet) { m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); }
 
@@ -636,6 +594,7 @@ void RastaConverter::MainLoopDual()
 	// Initialize atomic stage coordination for alternation
 	m_eval_gstate.m_dual_stage_focus_B.store(false, std::memory_order_relaxed);
 	m_eval_gstate.m_dual_stage_counter.store(0, std::memory_order_relaxed);
+	m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_ALTERNATING, std::memory_order_relaxed);
 
 	for (int tid = 0; tid < num_workers; ++tid) {
 		workers.emplace_back([this, E0, tid]() {
@@ -699,7 +658,7 @@ void RastaConverter::MainLoopDual()
 
 					int next_idx = 1 - m_eval_gstate.m_dual_fixed_rows_active_index.load(std::memory_order_acquire);
 					if ((int)m_eval_gstate.m_dual_fixed_rows_buf[next_idx].size() != m_height) {
-						m_eval_gstate.m_dual_fixed_rows_buf[next_idx].resize(m_height);
+						m_eval_gstate.m_dual_fixed_rows_buf[next_idx].assign((size_t)m_height, (const unsigned char*)nullptr);
 					}
 					if (mutateB) {
 						// B will be mutated, so A is fixed - wire pointers to current A rows
@@ -747,13 +706,24 @@ void RastaConverter::MainLoopDual()
 
 				// STAGE 3: ZERO-COPY access to fixed frame - lock-free pointer array snapshot
 				int read_idx = m_eval_gstate.m_dual_fixed_rows_active_index.load(std::memory_order_acquire);
-				const auto& other_rows = m_eval_gstate.m_dual_fixed_rows_buf[read_idx];
+				const auto& other_rows_ref = m_eval_gstate.m_dual_fixed_rows_buf[read_idx];
 
-				// STAGE 4: Heavy computation outside locks
-				// Provide other frame rows for dual-aware mutations during this mutation call
-				ev.SetDualMutationOtherRows(other_rows);
-				ev.MutateRasterProgram(&cand);
-				distance_accum_t cost = ev.ExecuteRasterProgramDual(&cand, line_results.data(), other_rows, mutateB);
+				// If the buffer isn't yet sized (e.g., transient during phase switch), use a local fallback
+				distance_accum_t cost;
+				if ((int)other_rows_ref.size() != m_height) {
+					std::vector<const unsigned char*> fallback_rows((size_t)m_height, (const unsigned char*)nullptr);
+					// STAGE 4: Heavy computation outside locks
+					// Provide other frame rows for dual-aware mutations during this mutation call
+					ev.SetDualMutationOtherRows(fallback_rows);
+					ev.MutateRasterProgram(&cand);
+					cost = ev.ExecuteRasterProgramDual(&cand, line_results.data(), fallback_rows, mutateB);
+				} else {
+					// STAGE 4: Heavy computation outside locks
+					// Provide other frame rows for dual-aware mutations during this mutation call
+					ev.SetDualMutationOtherRows(other_rows_ref);
+					ev.MutateRasterProgram(&cand);
+					cost = ev.ExecuteRasterProgramDual(&cand, line_results.data(), other_rows_ref, mutateB);
+				}
 
 				// STAGE 5: Shared acceptance core (under lock)
 				Evaluator::AcceptanceOutcome out;

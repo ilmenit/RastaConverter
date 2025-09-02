@@ -226,7 +226,7 @@ void RastaConverter::SaveStatistics(const char *fn)
 	{
 		const statistics_point& pt = *it;
 
-		fprintf(f, "%u,%u,%.6f\n", pt.evaluations, pt.seconds, NormalizeScore(pt.distance));
+		fprintf(f, "%llu,%u,%.6f\n", (unsigned long long)pt.evaluations, pt.seconds, NormalizeScore(pt.distance));
 	}
 
 	fclose(f);
@@ -814,6 +814,9 @@ bool RastaConverter::ProcessInit()
 	m_eval_gstate.m_thread_count = cfg.threads;
 	// Propagate optimizer selection (default LAHC)
 	m_eval_gstate.m_optimizer = (cfg.optimizer == Configuration::E_OPT_LAHC) ? EvalGlobalState::OPT_LAHC : EvalGlobalState::OPT_DLAS;
+	// Configure aggressive search trigger
+	m_eval_gstate.m_unstuck_after = cfg.unstuck_after;
+	m_eval_gstate.m_unstuck_drift_norm = cfg.unstuck_drift_norm;
 
 	// When initializing evaluators, pass thread ID:
 	for (size_t i = 0; i < m_evaluators.size(); ++i)
@@ -1444,25 +1447,50 @@ void RastaConverter::TestRasterProgram(raster_picture *pic)
 
 void RastaConverter::ShowMutationStats()
 {
+	int row = 0;
 	for (int i=0;i<E_MUTATION_MAX;++i)
 	{
-		// Always show mutation stats (single and dual mode)
-		gui.DisplayText(0, 230 + 20 * i, string(mutation_names[i]) + string("  ") + format_with_commas(m_eval_gstate.m_mutation_stats[i]));
+		// Show dual-only mutation stat only in dual mode
+		if (!cfg.dual_mode && i == E_MUTATION_COMPLEMENT_VALUE_DUAL) continue;
+		gui.DisplayText(0, 230 + 20 * row, string(mutation_names[i]) + string("  ") + format_with_commas(m_eval_gstate.m_mutation_stats[i]));
+		++row;
 	}
 
 	gui.DisplayText(320, 250, string("Evaluations: ") + format_with_commas(m_eval_gstate.m_evaluations));
 	gui.DisplayText(320, 270, string("LastBest: ") + format_with_commas(m_eval_gstate.m_last_best_evaluation) + string("                "));
 	gui.DisplayText(320, 290, string("Rate: ") + format_with_commas((unsigned long long)m_rate) + string("                "));
-	gui.DisplayText(320, 310, string("Norm. Dist: ") + format_with_commas(NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
+	{
+		double norm = NormalizeScore(m_eval_gstate.m_best_result);
+		std::string line = std::string("Norm. Dist: ") + format_with_commas(norm);
+		// Show current normalized drift if active
+		if (m_eval_gstate.m_current_norm_drift > 0.0 && m_eval_gstate.m_unstuck_after > 0 && m_eval_gstate.m_evaluations > m_eval_gstate.m_last_best_evaluation) {
+			unsigned long long plateau = m_eval_gstate.m_evaluations - m_eval_gstate.m_last_best_evaluation;
+			if (plateau >= m_eval_gstate.m_unstuck_after) {
+				line += std::string(" (+") + format_with_commas(m_eval_gstate.m_current_norm_drift) + std::string(")");
+			}
+		}
+		line += std::string("                ");
+		gui.DisplayText(320, 310, line);
+	}
 
 	// Additional dual-mode status lines
 	if (cfg.dual_mode)
 	{
 		const bool focusB = m_eval_gstate.m_dual_stage_focus_B.load(std::memory_order_relaxed);
-		const char *optimizing = focusB ? "B" : "A";
 		const char *showing = (m_dual_display == DualDisplayMode::A) ? "A" : (m_dual_display == DualDisplayMode::B) ? "B" : "M";
-		gui.DisplayText(320, 330, string("Optimizing: ") + optimizing);
-		gui.DisplayText(320, 350, string("Showing: ") + showing);
+		EvalGlobalState::DualPhase phase = m_eval_gstate.m_dual_phase.load(std::memory_order_relaxed);
+		std::string phaseText;
+		switch (phase) {
+			case EvalGlobalState::DUAL_PHASE_BOOTSTRAP_A: phaseText = "Phase: Bootstrap A"; break;
+			case EvalGlobalState::DUAL_PHASE_BOOTSTRAP_B: {
+				bool copied = m_eval_gstate.m_dual_bootstrap_b_copied.load(std::memory_order_relaxed);
+				phaseText = copied ? "Phase: Bootstrap B (copy)" : "Phase: Bootstrap B (generate)"; break;
+			}
+			case EvalGlobalState::DUAL_PHASE_ALTERNATING: phaseText = std::string("Phase: Alternating, optimizing ") + (focusB ? "B" : "A"); break;
+			default: phaseText = "Phase: -"; break;
+		}
+		gui.DisplayText(320, 330, phaseText);
+		gui.DisplayText(320, 350, std::string("Showing: ") + showing);
 		gui.DisplayText(320, 370, "Press [A] [B] [M]ix");
 	}
 }
@@ -1909,7 +1937,7 @@ void RastaConverter::LoadRasterProgram(string name)
 		// get info about the file
 		pos=line.find("; Evaluations:");
 		if (pos!=string::npos)
-			m_eval_gstate.m_evaluations=String2Value<unsigned int>(line.substr(pos+15));
+			m_eval_gstate.m_evaluations=String2Value<unsigned long long>(line.substr(pos+15));
 
 		pos=line.find("; InputName:");
 		if (pos!=string::npos)
@@ -2074,7 +2102,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
 	fprintf(fp,"; InputName: %s\n",cfg.input_file.c_str());
 	fprintf(fp,"; CmdLine: %s\n",cfg.command_line.c_str());
-	fprintf(fp,"; Evaluations: %lu\n", (long unsigned)m_eval_gstate.m_evaluations);
+	fprintf(fp,"; Evaluations: %llu\n", (unsigned long long)m_eval_gstate.m_evaluations);
 	fprintf(fp,"; Score: %g\n",NormalizeScore(m_eval_gstate.m_best_result));
 	fprintf(fp,"; ---------------------------------- \n");
 

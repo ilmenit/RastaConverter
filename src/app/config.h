@@ -87,6 +87,14 @@ struct Configuration {
 	enum e_optimizer { E_OPT_DLAS, E_OPT_LAHC };
 	e_optimizer optimizer = E_OPT_LAHC; // /opt dlas|lahc (default lahc)
 
+	// Aggressive search trigger: escalate exploration after this many
+	// evaluations without improvement (0 = never escalate)
+	unsigned long long unstuck_after = 1000000ULL;
+
+	// When stuck, add this normalized drift to acceptance thresholds per evaluation
+	// Units: normalized distance (same scale as Norm. Dist). 0 = disabled.
+	double unstuck_drift_norm = 0.0;
+
 
 	CommandLineParser parser; 
 
