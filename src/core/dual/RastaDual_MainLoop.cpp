@@ -32,6 +32,94 @@ void RastaConverter::MainLoopDual()
 	m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_BOOTSTRAP_A, std::memory_order_relaxed);
 	Evaluator bootstrapEval; bootstrapEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed+101, cfg.cache_size);
 
+	// Prepare common UI rate tracking variables (used in both paths)
+	clock_t last_rate_check_time = clock();
+	unsigned long long last_eval = m_eval_gstate.m_evaluations;
+
+	// Fast path for /continue in dual mode: skip bootstrapping A/B and jump straight to alternating
+	bool skip_bootstrap = false;
+	if (cfg.continue_processing && cfg.dual_mode
+		&& !m_eval_gstate.m_best_pic.raster_lines.empty()
+		&& !m_best_pic_B.raster_lines.empty())
+	{
+		skip_bootstrap = true;
+		DBG_PRINT("[RASTA] /continue detected - skipping dual bootstrap, initializing from saved A/B");
+
+		// Re-evaluate A to populate created/targets and sprites for UI/state
+		{
+			raster_picture a = m_eval_gstate.m_best_pic;
+			bootstrapEval.RecachePicture(&a);
+			std::vector<const line_cache_result*> resA(m_height, nullptr);
+			(void)bootstrapEval.ExecuteRasterProgram(&a, resA.data());
+			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+			UpdateCreatedFromResults(resA, m_eval_gstate.m_created_picture);
+			UpdateTargetsFromResults(resA, m_eval_gstate.m_created_picture_targets);
+			memcpy(&m_eval_gstate.m_sprites_memory, &bootstrapEval.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
+			m_eval_gstate.m_initialized = true;
+			m_eval_gstate.m_update_initialized = true;
+			m_eval_gstate.m_condvar_update.notify_one();
+		}
+		// Re-evaluate B similarly
+		{
+			raster_picture b = m_best_pic_B;
+			bootstrapEval.RecachePicture(&b);
+			std::vector<const line_cache_result*> resB(m_height, nullptr);
+			(void)bootstrapEval.ExecuteRasterProgram(&b, resB.data());
+			UpdateCreatedFromResults(resB, m_created_picture_B);
+			UpdateTargetsFromResults(resB, m_created_picture_targets_B);
+			memcpy(&m_sprites_memory_B, &bootstrapEval.GetSpritesMemory(), sizeof m_sprites_memory_B);
+		}
+
+		// Initialize fixed frame pointer buffers for alternating phase (use B as initial fixed)
+		m_eval_gstate.m_dual_fixed_frame_A.resize(m_height);
+		m_eval_gstate.m_dual_fixed_frame_B.resize(m_height);
+		for (int i = 0; i < 2; ++i) m_eval_gstate.m_dual_fixed_rows_buf[i].resize(m_height);
+		int init_idx = 0;
+		for (int y = 0; y < m_height; ++y) {
+			if (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) {
+				m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_created_picture_B[y].data();
+			} else {
+				m_eval_gstate.m_dual_fixed_frame_B[y].assign(m_width, 0);
+				m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_eval_gstate.m_dual_fixed_frame_B[y].data();
+			}
+		}
+		m_eval_gstate.m_dual_fixed_rows_active_index.store(init_idx, std::memory_order_release);
+		m_eval_gstate.m_dual_fixed_frame_is_A.store(false, std::memory_order_relaxed);
+
+		// Establish a baseline dual cost from current A with fixed B (for UI/acceptance info)
+		{
+			Evaluator baseEv;
+			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 777, cfg.cache_size);
+			baseEv.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
+				m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
+				m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
+				m_target_y.data(), m_target_u.data(), m_target_v.data());
+			baseEv.SetDualTables8(
+				m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
+				m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
+				m_target_y8.data(), m_target_u8.data(), m_target_v8.data());
+			baseEv.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
+			std::vector<const line_cache_result*> tmpRes(m_height, nullptr);
+			std::vector<const unsigned char*> otherRows((size_t)m_height, (const unsigned char*)nullptr);
+			for (int y = 0; y < m_height; ++y) otherRows[y] = (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) ? m_created_picture_B[y].data() : nullptr;
+			raster_picture a = m_eval_gstate.m_best_pic;
+			baseEv.RecachePicture(&a);
+			distance_accum_t baseCost = baseEv.ExecuteRasterProgramDual(&a, tmpRes.data(), otherRows, /*mutateB*/false);
+			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+			m_eval_gstate.m_best_result = (double)baseCost;
+			m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+		}
+
+		// Immediately show frame in dual mode
+		if (!quiet) { m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); }
+
+		// Prepare alternating phase state
+		m_eval_gstate.m_dual_stage_focus_B.store(false, std::memory_order_relaxed);
+		m_eval_gstate.m_dual_stage_counter.store(0, std::memory_order_relaxed);
+		m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_ALTERNATING, std::memory_order_relaxed);
+	}
+
+	if (!skip_bootstrap) {
 	// Bootstrap A using single-frame evaluation for first_dual_steps
 	raster_picture bestA = m_eval_gstate.m_best_pic;
 	std::vector<const line_cache_result*> resultsA(m_height, nullptr);
@@ -110,8 +198,8 @@ void RastaConverter::MainLoopDual()
 	}
 
 	// UI loop for bootstrap A
-	clock_t last_rate_check_time = clock();
-	unsigned long long last_eval = m_eval_gstate.m_evaluations;
+	last_rate_check_time = clock();
+	last_eval = m_eval_gstate.m_evaluations;
 	if (!quiet) { m_dual_display = DualDisplayMode::A; }
 	while (!m_eval_gstate.m_finished && m_eval_gstate.m_evaluations < targetE_A) {
 		if (!quiet) {
@@ -356,9 +444,10 @@ void RastaConverter::MainLoopDual()
 		m_eval_gstate.m_dual_fixed_rows_active_index.store(init_idx, std::memory_order_release);
 		m_eval_gstate.m_dual_fixed_frame_is_A.store(false, std::memory_order_relaxed); // B is initially fixed
 	}
+}
 
-	// Immediately show initial frame to ensure output is visible in dual mode
-	if (!quiet) { m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); }
+	// Immediately show initial frame to ensure output is visible in dual mode (only if we didn't already)
+	if (!skip_bootstrap && !quiet) { m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); }
 
 	// Loop until finished/max_evals using worker threads and snapshots
 	const unsigned long long E0 = m_eval_gstate.m_evaluations;
