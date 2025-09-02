@@ -769,11 +769,11 @@ bool RastaConverter::ProcessInit()
 	DBG_PRINT("[RASTA] SetDistanceFunction(pre)");
 	SetDistanceFunction(cfg.pre_dstf);
 
-	// Apply dithering and other picture transformation
-	if (!cfg.dual_mode) {
-		PrepareDestinationPicture();
+	// Prepare destination picture for BOTH modes to keep bootstrap behavior identical to single-frame
+	PrepareDestinationPicture();
+	// Preserve original behavior of saving -dst only in single-frame mode
+	if (!cfg.dual_mode)
 		SavePicture(cfg.output_file+"-dst.png",destination_bitmap);
-	}
 
 	if (cfg.preprocess_only)
 		exit(1);
@@ -1447,20 +1447,13 @@ void RastaConverter::ShowMutationStats()
 	{
 		// Show mutation stats only in single-frame mode
 		if (!cfg.dual_mode)
-			gui.DisplayText(0, 230 + 20 * i, string(mutation_names[i]) + string("  ") + std::to_string(m_eval_gstate.m_mutation_stats[i]));
+			gui.DisplayText(0, 230 + 20 * i, string(mutation_names[i]) + string("  ") + format_with_commas(m_eval_gstate.m_mutation_stats[i]));
 	}
-
-	// Helper to format integers with thousands separators (e.g., 1,234,567)
-	auto format_with_commas = [](unsigned long long value) -> std::string {
-		std::string s = std::to_string(value);
-		for (int i = (int)s.length() - 3; i > 0; i -= 3) s.insert((size_t)i, ",");
-		return s;
-	};
 
 	gui.DisplayText(320, 250, string("Evaluations: ") + format_with_commas(m_eval_gstate.m_evaluations));
 	gui.DisplayText(320, 270, string("LastBest: ") + format_with_commas(m_eval_gstate.m_last_best_evaluation) + string("                "));
-	gui.DisplayText(320, 290, string("Rate: ") + std::to_string((unsigned long long)m_rate) + string("                "));
-	gui.DisplayText(320, 310, string("Norm. Dist: ") + std::to_string(NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
+	gui.DisplayText(320, 290, string("Rate: ") + format_with_commas((unsigned long long)m_rate) + string("                "));
+	gui.DisplayText(320, 310, string("Norm. Dist: ") + format_with_commas(NormalizeScore(m_eval_gstate.m_best_result)) + string("                "));
 
 	// Additional dual-mode status lines
 	if (cfg.dual_mode)

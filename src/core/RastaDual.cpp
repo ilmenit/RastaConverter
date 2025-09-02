@@ -287,9 +287,22 @@ void RastaConverter::MainLoopDual()
 			Evaluator& ev = m_evaluators[tid];
 			std::vector<const line_cache_result*> line_results(m_height, nullptr);
 			raster_picture localBest = bestA;
+			// Keep a local view of accepted cost to detect external improvements
+			double localAcceptedCost; {
+				std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+				localAcceptedCost = m_eval_gstate.m_best_result;
+			}
 			while (true) {
 				// Early stop check (lock free read)
 				if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_A) break;
+				// Sync local baseline if another thread improved
+				if (m_eval_gstate.m_best_result < localAcceptedCost) {
+					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+					if (m_eval_gstate.m_best_result < localAcceptedCost) {
+						localBest = m_eval_gstate.m_best_pic;
+						localAcceptedCost = m_eval_gstate.m_best_result;
+					}
+				}
 				raster_picture cand = localBest;
 				ev.MutateRasterProgram(&cand);
 				distance_accum_t cost = ev.ExecuteRasterProgram(&cand, line_results.data());
@@ -300,13 +313,16 @@ void RastaConverter::MainLoopDual()
 					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost);
 					if (out.improved) {
 						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+						m_eval_gstate.m_best_result = (double)cost;
 						m_eval_gstate.m_best_pic = cand; m_eval_gstate.m_best_pic.uncache_insns();
 						UpdateCreatedFromResults(line_results, m_eval_gstate.m_created_picture);
 						UpdateTargetsFromResults(line_results, m_eval_gstate.m_created_picture_targets);
 						memcpy(&m_eval_gstate.m_sprites_memory, &ev.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
 						m_eval_gstate.m_update_improvement = true;
 						m_eval_gstate.m_condvar_update.notify_one();
+						// Update local baseline to the newly accepted cand
 						localBest = cand;
+						localAcceptedCost = (double)cost;
 					}
 					if (m_eval_gstate.m_save_period > 0 && (m_eval_gstate.m_evaluations % (unsigned long long)m_eval_gstate.m_save_period) == 0ULL) {
 						m_eval_gstate.m_update_autosave = true;
@@ -397,6 +413,17 @@ void RastaConverter::MainLoopDual()
 		UpdateTargetsFromResults(resultsB, m_created_picture_targets_B);
 		memcpy(&m_sprites_memory_B, &bootstrapEval.GetSpritesMemory(), sizeof m_sprites_memory_B);
 
+		// Reset optimizer state (LAHC/DLAS) for B bootstrap baseline so acceptance is consistent
+		{
+			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+			m_eval_gstate.m_previous_results.clear();
+			m_eval_gstate.m_previous_results.resize(solutions, (double)bestCostB);
+			m_eval_gstate.m_previous_results_index = 0;
+			m_eval_gstate.m_current_cost = (double)bestCostB;
+			m_eval_gstate.m_cost_max = (double)bestCostB;
+			m_eval_gstate.m_N = solutions;
+		}
+
 		// Multi-threaded bootstrap for B using the same evaluators
 		const unsigned long long targetE_B = m_eval_gstate.m_evaluations + cfg.first_dual_steps;
 		std::vector<std::thread> bootWorkersB;
@@ -406,8 +433,30 @@ void RastaConverter::MainLoopDual()
 				Evaluator& ev = m_evaluators[tid];
 				std::vector<const line_cache_result*> line_results(m_height, nullptr);
 				raster_picture localB = m_best_pic_B;
+				// Keep a local view of accepted cost to detect external improvements (global best)
+				double localAcceptedCost; {
+					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+					localAcceptedCost = m_eval_gstate.m_best_result;
+				}
+				// Track per-B generation to adopt newer B best across threads
+				unsigned long long localGenB = m_eval_gstate.m_dual_generation_B.load(std::memory_order_relaxed);
 				while (true) {
 					if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_B) break;
+					// Sync local baseline if another thread improved GLOBAL best (rare in B bootstrap)
+					if (m_eval_gstate.m_best_result < localAcceptedCost) {
+						std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+						if (m_eval_gstate.m_best_result < localAcceptedCost) {
+							localB = m_best_pic_B;
+							localAcceptedCost = m_eval_gstate.m_best_result;
+						}
+					}
+					// Also adopt latest B best when another thread found a per-B improvement
+					unsigned long long genB = m_eval_gstate.m_dual_generation_B.load(std::memory_order_acquire);
+					if (genB != localGenB) {
+						std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+						localB = m_best_pic_B;
+						localGenB = genB;
+					}
 					raster_picture cand = localB;
 					ev.MutateRasterProgram(&cand);
 					distance_accum_t cost = ev.ExecuteRasterProgram(&cand, line_results.data());
@@ -419,13 +468,31 @@ void RastaConverter::MainLoopDual()
 						if (out.improved) {
 							m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
+							m_eval_gstate.m_best_result = (double)cost;
 							UpdateCreatedFromResults(line_results, m_created_picture_B);
 							UpdateTargetsFromResults(line_results, m_created_picture_targets_B);
 							memcpy(&m_sprites_memory_B, &ev.GetSpritesMemory(), sizeof m_sprites_memory_B);
 							m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
 							m_eval_gstate.m_update_improvement = true;
 							m_eval_gstate.m_condvar_update.notify_one();
+							// Update local baseline to the newly accepted cand
 							localB = m_best_pic_B;
+							bestCostB = (double)cost;
+							localGenB = m_eval_gstate.m_dual_generation_B.load(std::memory_order_relaxed);
+						}
+						// Even if not a new GLOBAL best, record B's own best for UI/future and resync threads
+						else if ((double)cost < bestCostB) {
+							bestCostB = (double)cost;
+							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
+							UpdateCreatedFromResults(line_results, m_created_picture_B);
+							UpdateTargetsFromResults(line_results, m_created_picture_targets_B);
+							memcpy(&m_sprites_memory_B, &ev.GetSpritesMemory(), sizeof m_sprites_memory_B);
+							m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
+							m_eval_gstate.m_update_improvement = true;
+							m_eval_gstate.m_condvar_update.notify_one();
+							// Adopt locally
+							localB = m_best_pic_B;
+							localGenB = m_eval_gstate.m_dual_generation_B.load(std::memory_order_relaxed);
 						}
 						if (m_eval_gstate.m_save_period > 0 && (m_eval_gstate.m_evaluations % (unsigned long long)m_eval_gstate.m_save_period) == 0ULL) {
 							m_eval_gstate.m_update_autosave = true;
@@ -696,6 +763,7 @@ void RastaConverter::MainLoopDual()
 					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost);
 					if (out.improved) {
 						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+						m_eval_gstate.m_best_result = (double)cost;
 						if (mutateB) {
 							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
 							UpdateCreatedFromResults(line_results, m_created_picture_B);

@@ -176,7 +176,7 @@ void Configuration::Process(int argc, char *argv[])
 
 	// Diagnose unrecognized options and missing values
 	for (const auto &tok : parser.getUnrecognized()) {
-		warning_messages.push_back(std::string("Unrecognized option: ") + tok);
+		error_messages.push_back(std::string("Unrecognized option: ") + tok);
 	}
 	for (const auto &name : parser.getMissingValueOptions()) {
 		error_messages.push_back(std::string("Missing value for option: ") + name);
@@ -188,7 +188,7 @@ void Configuration::Process(int argc, char *argv[])
 	}
 
 	// If there are any fatal CLI issues, stop early so user sees errors and help immediately
-	if (!parser.getMissingValueOptions().empty()) {
+	if (!parser.getMissingValueOptions().empty() || !parser.getUnrecognized().empty()) {
 		bad_arguments = true;
 	}
 
