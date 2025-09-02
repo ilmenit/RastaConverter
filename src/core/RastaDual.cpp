@@ -756,13 +756,14 @@ void RastaConverter::MainLoopDual()
 				distance_accum_t cost = ev.ExecuteRasterProgramDual(&cand, line_results.data(), other_rows, mutateB);
 
 				// STAGE 5: Shared acceptance core (under lock)
+				Evaluator::AcceptanceOutcome out;
 				{
 					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 					if (m_eval_gstate.m_finished || (cfg.max_evals > 0 && m_eval_gstate.m_evaluations >= m_eval_gstate.m_max_evals)) {
 						break;
 					}
 					++m_eval_gstate.m_evaluations;
-					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost);
+					out = ev.ApplyAcceptanceCore((double)cost);
 					if (out.improved) {
 						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						m_eval_gstate.m_best_result = (double)cost;
@@ -788,6 +789,10 @@ void RastaConverter::MainLoopDual()
 						m_eval_gstate.m_update_autosave = true;
 						m_eval_gstate.m_condvar_update.notify_one();
 					}
+				}
+				// Flush mutation stats after improvement (outside lock to avoid deadlock)
+				if (out.improved) {
+					ev.FlushMutationStatsToGlobal();
 				}
 			}
 		});
