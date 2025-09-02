@@ -202,6 +202,9 @@ public:
 		return ExecuteRasterProgramDual(pic, line_results, other_rows, mutateB);
 	}
 
+	// Provide other-frame rows for dual-aware mutations (non-owning, valid during mutation call only)
+	inline void SetDualMutationOtherRows(const std::vector<const unsigned char*>& rows) { m_dual_mutation_other_rows = &rows; }
+
 private:
 	int m_thread_id;
 	// LRU tracking
@@ -296,6 +299,9 @@ private:
 	unsigned short m_sq_lut[256]; // squared difference LUT (0..255)
 	float m_dual_lambda_luma = 1.0f;
 	float m_dual_lambda_chroma = 0.25f;
+
+	// Pointer to the other frame rows for dual-aware mutation (lifetime: around MutateRasterProgram call)
+	const std::vector<const unsigned char*>* m_dual_mutation_other_rows = nullptr;
 };
 
 #endif

@@ -155,6 +155,7 @@ const char *mutation_names[E_MUTATION_MAX]=
 	"Change Target ",
 	"Change Value  ",
 	"Chg Val to Col",
+	"Dual Complement",
 };
 
 void resize_rgb_picture(vector < screen_line > *picture, size_t width, size_t height)
@@ -1445,9 +1446,8 @@ void RastaConverter::ShowMutationStats()
 {
 	for (int i=0;i<E_MUTATION_MAX;++i)
 	{
-		// Show mutation stats only in single-frame mode
-		if (!cfg.dual_mode)
-			gui.DisplayText(0, 230 + 20 * i, string(mutation_names[i]) + string("  ") + format_with_commas(m_eval_gstate.m_mutation_stats[i]));
+		// Always show mutation stats (single and dual mode)
+		gui.DisplayText(0, 230 + 20 * i, string(mutation_names[i]) + string("  ") + format_with_commas(m_eval_gstate.m_mutation_stats[i]));
 	}
 
 	gui.DisplayText(320, 250, string("Evaluations: ") + format_with_commas(m_eval_gstate.m_evaluations));

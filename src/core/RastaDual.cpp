@@ -750,6 +750,8 @@ void RastaConverter::MainLoopDual()
 				const auto& other_rows = m_eval_gstate.m_dual_fixed_rows_buf[read_idx];
 
 				// STAGE 4: Heavy computation outside locks
+				// Provide other frame rows for dual-aware mutations during this mutation call
+				ev.SetDualMutationOtherRows(other_rows);
 				ev.MutateRasterProgram(&cand);
 				distance_accum_t cost = ev.ExecuteRasterProgramDual(&cand, line_results.data(), other_rows, mutateB);
 

@@ -490,7 +490,7 @@ void Evaluator::RecachePicture(raster_picture* pic, bool force)
 
 int Evaluator::SelectMutation()
 {
-	// Legacy-only: consider all baseline mutations
+	// Consider all mutations but gate dual-only one if no dual context
 	const int active_mutations = E_MUTATION_MAX;
 
 	double weights[E_MUTATION_MAX];
@@ -500,6 +500,12 @@ int Evaluator::SelectMutation()
 		// Use success rate if we have enough samples, otherwise use default weight
 		double success_rate = (m_mutation_attempt_count[i] > 10) ?
 			(double)m_mutation_success_count[i] / m_mutation_attempt_count[i] : 0.1;
+
+		// Gate dual-only mutation unless dual LUTs and rows are available
+		if (i == E_MUTATION_COMPLEMENT_VALUE_DUAL) {
+			bool dual_ok = (m_dual_pairYsum || m_dual_pairYsum8) && m_dual_mutation_other_rows != nullptr;
+			if (!dual_ok) { weights[i] = 0.0; continue; }
+		}
 
 		// Balance exploration vs exploitation - never let probability go to zero
 		weights[i] = 0.1 + 0.9 * success_rate;
@@ -1403,6 +1409,133 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 		m_current_mutations[E_MUTATION_CHANGE_VALUE_TO_COLOR]++;
 		m_mutation_success_count[mutation]++;
 		break;
+	case E_MUTATION_COMPLEMENT_VALUE_DUAL:
+		{
+			// Dual-aware: choose value that complements other frame to match target at (x,y)
+			// Fallback to CHANGE_VALUE_TO_COLOR if dual context not available
+			if (!(m_dual_pairYsum || m_dual_pairYsum8) || m_dual_mutation_other_rows == nullptr) {
+				// degrade gracefully
+				int saved_mut = E_MUTATION_CHANGE_VALUE_TO_COLOR;
+				mutation = saved_mut;
+				// re-run this case body by jumping label-style is messy; just perform inline equivalent
+				int xx;
+				if ((prog.instructions[i1].loose.target >= E_HPOSP0 && prog.instructions[i1].loose.target <= E_HPOSP3))
+				{
+					xx = m_mem_regs[prog.instructions[i1].loose.target] - sprite_screen_color_cycle_start;
+					xx += Random(sprite_size);
+				}
+				else
+				{
+					c = 0;
+					for (x = 0; x < i1 - 1; ++x)
+					{
+						if (prog.instructions[x].loose.instruction <= E_RASTER_NOP)
+							c += 2;
+						else
+							c += 4;
+					}
+					while (Random(5) == 0) ++c;
+					if (c >= free_cycles) c = free_cycles - 1;
+					xx = screen_cycles[c].offset;
+					xx += Random(screen_cycles[c].length);
+				}
+				if (xx < 0 || xx >= (int)m_width) xx = Random(m_width);
+				int yy = m_currently_mutated_y; while (Random(5) == 0 && yy + 1 < (int)m_height) ++yy;
+				prog.instructions[i1].loose.value = FindAtariColorIndex(m_picture[yy][xx]) * 2;
+				prog.cache_key = NULL;
+				m_current_mutations[E_MUTATION_CHANGE_VALUE_TO_COLOR]++;
+				m_mutation_success_count[E_MUTATION_CHANGE_VALUE_TO_COLOR]++;
+				break;
+			}
+
+			// Compute approximate (x,y) like CHANGE_VALUE_TO_COLOR
+			if ((prog.instructions[i1].loose.target >= E_HPOSP0 && prog.instructions[i1].loose.target <= E_HPOSP3))
+			{
+				x = m_mem_regs[prog.instructions[i1].loose.target] - sprite_screen_color_cycle_start;
+				x += Random(sprite_size);
+			}
+			else
+			{
+				c = 0;
+				for (int k = 0; k < i1 - 1; ++k)
+				{
+					if (prog.instructions[k].loose.instruction <= E_RASTER_NOP) c += 2; else c += 4;
+				}
+				while (Random(5) == 0) ++c;
+				if (c >= free_cycles) c = free_cycles - 1;
+				x = screen_cycles[c].offset;
+				x += Random(screen_cycles[c].length);
+			}
+			if (x < 0 || x >= (int)m_width) x = Random(m_width);
+			int ypix = m_currently_mutated_y; while (Random(5) == 0 && ypix + 1 < (int)m_height) ++ypix;
+
+			// Get other-frame index at (x,ypix)
+			unsigned char idxOther = 0;
+			{
+				const std::vector<const unsigned char*>& rows = *m_dual_mutation_other_rows;
+				if ((int)rows.size() > ypix && rows[ypix]) idxOther = rows[ypix][x];
+			}
+
+			// Compute best self index scanning 0..127 using dual LUTs
+			unsigned bestIdx = 0; unsigned bestScore = 0xFFFFFFFFu; double bestScoreF = 1e300;
+			const unsigned pix = (unsigned)(m_width * ypix + x);
+			if (m_dual_pairYsum8 && m_dual_pairUsum8 && m_dual_pairVsum8 && m_dual_targetY8 && m_dual_targetU8 && m_dual_targetV8)
+			{
+				unsigned char Ty = m_dual_targetY8[pix];
+				unsigned char Tu = m_dual_targetU8[pix];
+				unsigned char Tv = m_dual_targetV8[pix];
+				for (unsigned s = 0; s < 128u; ++s)
+				{
+					unsigned pair = (s << 7) | (unsigned)idxOther;
+					unsigned char Yab = m_dual_pairYsum8[pair];
+					unsigned char Uab = m_dual_pairUsum8[pair];
+					unsigned char Vab = m_dual_pairVsum8[pair];
+					unsigned dY = (unsigned)((Yab > Ty) ? (Yab - Ty) : (Ty - Yab));
+					unsigned dU = (unsigned)((Uab > Tu) ? (Uab - Tu) : (Tu - Uab));
+					unsigned dV = (unsigned)((Vab > Tv) ? (Vab - Tv) : (Tv - Vab));
+					unsigned sum = (unsigned)m_sq_lut[dY] + (unsigned)m_sq_lut[dU] + (unsigned)m_sq_lut[dV];
+					if (m_dual_pairYdiff8 && m_dual_pairUdiff8 && m_dual_pairVdiff8)
+					{
+						unsigned dYt = m_dual_pairYdiff8[pair];
+						unsigned dUt = m_dual_pairUdiff8[pair];
+						unsigned dVt = m_dual_pairVdiff8[pair];
+						sum += (unsigned)((double)m_dual_lambda_luma * (double)m_sq_lut[dYt]
+							+ (double)m_dual_lambda_chroma * ((double)m_sq_lut[dUt] + (double)m_sq_lut[dVt]));
+					}
+					if (sum < bestScore) { bestScore = sum; bestIdx = s; }
+				}
+			}
+			else
+			{
+				float Ty = m_dual_targetY[pix];
+				float Tu = m_dual_targetU[pix];
+				float Tv = m_dual_targetV[pix];
+				for (unsigned s = 0; s < 128u; ++s)
+				{
+					unsigned pair = (s << 7) | (unsigned)idxOther;
+					float Yab = m_dual_pairYsum[pair];
+					float Uab = m_dual_pairUsum[pair];
+					float Vab = m_dual_pairVsum[pair];
+					float dy = Yab - Ty, du = Uab - Tu, dv = Vab - Tv;
+					double dist = (double)(dy*dy + du*du + dv*dv);
+					if (m_dual_pairYdiff && m_dual_pairUdiff && m_dual_pairVdiff)
+					{
+						float dYt = m_dual_pairYdiff[pair];
+						float dUt = m_dual_pairUdiff[pair];
+						float dVt = m_dual_pairVdiff[pair];
+						dist += (double)m_dual_lambda_luma * (double)(dYt*dYt)
+							+ (double)m_dual_lambda_chroma * (double)(dUt*dUt + dVt*dVt);
+					}
+					if (dist < bestScoreF) { bestScoreF = dist; bestIdx = s; }
+				}
+			}
+
+			prog.instructions[i1].loose.value = (unsigned char)(bestIdx * 2);
+			prog.cache_key = NULL;
+			m_current_mutations[E_MUTATION_COMPLEMENT_VALUE_DUAL]++;
+			m_mutation_success_count[E_MUTATION_COMPLEMENT_VALUE_DUAL]++;
+			break;
+		}
 	}
 }
 
