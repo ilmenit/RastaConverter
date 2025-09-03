@@ -17,7 +17,7 @@ std::string Value2String(T value)
 template<class T>
 T String2Value(const std::string &s)
 {
-	T result;
+	T result{};
 	std::stringstream ss(s);
 	ss >> result;
 	return result;
@@ -26,7 +26,7 @@ T String2Value(const std::string &s)
 template<class T>
 T String2HexValue(const std::string &s)
 {
-	T result;
+	T result{};
 	std::stringstream ss;
 	ss << std::hex << s;
 	ss >> (std::hex) >> result;

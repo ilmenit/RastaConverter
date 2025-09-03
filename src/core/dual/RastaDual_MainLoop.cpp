@@ -107,7 +107,9 @@ void RastaConverter::MainLoopDual()
 			distance_accum_t baseCost = baseEv.ExecuteRasterProgramDual(&a, tmpRes.data(), otherRows, /*mutateB*/false);
 			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 			m_eval_gstate.m_best_result = (double)baseCost;
-			m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+			// Do not clobber a loaded last-best if present
+			if (m_eval_gstate.m_last_best_evaluation == 0ULL)
+				m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 		}
 
 		// Immediately show frame in dual mode
@@ -132,7 +134,8 @@ void RastaConverter::MainLoopDual()
 		bestA.uncache_insns();
 		m_eval_gstate.m_best_pic = bestA;
 		m_eval_gstate.m_best_result = (double)bestCostA;
-		m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+		if (m_eval_gstate.m_last_best_evaluation == 0ULL)
+			m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 		UpdateCreatedFromResults(resultsA, m_eval_gstate.m_created_picture);
 		UpdateTargetsFromResults(resultsA, m_eval_gstate.m_created_picture_targets);
 		memcpy(&m_eval_gstate.m_sprites_memory, &bootstrapEval.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);

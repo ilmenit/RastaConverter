@@ -237,9 +237,15 @@ void RastaConverter::SaveOptimizerState(const char* fn) {
 	if (!f)
 		return;
 
-	// Optimizer kind first line
+	// Optimizer kind
 	const char* opt = (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LAHC) ? "lahc" : "dlas";
 	fprintf(f, "%s\n", opt);
+
+	// Persist evaluation counters as unsigned long long
+	fprintf(f, "%llu\n", (unsigned long long)m_eval_gstate.m_evaluations);
+	fprintf(f, "%llu\n", (unsigned long long)m_eval_gstate.m_last_best_evaluation);
+
+	// DLAS/LAHC state
 	fprintf(f, "%lu\n", (unsigned long)m_eval_gstate.m_previous_results.size());
 	fprintf(f, "%lu\n", (unsigned long)m_eval_gstate.m_previous_results_index);
 	fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_cost_max);
@@ -264,6 +270,14 @@ void RastaConverter::LoadOptimizerState(string name)
 	std::string opt = optbuf;
 	for (auto &c : opt) c = (char)tolower(c);
 	m_eval_gstate.m_optimizer = (opt == "lahc") ? EvalGlobalState::OPT_LAHC : EvalGlobalState::OPT_DLAS;
+
+	// Load evaluation counters as unsigned long long
+	unsigned long long evals = 0ULL;
+	unsigned long long lastbest = 0ULL;
+	fscanf(f, "%llu\n", &evals);
+	fscanf(f, "%llu\n", &lastbest);
+	m_eval_gstate.m_evaluations = evals;
+	m_eval_gstate.m_last_best_evaluation = lastbest;
 
 	unsigned long no_elements = 0;
 	unsigned long index = 0;
@@ -553,12 +567,29 @@ void RastaConverter::OtherDithering()
 				}
 			}
 			unsigned char color_index=FindAtariColorIndex(out_pixel);
-			color_indexes_on_dst_picture.insert(color_index);	
+			color_indexes_on_dst_picture.insert(color_index);
 			out_pixel = atari_palette[color_index];
 			RGBQUAD color=RGB2PIXEL(out_pixel);
 			FreeImage_SetPixelColor(destination_bitmap,x,y,&color);
 		}
 		ShowDestinationLine(y);
+		// Keep UI responsive: pump events and present per line
+		switch (gui.NextFrame())
+		{
+		case GUI_command::REDRAW:
+			ShowInputBitmap();
+			ShowDestinationBitmap();
+			gui.Present();
+			break;
+		case GUI_command::SAVE:
+		case GUI_command::STOP:
+		case GUI_command::CONTINUE:
+		case GUI_command::SHOW_A:
+		case GUI_command::SHOW_B:
+		case GUI_command::SHOW_MIX:
+			break;
+		}
+		gui.Present();
 	}
 }
 
@@ -1025,21 +1056,33 @@ void *RastaConverter::KnollDitheringParallelHelper(void *arg)
 
 void RastaConverter::KnollDitheringParallel(int from, int to)
 {
+	std::vector<unsigned char> local_line;
+	local_line.resize((size_t)m_width);
+	std::set<unsigned char> local_indices;
 	for(int y=from; y<to; ++y)
 	{
+		local_indices.clear();
 		for(unsigned x=0; x<(unsigned)m_width; ++x)
 		{
 			rgb r_color = m_picture[y][x];
 			unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
 			MixingPlan plan = DeviseBestMixingPlan(r_color);
 			unsigned char color_index=plan.colors[ map_value ];
-			color_indexes_on_dst_picture.insert(color_index);	
-			rgb out_pixel = atari_palette[color_index];
-
-			RGBQUAD color=RGB2PIXEL(out_pixel);
-			FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
+			local_line[x] = color_index;
+			local_indices.insert(color_index);
 		}
-		ShowDestinationLine(y);
+		for(unsigned x=0; x<(unsigned)m_width; ++x)
+		{
+			rgb out_pixel = atari_palette[ local_line[x] ];
+			m_picture[y][x] = out_pixel;
+		}
+		{
+			std::lock_guard<std::mutex> lock(m_color_set_mutex);
+			for (auto v : local_indices) color_indexes_on_dst_picture.insert(v);
+		}
+		// Mark this line ready so the main thread can draw it
+		if (m_knoll_line_ready)
+			m_knoll_line_ready[(size_t)y].store(1, std::memory_order_release);
 	}
 }
 
@@ -1050,7 +1093,98 @@ void RastaConverter::KnollDithering()
 	{
 		luma[c] = atari_palette[c].r*299 + atari_palette[c].g*587 + atari_palette[c].b*114;
 	}
-	ParallelFor(0,m_height,KnollDitheringParallelHelper);
+	// Initialize progress flags for multi-threaded readiness
+	m_knoll_line_ready.reset(new std::atomic<unsigned char>[(size_t)m_height]);
+	m_knoll_line_drawn.assign((size_t)m_height, 0);
+	for (int i=0;i<m_height;++i) m_knoll_line_ready[(size_t)i].store(0, std::memory_order_relaxed);
+	// Show initial empty destination area so window isn't blank
+	ShowDestinationBitmap();
+	gui.Present();
+	// Launch workers (non-blocking) with robust partitioning
+	std::vector<std::thread> threads;
+	std::vector<parallel_for_arg_t> threads_arg;
+	int total_threads = std::max(1, cfg.threads);
+	threads.reserve(total_threads);
+	threads_arg.resize(total_threads);
+	int from=0;
+	int to=m_height;
+	int step = (to - from + total_threads - 1) / total_threads; // ceil division
+	for (int t=0;t<total_threads;++t)
+	{
+		threads_arg[t].this_ptr=this;
+		threads_arg[t].from=from;
+		int tto = from + step;
+		if (t==total_threads-1 || tto>to) tto = to;
+		threads_arg[t].to=tto;
+		threads.emplace_back( std::bind( KnollDitheringParallelHelper, ( void* )&threads_arg[t] ) );
+		from = tto;
+	}
+	// Progressive commit loop: draw lines as they become ready
+	int next_to_draw = 0;
+	int presented_until = -1;
+	while (next_to_draw < m_height)
+	{
+		// Draw any contiguous ready lines starting from next_to_draw
+		while (next_to_draw < m_height && m_knoll_line_ready[(size_t)next_to_draw].load(std::memory_order_acquire))
+		{
+			if (!m_knoll_line_drawn[(size_t)next_to_draw])
+			{
+				for (int x=0; x<m_width; ++x)
+				{
+					rgb out_pixel = m_picture[next_to_draw][x];
+					RGBQUAD color=RGB2PIXEL(out_pixel);
+					FreeImage_SetPixelColor(destination_bitmap, x, next_to_draw, &color);
+				}
+				ShowDestinationLine(next_to_draw);
+				m_knoll_line_drawn[(size_t)next_to_draw] = 1;
+			}
+			++next_to_draw;
+		}
+		// Also draw any out-of-order ready lines to avoid waiting on the first line
+		int drawn_this_iter = 0;
+		for (int y=0; y<m_height && drawn_this_iter<8; ++y)
+		{
+			if (!m_knoll_line_drawn[(size_t)y] && m_knoll_line_ready[(size_t)y].load(std::memory_order_acquire))
+			{
+				for (int x=0; x<m_width; ++x)
+				{
+					rgb out_pixel = m_picture[y][x];
+					RGBQUAD color=RGB2PIXEL(out_pixel);
+					FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
+				}
+				ShowDestinationLine(y);
+				m_knoll_line_drawn[(size_t)y] = 1;
+				++drawn_this_iter;
+			}
+		}
+		// Pump events and present periodically to keep UI responsive
+		switch (gui.NextFrame())
+		{
+		case GUI_command::REDRAW:
+			ShowInputBitmap();
+			ShowDestinationBitmap();
+			gui.Present();
+			break;
+		case GUI_command::SAVE:
+		case GUI_command::STOP:
+		case GUI_command::CONTINUE:
+		case GUI_command::SHOW_A:
+		case GUI_command::SHOW_B:
+		case GUI_command::SHOW_MIX:
+			break;
+		}
+		if (presented_until != next_to_draw)
+		{
+			gui.Present();
+			presented_until = next_to_draw;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	// Join workers before leaving
+	for (int t=0;t<total_threads;++t)
+	{
+		threads[t].join();
+	}
 }
 
 void RastaConverter::ClearErrorMap()

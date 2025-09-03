@@ -119,41 +119,41 @@ set(HEADER_FILES
     src/core/TargetPicture.h
 )
 
-# Create main GUI executable as the default target
-add_executable(RastaConverter ${ALL_SOURCE_FILES} ${HEADER_FILES})
-
-# Add Windows-specific sources/headers only on Windows
-if(WIN32)
-    target_sources(RastaConverter PRIVATE src/platform/win/ConsoleCtrlWin.cpp)
-    target_include_directories(RastaConverter PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/win)
-endif()
-
-# Optional console-only build
+# Targets
 if(BUILD_NO_GUI)
+    # Console-only build (no SDL2/GUI)
     add_executable(RastaConverter-NO_GUI ${COMMON_SOURCE_FILES} ${HEADER_FILES})
     if(WIN32)
         target_sources(RastaConverter-NO_GUI PRIVATE src/platform/win/ConsoleCtrlWin.cpp)
         target_include_directories(RastaConverter-NO_GUI PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/win)
     endif()
-    message(STATUS "Building both GUI and NO_GUI versions")
+    message(STATUS "Building console-only version (NO_GUI=ON)")
 else()
-    message(STATUS "Building GUI version only (use -DBUILD_NO_GUI=ON or -DNO_GUI=ON to add console version too)")
+    # GUI build (default)
+    add_executable(RastaConverter ${COMMON_SOURCE_FILES} ${GUI_SOURCE_FILES} ${HEADER_FILES})
+    if(WIN32)
+        target_sources(RastaConverter PRIVATE src/platform/win/ConsoleCtrlWin.cpp)
+        target_include_directories(RastaConverter PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/win)
+    endif()
+    message(STATUS "Building GUI version only (use -DBUILD_NO_GUI=ON or -DNO_GUI=ON for console-only)")
 endif()
 
 # Include directories
-target_include_directories(RastaConverter PRIVATE
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/color
-    ${CMAKE_SOURCE_DIR}/src/rng
-    ${CMAKE_SOURCE_DIR}/src/utils
-    ${CMAKE_SOURCE_DIR}/src/core
-    ${CMAKE_SOURCE_DIR}/src/app
-    ${CMAKE_SOURCE_DIR}/src/app/thirdparty
-    ${CMAKE_SOURCE_DIR}/src/frontend/common
-    ${CMAKE_SOURCE_DIR}/src/frontend/gui
-    ${CMAKE_SOURCE_DIR}/src/frontend/console
-)
+if(NOT BUILD_NO_GUI)
+    target_include_directories(RastaConverter PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/color
+        ${CMAKE_SOURCE_DIR}/src/rng
+        ${CMAKE_SOURCE_DIR}/src/utils
+        ${CMAKE_SOURCE_DIR}/src/core
+        ${CMAKE_SOURCE_DIR}/src/app
+        ${CMAKE_SOURCE_DIR}/src/app/thirdparty
+        ${CMAKE_SOURCE_DIR}/src/frontend/common
+        ${CMAKE_SOURCE_DIR}/src/frontend/gui
+        ${CMAKE_SOURCE_DIR}/src/frontend/console
+    )
+endif()
 if(BUILD_NO_GUI)
     target_include_directories(RastaConverter-NO_GUI PRIVATE
         ${CMAKE_SOURCE_DIR}
@@ -214,92 +214,96 @@ else()
     endif()
 endif()
 
-# SDL2 / SDL2_ttf (required for GUI target)
+# SDL2 / SDL2_ttf (required only for GUI builds)
 set(RESOLVED_SDL_LIBS "")
 set(RESOLVED_SDL_INCLUDES "")
-find_package(SDL2 CONFIG QUIET)
-find_package(SDL2_ttf CONFIG QUIET)
-if(TARGET SDL2::SDL2)
-    list(APPEND RESOLVED_SDL_LIBS SDL2::SDL2)
-    if(TARGET SDL2::SDL2main)
-        list(APPEND RESOLVED_SDL_LIBS SDL2::SDL2main)
-    endif()
-    message(STATUS "SDL2: using imported targets")
-else()
-    find_package(SDL2 QUIET)
-    if(SDL2_FOUND AND DEFINED SDL2_LIBRARIES)
-        list(APPEND RESOLVED_SDL_LIBS ${SDL2_LIBRARIES})
-        set(RESOLVED_SDL_INCLUDES ${SDL2_INCLUDE_DIRS})
-        message(STATUS "SDL2: using Find module variables")
+if(NOT BUILD_NO_GUI)
+    find_package(SDL2 CONFIG QUIET)
+    find_package(SDL2_ttf CONFIG QUIET)
+    if(TARGET SDL2::SDL2)
+        list(APPEND RESOLVED_SDL_LIBS SDL2::SDL2)
+        if(TARGET SDL2::SDL2main)
+            list(APPEND RESOLVED_SDL_LIBS SDL2::SDL2main)
+        endif()
+        message(STATUS "SDL2: using imported targets")
     else()
-        # Fallback: try locating headers and library manually using SDL2_DIR hint and common paths
-        find_path(SDL2_INCLUDE_DIR SDL.h
-            HINTS ${SDL2_DIR} ${SDL2_DIR}/include ${SDL2_DIR}/include/SDL2
-            PATH_SUFFIXES SDL2
-            PATHS /usr/include /usr/local/include /opt/homebrew/include
-        )
-        find_library(SDL2_LIBRARY NAMES SDL2 SDL2-2.0
-            HINTS ${SDL2_DIR} ${SDL2_DIR}/lib ${SDL2_DIR}/lib/x64 ${SDL2_DIR}/lib/x86
-            PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
-        )
-        # SDL2main is optional; try to find it on Windows
-        if(WIN32)
-            find_library(SDL2MAIN_LIBRARY NAMES SDL2main
-                HINTS ${SDL2_DIR} ${SDL2_DIR}/lib ${SDL2_DIR}/lib/x64 ${SDL2_DIR}/lib/x86
-                PATHS /usr/lib /usr/local/lib
+        find_package(SDL2 QUIET)
+        if(SDL2_FOUND AND DEFINED SDL2_LIBRARIES)
+            list(APPEND RESOLVED_SDL_LIBS ${SDL2_LIBRARIES})
+            set(RESOLVED_SDL_INCLUDES ${SDL2_INCLUDE_DIRS})
+            message(STATUS "SDL2: using Find module variables")
+        else()
+            # Fallback: try locating headers and library manually using SDL2_DIR hint and common paths
+            find_path(SDL2_INCLUDE_DIR SDL.h
+                HINTS ${SDL2_DIR} ${SDL2_DIR}/include ${SDL2_DIR}/include/SDL2
+                PATH_SUFFIXES SDL2
+                PATHS /usr/include /usr/local/include /opt/homebrew/include
             )
-        endif()
-        if(SDL2_LIBRARY)
-            list(APPEND RESOLVED_SDL_LIBS ${SDL2_LIBRARY})
-            if(SDL2MAIN_LIBRARY)
-                list(APPEND RESOLVED_SDL_LIBS ${SDL2MAIN_LIBRARY})
+            find_library(SDL2_LIBRARY NAMES SDL2 SDL2-2.0
+                HINTS ${SDL2_DIR} ${SDL2_DIR}/lib ${SDL2_DIR}/lib/x64 ${SDL2_DIR}/lib/x86
+                PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
+            )
+            # SDL2main is optional; try to find it on Windows
+            if(WIN32)
+                find_library(SDL2MAIN_LIBRARY NAMES SDL2main
+                    HINTS ${SDL2_DIR} ${SDL2_DIR}/lib ${SDL2_DIR}/lib/x64 ${SDL2_DIR}/lib/x86
+                    PATHS /usr/lib /usr/local/lib
+                )
             endif()
-            if(SDL2_INCLUDE_DIR)
-                list(APPEND RESOLVED_SDL_INCLUDES ${SDL2_INCLUDE_DIR})
+            if(SDL2_LIBRARY)
+                list(APPEND RESOLVED_SDL_LIBS ${SDL2_LIBRARY})
+                if(SDL2MAIN_LIBRARY)
+                    list(APPEND RESOLVED_SDL_LIBS ${SDL2MAIN_LIBRARY})
+                endif()
+                if(SDL2_INCLUDE_DIR)
+                    list(APPEND RESOLVED_SDL_INCLUDES ${SDL2_INCLUDE_DIR})
+                endif()
+                message(STATUS "SDL2: using fallback library path: ${SDL2_LIBRARY}")
+            else()
+                message(FATAL_ERROR "SDL2 not found. Install system package (Ubuntu: libsdl2-dev, macOS: brew install sdl2) or provide via vcpkg or set SDL2_DIR.")
             endif()
-            message(STATUS "SDL2: using fallback library path: ${SDL2_LIBRARY}")
-        else()
-            message(FATAL_ERROR "SDL2 not found. Install system package (Ubuntu: libsdl2-dev, macOS: brew install sdl2) or provide via vcpkg or set SDL2_DIR.")
         endif()
     endif()
-endif()
 
-if(TARGET SDL2_ttf::SDL2_ttf)
-    list(APPEND RESOLVED_SDL_LIBS SDL2_ttf::SDL2_ttf)
-    message(STATUS "SDL2_ttf: using imported target")
-else()
-    find_package(SDL2_ttf QUIET)
-    if(SDL2_TTF_FOUND AND DEFINED SDL2_TTF_LIBRARIES)
-        list(APPEND RESOLVED_SDL_LIBS ${SDL2_TTF_LIBRARIES})
-        list(APPEND RESOLVED_SDL_INCLUDES ${SDL2_TTF_INCLUDE_DIRS})
-        message(STATUS "SDL2_ttf: using Find module variables")
+    if(TARGET SDL2_ttf::SDL2_ttf)
+        list(APPEND RESOLVED_SDL_LIBS SDL2_ttf::SDL2_ttf)
+        message(STATUS "SDL2_ttf: using imported target")
     else()
-        # Fallback for SDL2_ttf
-        find_path(SDL2_TTF_INCLUDE_DIR SDL_ttf.h
-            HINTS ${SDL2_TTF_DIR} ${SDL2_TTF_DIR}/include ${SDL2_TTF_DIR}/include/SDL2
-            PATH_SUFFIXES SDL2
-            PATHS /usr/include /usr/local/include /opt/homebrew/include
-        )
-        find_library(SDL2_TTF_LIBRARY NAMES SDL2_ttf
-            HINTS ${SDL2_TTF_DIR} ${SDL2_TTF_DIR}/lib ${SDL2_TTF_DIR}/lib/x64 ${SDL2_TTF_DIR}/lib/x86 ${SDL2_DIR}/lib ${SDL2_DIR}/lib/x64 ${SDL2_DIR}/lib/x86
-            PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
-        )
-        if(SDL2_TTF_LIBRARY)
-            list(APPEND RESOLVED_SDL_LIBS ${SDL2_TTF_LIBRARY})
-            if(SDL2_TTF_INCLUDE_DIR)
-                list(APPEND RESOLVED_SDL_INCLUDES ${SDL2_TTF_INCLUDE_DIR})
-            endif()
-            message(STATUS "SDL2_ttf: using fallback library path: ${SDL2_TTF_LIBRARY}")
+        find_package(SDL2_ttf QUIET)
+        if(SDL2_TTF_FOUND AND DEFINED SDL2_TTF_LIBRARIES)
+            list(APPEND RESOLVED_SDL_LIBS ${SDL2_TTF_LIBRARIES})
+            list(APPEND RESOLVED_SDL_INCLUDES ${SDL2_TTF_INCLUDE_DIRS})
+            message(STATUS "SDL2_ttf: using Find module variables")
         else()
-            message(FATAL_ERROR "SDL2_ttf not found. Install system package (Ubuntu: libsdl2-ttf-dev, macOS: brew install sdl2_ttf) or provide via vcpkg or set SDL2_TTF_DIR.")
+            # Fallback for SDL2_ttf
+            find_path(SDL2_TTF_INCLUDE_DIR SDL_ttf.h
+                HINTS ${SDL2_TTF_DIR} ${SDL2_TTF_DIR}/include ${SDL2_TTF_DIR}/include/SDL2
+                PATH_SUFFIXES SDL2
+                PATHS /usr/include /usr/local/include /opt/homebrew/include
+            )
+            find_library(SDL2_TTF_LIBRARY NAMES SDL2_ttf
+                HINTS ${SDL2_TTF_DIR} ${SDL2_TTF_DIR}/lib ${SDL2_TTF_DIR}/lib/x64 ${SDL2_TTF_DIR}/lib/x86 ${SDL2_DIR}/lib ${SDL2_DIR}/lib/x64 ${SDL2_DIR}/lib/x86
+                PATHS /usr/lib /usr/local/lib /opt/homebrew/lib
+            )
+            if(SDL2_TTF_LIBRARY)
+                list(APPEND RESOLVED_SDL_LIBS ${SDL2_TTF_LIBRARY})
+                if(SDL2_TTF_INCLUDE_DIR)
+                    list(APPEND RESOLVED_SDL_INCLUDES ${SDL2_TTF_INCLUDE_DIR})
+                endif()
+                message(STATUS "SDL2_ttf: using fallback library path: ${SDL2_TTF_LIBRARY}")
+            else()
+                message(FATAL_ERROR "SDL2_ttf not found. Install system package (Ubuntu: libsdl2-ttf-dev, macOS: brew install sdl2_ttf) or provide via vcpkg or set SDL2_TTF_DIR.")
+            endif()
         endif()
     endif()
 endif()
 
 # Windows-specific compile definitions
 if(WIN32)
-    target_compile_definitions(RastaConverter PRIVATE WIN32 _WINDOWS)
-    set_target_properties(RastaConverter PROPERTIES WIN32_EXECUTABLE FALSE)
+    if(NOT BUILD_NO_GUI)
+        target_compile_definitions(RastaConverter PRIVATE WIN32 _WINDOWS)
+        set_target_properties(RastaConverter PROPERTIES WIN32_EXECUTABLE FALSE)
+    endif()
     if(BUILD_NO_GUI)
         target_compile_definitions(RastaConverter-NO_GUI PRIVATE WIN32 _WINDOWS NO_GUI)
         set_target_properties(RastaConverter-NO_GUI PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -328,12 +332,14 @@ if(CMAKE_SYSTEM_PROCESSOR)
 endif()
 
 # Config-specific defines
-target_compile_definitions(RastaConverter PRIVATE
-    $<$<CONFIG:Debug>:_DEBUG>
-    $<$<CONFIG:Release>:NDEBUG;_SCL_SECURE=0>
-    $<$<CONFIG:RelWithDebInfo>:NDEBUG;_SCL_SECURE=0>
-    $<$<CONFIG:MinSizeRel>:NDEBUG;_SCL_SECURE=0>
-)
+if(NOT BUILD_NO_GUI)
+    target_compile_definitions(RastaConverter PRIVATE
+        $<$<CONFIG:Debug>:_DEBUG>
+        $<$<CONFIG:Release>:NDEBUG;_SCL_SECURE=0>
+        $<$<CONFIG:RelWithDebInfo>:NDEBUG;_SCL_SECURE=0>
+        $<$<CONFIG:MinSizeRel>:NDEBUG;_SCL_SECURE=0>
+    )
+endif()
 if(BUILD_NO_GUI)
     target_compile_definitions(RastaConverter-NO_GUI PRIVATE
         NO_GUI
@@ -346,12 +352,15 @@ endif()
 
 # Compiler options (speed-oriented defaults for Release)
 if(MSVC)
-    target_compile_options(RastaConverter PRIVATE
-        /W3 /wd4819
-        $<$<CONFIG:Debug>:/MDd;/Od;/RTC1>
-        $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/MT;/O2;/Ob2;/Oi;/Ot;/Gy;/Gw;$<IF:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,/fp:fast,>>
-        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:/arch:AVX2>
-    )
+    if(NOT BUILD_NO_GUI)
+        target_compile_options(RastaConverter PRIVATE
+            /W3 /wd4819
+            $<$<CONFIG:Debug>:/MDd;/Od;/RTC1>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/MT;/O2;/Ob2;/Oi;/Ot;/Gy;/Gw;$<IF:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,/fp:fast,>>
+            $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:/arch:AVX2>
+        )
+        target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
+    endif()
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
             /W3 /wd4819
@@ -359,25 +368,23 @@ if(MSVC)
             $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/MT;/O2;/Ob2;/Oi;/Ot;/Gy;/Gw;$<IF:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,/fp:fast,>>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:/arch:AVX2>
         )
-    endif()
-
-    target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
-    if(BUILD_NO_GUI)
         target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(RastaConverter PRIVATE
-        $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-        $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
-        $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
-        $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
-        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
-    )
-    if(ENABLE_DEAD_STRIP)
-        if(APPLE)
-            target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,-dead_strip>)
-        else()
-            target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
+    if(NOT BUILD_NO_GUI)
+        target_compile_options(RastaConverter PRIVATE
+            $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
+            $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+            $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
+        )
+        if(ENABLE_DEAD_STRIP)
+            if(APPLE)
+                target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,-dead_strip>)
+            else()
+                target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
+            endif()
         endif()
     endif()
     if(BUILD_NO_GUI)
@@ -397,16 +404,18 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         endif()
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
-    target_compile_options(RastaConverter PRIVATE
-        $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-        $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
-        $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
-        $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
-        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
-    )
-    if(NOT WIN32)
-        if(ENABLE_DEAD_STRIP)
-            target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
+    if(NOT BUILD_NO_GUI)
+        target_compile_options(RastaConverter PRIVATE
+            $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
+            $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+            $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
+        )
+        if(NOT WIN32)
+            if(ENABLE_DEAD_STRIP)
+                target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
+            endif()
         endif()
     endif()
     if(BUILD_NO_GUI)
@@ -424,15 +433,17 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
         endif()
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(RastaConverter PRIVATE
-        $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-        $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
-        $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
-        $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
-        $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
-    )
-    if(ENABLE_DEAD_STRIP)
-        target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
+    if(NOT BUILD_NO_GUI)
+        target_compile_options(RastaConverter PRIVATE
+            $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
+            $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
+            $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
+        )
+        if(ENABLE_DEAD_STRIP)
+            target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections -Wl,-O1>)
+        endif()
     endif()
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
@@ -449,7 +460,9 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 if(ENABLE_UNITY_BUILD)
-    set_target_properties(RastaConverter PROPERTIES UNITY_BUILD ON)
+    if(NOT BUILD_NO_GUI)
+        set_target_properties(RastaConverter PROPERTIES UNITY_BUILD ON)
+    endif()
     if(BUILD_NO_GUI)
         set_target_properties(RastaConverter-NO_GUI PROPERTIES UNITY_BUILD ON)
     endif()
@@ -460,8 +473,10 @@ if(ENABLE_LTO)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT ipo_supported OUTPUT ipo_output)
     if(ipo_supported)
-        set_property(TARGET RastaConverter PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-        set_property(TARGET RastaConverter PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+        if(NOT BUILD_NO_GUI)
+            set_property(TARGET RastaConverter PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+            set_property(TARGET RastaConverter PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+        endif()
         if(BUILD_NO_GUI)
             set_property(TARGET RastaConverter-NO_GUI PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
             set_property(TARGET RastaConverter-NO_GUI PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
@@ -473,24 +488,30 @@ endif()
 
 # Apply include dirs if using module variables (imported targets carry includes themselves)
 if(RESOLVED_FREEIMAGE_INCLUDES)
-    target_include_directories(RastaConverter PRIVATE ${RESOLVED_FREEIMAGE_INCLUDES})
+    if(NOT BUILD_NO_GUI)
+        target_include_directories(RastaConverter PRIVATE ${RESOLVED_FREEIMAGE_INCLUDES})
+    endif()
     if(BUILD_NO_GUI)
         target_include_directories(RastaConverter-NO_GUI PRIVATE ${RESOLVED_FREEIMAGE_INCLUDES})
     endif()
 endif()
 if(RESOLVED_SDL_INCLUDES)
-    target_include_directories(RastaConverter PRIVATE ${RESOLVED_SDL_INCLUDES})
+    if(NOT BUILD_NO_GUI)
+        target_include_directories(RastaConverter PRIVATE ${RESOLVED_SDL_INCLUDES})
+    endif()
     if(BUILD_NO_GUI)
         target_include_directories(RastaConverter-NO_GUI PRIVATE ${RESOLVED_SDL_INCLUDES})
     endif()
 endif()
 
 # Link libraries
-target_link_libraries(RastaConverter PRIVATE
-    ${RESOLVED_FREEIMAGE_LIBS}
-    ${RESOLVED_SDL_LIBS}
-    $<$<PLATFORM_ID:Windows>:Dbghelp>
-)
+if(NOT BUILD_NO_GUI)
+    target_link_libraries(RastaConverter PRIVATE
+        ${RESOLVED_FREEIMAGE_LIBS}
+        ${RESOLVED_SDL_LIBS}
+        $<$<PLATFORM_ID:Windows>:Dbghelp>
+    )
+endif()
 if(BUILD_NO_GUI)
     target_link_libraries(RastaConverter-NO_GUI PRIVATE
         ${RESOLVED_FREEIMAGE_LIBS}
@@ -499,11 +520,13 @@ if(BUILD_NO_GUI)
 endif()
 
 # Output directories (under preset build dir)
-set_target_properties(RastaConverter PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
-    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/RelWithDebInfo"
-)
+if(NOT BUILD_NO_GUI)
+    set_target_properties(RastaConverter PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/RelWithDebInfo"
+    )
+endif()
 if(BUILD_NO_GUI)
     set_target_properties(RastaConverter-NO_GUI PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug-NO_GUI"
@@ -513,25 +536,27 @@ if(BUILD_NO_GUI)
 endif()
 
 # Post-build: copy resources (Palettes, Generator, and docs) next to the executables
-set(RC_RUNTIME_COPY_DIR "$<TARGET_FILE_DIR:RastaConverter>")
-add_custom_command(TARGET RastaConverter POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Palettes" "${RC_RUNTIME_COPY_DIR}/Palettes"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Generator" "${RC_RUNTIME_COPY_DIR}/Generator"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/GeneratorDual" "${RC_RUNTIME_COPY_DIR}/GeneratorDual"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/clacon2.ttf" "${RC_RUNTIME_COPY_DIR}/clacon2.ttf"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/ChangeLog.md" "${RC_RUNTIME_COPY_DIR}/ChangeLog.md"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR}/help.txt"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR}/README.md"
-)
-if(EXISTS "${CMAKE_SOURCE_DIR}/dlls")
+if(NOT BUILD_NO_GUI)
+    set(RC_RUNTIME_COPY_DIR "$<TARGET_FILE_DIR:RastaConverter>")
     add_custom_command(TARGET RastaConverter POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dlls" "${RC_RUNTIME_COPY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Palettes" "${RC_RUNTIME_COPY_DIR}/Palettes"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Generator" "${RC_RUNTIME_COPY_DIR}/Generator"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/GeneratorDual" "${RC_RUNTIME_COPY_DIR}/GeneratorDual"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/clacon2.ttf" "${RC_RUNTIME_COPY_DIR}/clacon2.ttf"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/ChangeLog.md" "${RC_RUNTIME_COPY_DIR}/ChangeLog.md"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR}/help.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR}/README.md"
     )
-endif()
-if(EXISTS "${CMAKE_SOURCE_DIR}/test.jpg")
-    add_custom_command(TARGET RastaConverter POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test.jpg" "${RC_RUNTIME_COPY_DIR}/test.jpg"
-    )
+    if(EXISTS "${CMAKE_SOURCE_DIR}/dlls")
+        add_custom_command(TARGET RastaConverter POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dlls" "${RC_RUNTIME_COPY_DIR}"
+        )
+    endif()
+    if(EXISTS "${CMAKE_SOURCE_DIR}/test.jpg")
+        add_custom_command(TARGET RastaConverter POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test.jpg" "${RC_RUNTIME_COPY_DIR}/test.jpg"
+        )
+    endif()
 endif()
 if(BUILD_NO_GUI)
     set(RC_RUNTIME_COPY_DIR_NO_GUI "$<TARGET_FILE_DIR:RastaConverter-NO_GUI>")
@@ -557,12 +582,14 @@ endif()
 
 # Optionally copy all runtime DLLs for convenience on Windows (can be noisy under vcpkg)
 if(WIN32 AND COPY_ALL_RUNTIME_DLLS AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.21)
-    add_custom_command(TARGET RastaConverter POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:RastaConverter>
-            $<TARGET_FILE_DIR:RastaConverter>
-        COMMAND_EXPAND_LISTS
-    )
+    if(NOT BUILD_NO_GUI)
+        add_custom_command(TARGET RastaConverter POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:RastaConverter>
+                $<TARGET_FILE_DIR:RastaConverter>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
     if(BUILD_NO_GUI)
         add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -578,8 +605,9 @@ source_group("Source Files" FILES ${ALL_SOURCE_FILES})
 source_group("Header Files" FILES ${HEADER_FILES})
 
 # Install rules (basic)
-install(TARGETS RastaConverter RUNTIME DESTINATION bin)
-if(BUILD_NO_GUI)
+if(NOT BUILD_NO_GUI)
+    install(TARGETS RastaConverter RUNTIME DESTINATION bin)
+else()
     install(TARGETS RastaConverter-NO_GUI RUNTIME DESTINATION bin)
 endif()
 install(FILES README.md ChangeLog.md help.txt DESTINATION share/doc/rasta)
@@ -587,17 +615,21 @@ install(DIRECTORY Palettes DESTINATION share/rasta)
 
 # Summary
 message(STATUS "=== BUILD CONFIGURATION SUMMARY ===")
-message(STATUS "Main target: RastaConverter (GUI enabled)")
-if(BUILD_NO_GUI)
-    message(STATUS "Secondary target: RastaConverter-NO_GUI (console only)")
+if(NOT BUILD_NO_GUI)
+    message(STATUS "Main target: RastaConverter (GUI enabled)")
+    message(STATUS "Console target: DISABLED (use -DBUILD_NO_GUI=ON to enable console-only)")
 else()
-    message(STATUS "Console target: DISABLED (use -DBUILD_NO_GUI=ON to enable)")
+    message(STATUS "Main target: RastaConverter-NO_GUI (console only)")
 endif()
 message(STATUS "Architecture: ${ARCH_DIR}")
 message(STATUS "Dependencies:")
 message(STATUS "  ✓ FreeImage: ${RESOLVED_FREEIMAGE_LIBS}")
-message(STATUS "  ✓ SDL2/SDL2main: (if present) via imported target or module")
-message(STATUS "  ✓ SDL2_ttf: via imported target or module")
+if(NOT BUILD_NO_GUI)
+    message(STATUS "  ✓ SDL2/SDL2main: (if present) via imported target or module")
+    message(STATUS "  ✓ SDL2_ttf: via imported target or module")
+else()
+    message(STATUS "  – SDL2/SDL2_ttf: not required (NO_GUI)")
+endif()
 message(STATUS "Optimizations (Release/RelWithDebInfo): LTO=${ENABLE_LTO}, FAST_MATH=${ENABLE_FAST_MATH}/MSVC_FAST=${ENABLE_MSVC_FAST_MATH}, DEAD_STRIP=${ENABLE_DEAD_STRIP}, AVX2=${ENABLE_AVX2}")
 message(STATUS "====================================")
 

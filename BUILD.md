@@ -62,7 +62,7 @@ build.bat
 # Debug:
 build.bat debug
 
-# Add console version too:
+# Console-only (no SDL2/GUI):
 build.bat nogui
 
 # Clean or clean only:
@@ -98,7 +98,7 @@ macOS/Linux (bash)
 # Auto-select preset per OS/compiler:
 ./build.sh
 
-# Debug or add console:
+# Debug or console-only:
 ./build.sh '' Debug
 ./build.sh '' Release nogui
 
@@ -173,7 +173,8 @@ Installs the binary in `bin/` and resources/docs in `share/`.
 
 Notes
 -----
-- GUI target is always built; the console target `RastaConverter-NO_GUI` is added when `-DBUILD_NO_GUI=ON`.
+- With `-DBUILD_NO_GUI=ON` (or `nogui` in wrappers), the build is console-only: target `RastaConverter-NO_GUI` is produced and SDL2/SDL2_ttf discovery/linking is skipped.
+- Without NO_GUI the default GUI target `RastaConverter` is built and SDL2/SDL2_ttf are required.
 - Clear build summaries are printed with dependency resolution info.
 
 Profile-guided optimization (PGO)

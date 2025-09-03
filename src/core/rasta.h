@@ -16,6 +16,9 @@
 #include <algorithm>
 #include <string>
 #include <sys/timeb.h>
+#include <mutex>
+#include <atomic>
+#include <memory>
 #include "FreeImage.h"
 #include "CommandLineParser.h"
 #include "config.h"
@@ -67,6 +70,7 @@ private:
 	std::chrono::time_point<std::chrono::steady_clock> m_previous_save_time;
 
 	EvalGlobalState m_eval_gstate;
+	std::mutex m_color_set_mutex;
 	// Dual-mode state
 	raster_picture m_best_pic_B; // best B program
 	std::vector< std::vector<unsigned char> > m_created_picture_B; // lines of color indices for B
@@ -86,6 +90,10 @@ private:
 	enum class DualDisplayMode { A, B, MIX };
 	DualDisplayMode m_dual_display = DualDisplayMode::MIX;
 	sprites_memory_t m_sprites_memory_B{}; // sprites for B
+
+	// Knoll dithering progress (for live UI updates)
+	std::unique_ptr<std::atomic<unsigned char>[]> m_knoll_line_ready; // size=m_height, 0=not ready, 1=ready
+	std::vector<unsigned char> m_knoll_line_drawn; // 0 = not drawn, 1 = drawn
 
 	vector<Evaluator> m_evaluators;
 

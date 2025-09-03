@@ -101,9 +101,9 @@ if %CHECK_DEPS% EQU 1 (
 echo [info] Preset: %PRESET%
 echo [info] Config: %CONFIG%
 if %BUILD_NO_GUI% EQU 1 (
-    echo [info] Building GUI + Console
+    echo [info] Building console-only (NO_GUI)
 ) else (
-    echo [info] Building GUI only
+    echo [info] Building GUI
 )
 
 REM Configure

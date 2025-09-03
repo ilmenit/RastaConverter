@@ -276,6 +276,8 @@ void Configuration::Process(int argc, char *argv[])
 
 	dither_val2 = parser.getValue("dither_rand","0");
 	dither_randomness=String2Value<double>(dither_val2);
+	if (dither_randomness < 0.0) dither_randomness = 0.0;
+	if (dither_randomness > 1.0) dither_randomness = 1.0;
 
 	string cache_string = parser.getValue("cache", "64");
 	cache_size = 1024*1024*String2Value<double>(cache_string);
