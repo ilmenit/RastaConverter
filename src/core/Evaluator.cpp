@@ -9,6 +9,7 @@
 #include "TargetPicture.h"
 #include "prng_xoroshiro.h"
 #include <cfloat>
+#include <chrono>
 #include "debug_log.h"
 #include "debug_log.h"
 
@@ -621,7 +622,7 @@ void Evaluator::Run() {
 
 	unsigned last_eval = 0;
 	bool clean_first_evaluation = true;
-	clock_t last_rate_check_time = clock();
+	auto last_rate_check_tp = std::chrono::steady_clock::now();
 
 	raster_picture new_picture;
 	std::vector<const line_cache_result*> line_results(m_height);

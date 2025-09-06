@@ -336,7 +336,7 @@ void RastaConverter::MainLoopDual()
 	}
 
 	// UI loop for bootstrap A
-	clock_t last_rate_check_time = clock();
+	auto last_rate_check_tp = std::chrono::steady_clock::now();
 	unsigned long long last_eval = m_eval_gstate.m_evaluations;
 	if (!quiet) { m_dual_display = DualDisplayMode::A; }
 	while (!m_eval_gstate.m_finished && m_eval_gstate.m_evaluations < targetE_A) {
@@ -351,11 +351,11 @@ void RastaConverter::MainLoopDual()
 				default: break;
 			}
 		}
-		clock_t next_rate_check_time = clock();
-		if (next_rate_check_time > last_rate_check_time + CLOCKS_PER_SEC / 4) {
-			double clock_delta = (double)(next_rate_check_time - last_rate_check_time);
-			m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) * (double)CLOCKS_PER_SEC / clock_delta;
-			last_rate_check_time = next_rate_check_time;
+		auto next_rate_check_tp = std::chrono::steady_clock::now();
+		double secs = std::chrono::duration<double>(next_rate_check_tp - last_rate_check_tp).count();
+		if (secs > 0.25) {
+			m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) / secs;
+			last_rate_check_tp = next_rate_check_tp;
 			last_eval = m_eval_gstate.m_evaluations;
 			if (cfg.save_period == -1) {
 				using namespace std::literals::chrono_literals;
@@ -509,7 +509,7 @@ void RastaConverter::MainLoopDual()
 		}
 
 		// UI loop for bootstrap B
-		last_rate_check_time = clock();
+		last_rate_check_tp = std::chrono::steady_clock::now();
 		last_eval = m_eval_gstate.m_evaluations;
 		if (!quiet) { m_dual_display = DualDisplayMode::B; }
 		while (!m_eval_gstate.m_finished && m_eval_gstate.m_evaluations < targetE_B) {
@@ -524,11 +524,11 @@ void RastaConverter::MainLoopDual()
 					default: break;
 				}
 			}
-			clock_t next_rate_check_time = clock();
-			if (next_rate_check_time > last_rate_check_time + CLOCKS_PER_SEC / 4) {
-				double clock_delta = (double)(next_rate_check_time - last_rate_check_time);
-				m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) * (double)CLOCKS_PER_SEC / clock_delta;
-				last_rate_check_time = next_rate_check_time;
+			auto next_rate_check_tp = std::chrono::steady_clock::now();
+			double secs = std::chrono::duration<double>(next_rate_check_tp - last_rate_check_tp).count();
+			if (secs > 0.25) {
+				m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) / secs;
+				last_rate_check_tp = next_rate_check_tp;
 				last_eval = m_eval_gstate.m_evaluations;
 				if (cfg.save_period == -1) {
 					using namespace std::literals::chrono_literals;
@@ -785,11 +785,11 @@ void RastaConverter::MainLoopDual()
 		}
 
 		// Periodic stats/UI similar to single-frame
-		clock_t next_rate_check_time = clock();
-		if (next_rate_check_time > last_rate_check_time + CLOCKS_PER_SEC / 4) {
-			double clock_delta = (double)(next_rate_check_time - last_rate_check_time);
-			m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) * (double)CLOCKS_PER_SEC / clock_delta;
-			last_rate_check_time = next_rate_check_time;
+		auto next_rate_check_tp = std::chrono::steady_clock::now();
+		double secs = std::chrono::duration<double>(next_rate_check_tp - last_rate_check_tp).count();
+		if (secs > 0.25) {
+			m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) / secs;
+			last_rate_check_tp = next_rate_check_tp;
 			last_eval = m_eval_gstate.m_evaluations;
 			if (cfg.save_period == -1) {
 				using namespace std::literals::chrono_literals;

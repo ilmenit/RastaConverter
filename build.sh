@@ -60,6 +60,7 @@ esac
 
 binary_dir="build/${preset}"
 cfg=("--preset" "$preset")
+cfg+=("-DCMAKE_BUILD_TYPE=$config")
 [[ $build_no_gui -eq 1 ]] && cfg+=("-DBUILD_NO_GUI=ON")
 
 # Map compiler token to CMake CC/CXX

@@ -9,6 +9,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Enable folder structure in IDEs
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+# Ensure native threads are available for std::thread on POSIX (adds -pthread flags)
+find_package(Threads REQUIRED)
+
 # --------------------------------------------------------------------------------------
 # Options (speed-oriented defaults for Release builds)
 # --------------------------------------------------------------------------------------
@@ -509,12 +512,14 @@ if(NOT BUILD_NO_GUI)
     target_link_libraries(RastaConverter PRIVATE
         ${RESOLVED_FREEIMAGE_LIBS}
         ${RESOLVED_SDL_LIBS}
+        Threads::Threads
         $<$<PLATFORM_ID:Windows>:Dbghelp>
     )
 endif()
 if(BUILD_NO_GUI)
     target_link_libraries(RastaConverter-NO_GUI PRIVATE
         ${RESOLVED_FREEIMAGE_LIBS}
+        Threads::Threads
         $<$<PLATFORM_ID:Windows>:Dbghelp>
     )
 endif()

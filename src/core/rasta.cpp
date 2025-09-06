@@ -1718,12 +1718,14 @@ void RastaConverter::MainLoop()
 	m_previous_save_time = std::chrono::steady_clock::now();
 
 	bool clean_first_evaluation = cfg.continue_processing;
-	clock_t last_rate_check_time = clock();
+	auto last_rate_check_tp = std::chrono::steady_clock::now();
 
 	bool pending_update = false;
 
 	// spin up only one evaluator -- we need its result before the rest can go, unless in dual mode
-	std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+	// Do not hold the lock across UI work; acquire on demand
+	std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex, std::defer_lock };
+	lock.lock();
 	if (!cfg.dual_mode) {
 		m_evaluators[0].Start();
 	}
@@ -1742,16 +1744,19 @@ void RastaConverter::MainLoop()
 	while (running)
 	{
 
-		if (eval_inited)
+		// Release global lock during UI/rendering to avoid blocking workers
+		if (lock.owns_lock()) lock.unlock();
+
+		if (eval_inited && !cfg.quiet)
 		{
-			clock_t next_rate_check_time = clock();
+			auto next_rate_check_tp = std::chrono::steady_clock::now();
 
-			if (next_rate_check_time > last_rate_check_time + CLOCKS_PER_SEC / 4)
+			double secs = std::chrono::duration<double>(next_rate_check_tp - last_rate_check_tp).count();
+			if (secs > 0.25)
 			{
-				double clock_delta = (double)(next_rate_check_time - last_rate_check_time);
-				m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) * (double)CLOCKS_PER_SEC / clock_delta;
+				m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) / secs;
 
-				last_rate_check_time = next_rate_check_time;
+				last_rate_check_tp = next_rate_check_tp;
 				last_eval = m_eval_gstate.m_evaluations;
 
 				if (pending_update)
@@ -1793,6 +1798,9 @@ void RastaConverter::MainLoop()
 			}
 		}
 
+		// Reacquire lock before waiting on condition/flags
+		if (!lock.owns_lock()) lock.lock();
+
 		auto now = std::chrono::steady_clock::now();
 		auto deadline = now + std::chrono::nanoseconds( 250000000 );
 
@@ -1802,9 +1810,11 @@ void RastaConverter::MainLoop()
 		if (m_eval_gstate.m_update_initialized)
 		{
 			m_eval_gstate.m_update_initialized = false;
-
+			// Start remaining workers without holding the lock
+			lock.unlock();
 			for (size_t i = 1; i < m_evaluators.size(); ++i)
 				m_evaluators[i].Start();
+			lock.lock();
 
 			eval_inited = true;
 			pending_update = true;
