@@ -387,7 +387,9 @@ void Configuration::Process(int argc, char *argv[])
 		if (argc>1)
 		{
 			temp=argv[1];
-			if (temp.find("/")==string::npos && temp.find("-")==string::npos)
+			// Only reject if it starts with '-' (command line option) or contains '/' (path)
+			// Allow hyphens in filenames as long as they don't start the argument
+			if (temp.find("/")==string::npos && !temp.empty() && temp[0]!='-')
 				input_file=temp;
 		}
 	}
