@@ -111,8 +111,8 @@ struct EvalGlobalState
 	// Versioning for best-state updates to avoid per-iteration locks
 	std::atomic<unsigned long long> m_best_state_version{0};
 
-	// Optimizer selector (DLAS or LAHC)
-	enum Optimizer { OPT_DLAS, OPT_LAHC };
+	// Optimizer selector (DLAS, LAHC, or Legacy)
+	enum Optimizer { OPT_DLAS, OPT_LAHC, OPT_LEGACY };
 	Optimizer m_optimizer = OPT_LAHC;
 
 	// Aggressive search trigger threshold (0 = never)
@@ -229,7 +229,6 @@ private:
 	int m_mutation_attempt_count[E_MUTATION_MAX];
 	int SelectMutation(); 
 
-	void BatchMutateLine(raster_line& prog, raster_picture& pic, int count);
 
 	void CaptureRegisterState(register_state& rs) const;
 	void ApplyRegisterState(const register_state& rs);

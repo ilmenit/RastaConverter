@@ -27,7 +27,7 @@ Dual-frame mode (two frames A/B alternating):
   - A, B, or Mixed (blended) — toggle with keys: [A], [B], [M]
   - Status lines under stats: Optimizing: A|B; Showing: A|B|M; Press [A] [B] [M]ix
 - Note: Mutation statistics are shown only in single-frame mode (hidden in dual mode)
-  - Optimizer and history: /opt (lahc|dlas) and /s (history length) work exactly the same as in single-frame mode; dual mode uses the same acceptance logic and history
+  - Optimizer and history: /opt (lahc|dlas|legacy) and /s (history length) work exactly the same as in single-frame mode; dual mode uses the same acceptance logic and history
 
 Command line options (accept '/', '-' or '--' prefixes; aliases included under each option):
 
@@ -164,21 +164,24 @@ Input:
   For DLAS, small values like /s=3..5 often work very well.
   Aliases: /s, --solutions
  
- /opt or --optimizer=lahc|dlas
+ /opt or --optimizer=lahc|dlas|legacy
   Select optimization algorithm. Default: lahc
   - lahc: Late Acceptance Hill Climbing (default)
   - dlas: Diversified Late Acceptance Search
+  - legacy: Legacy LAHC behavior
   Aliases: --opt, --optimizer
   
 /unstuck_after=<N>
-  Escalate exploration only after N evaluations without improvement (0=never). Default: 1000000
+  Default: 1000000
+  Escalate exploration only after N evaluations without improvement (0=never). 
   When triggered, the search uses larger mutation batches and more exploratory edits
   to escape local minima, especially useful in dual mode with anti-flicker. Aliases: /ua, --unstuck_after
   
-/unstuck_drift_norm=<FLOAT>
+/unstuck_drift=<FLOAT>
+  Default: 0.00001
   When stuck (as per /unstuck_after), slowly relax acceptance by adding FLOAT to the normalized
   distance threshold per evaluation (0=off). Typical small value: 0.00001. This allows accepting
-  slightly worse, but different, solutions to escape deep local minima. Aliases: /ud, --unstuck_drift_norm
+  slightly worse, but different, solutions to escape deep local minima. Aliases: /ud, --unstuck_drift
   
 /distance=Color distance function
   Default: yuv, other options: euclid, ciede

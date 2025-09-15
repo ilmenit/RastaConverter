@@ -84,8 +84,8 @@ struct Configuration {
 	double dual_chroma = 0.1; // weight for (Ua - Ub)^2 + (Va - Vb)^2
 
 	// --- Optimizer selection ---
-	enum e_optimizer { E_OPT_DLAS, E_OPT_LAHC };
-	e_optimizer optimizer = E_OPT_LAHC; // /opt dlas|lahc (default lahc)
+	enum e_optimizer { E_OPT_DLAS, E_OPT_LAHC, E_OPT_LEGACY };
+	e_optimizer optimizer = E_OPT_LAHC; // /opt dlas|lahc|legacy (default lahc)
 
 	// Aggressive search trigger: escalate exploration after this many
 	// evaluations without improvement (0 = never escalate)

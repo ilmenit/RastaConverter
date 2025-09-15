@@ -223,7 +223,44 @@ GUI_command RastaSDL::NextFrame()
 		switch (e.type)
 		{
 		case SDL_QUIT:
-			return GUI_command::STOP;
+			{
+				const SDL_MessageBoxButtonData buttons[] = {
+					{ /* .flags, .buttonid, .text */        0, 0, "No" },
+					{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Yes" },
+				};
+				const SDL_MessageBoxColorScheme colorScheme = {
+					{ /* .colors (.r, .g, .b) */
+						/* [SDL_MESSAGEBOX_COLOR_BACKGROUND] */
+						{ 255,   0,   0 },
+						/* [SDL_MESSAGEBOX_COLOR_TEXT] */
+						{   0, 255,   0 },
+						/* [SDL_MESSAGEBOX_COLOR_BUTTON_BORDER] */
+						{ 255, 255,   0 },
+						/* [SDL_MESSAGEBOX_COLOR_BUTTON_BACKGROUND] */
+						{   0,   0, 255 },
+						/* [SDL_MESSAGEBOX_COLOR_BUTTON_SELECTED] */
+						{ 255,   0, 255 }
+					}
+				};
+				const SDL_MessageBoxData messageboxdata = {
+					SDL_MESSAGEBOX_INFORMATION, /* .flags */
+					NULL, /* .window */
+					"Rasta Converter", /* .title */
+					"Do you really want to quit?", /* .message */
+					SDL_arraysize(buttons), /* .numbuttons */
+					buttons, /* .buttons */
+					&colorScheme /* .colorScheme */
+				};
+				int buttonid;
+				if (SDL_ShowMessageBox(&messageboxdata, &buttonid) < 0) {
+					SDL_Log("error displaying message box");
+					return GUI_command::STOP;
+				}
+				if (buttonid == 1) {
+					return GUI_command::STOP;
+				}
+				return GUI_command::CONTINUE;
+			}
 		case SDL_KEYDOWN:
 			if (e.key.repeat == 0)
 			{

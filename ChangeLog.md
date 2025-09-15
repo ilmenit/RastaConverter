@@ -1,19 +1,16 @@
 ChangeLog
 =========
 
-RastaConverterBeta17      2025-08-?? [AI RELEASE]
+RastaConverterBeta17      2025-09-?? [AI RELEASE]
 * SDL2 version on Linux and flickering of input/destination images fixed
-* Very poor performance on Linux in comparison to Windows build - check release build options and Intel compiler for Linux 
+* Showing conversion rate fixed on Linux
 * Fixed /continue - shouldn't crash anymore
 * Fix to saving numbers to be more than 32bit (like number of evaluations for long run)
 * check NO_GUI build on Linux - shouldn't open SDL2 window.
 * Fixed knoll dithering
 * add to Linux build process copying ttf font to output directory so GUI version can work
-
-LAHC/DLAS optimizer seems to be not working - check if properly implemented
-dual mode getting quickly stuck in local optimum - experiment with different "unstucking ideas"
-even in dual mode there are visible artifacts on gradient - rethink dithering in dual mode
-
+* Added /opt=legacy option - legacy LAHC behavior
+* Added /unstuck_after and /unstuck_drift options to help with leaving local optimum
 
 RastaConverterBeta16      2025-08-24 [AI RELEASE]
 * Fix to ommited Change Value mutation - should reach better Norm. Distance.

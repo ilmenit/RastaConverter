@@ -158,6 +158,18 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
 		m_gstate->m_previous_results[l] = prev_cost;
 		++m_gstate->m_previous_results_index;
 		out.accepted = accept;
+	} else if (m_gstate->m_optimizer == EvalGlobalState::OPT_LEGACY) {
+		// Legacy LAHC: accept if result < historical value (like original LAHC but stricter)
+		// Also support drift for better exploration when stuck
+		// FIXED: Remove thread serialization bottleneck - allow all threads to contribute
+		bool accept = (result < m_gstate->m_previous_results[l] + drift);
+		if (accept) {
+			m_gstate->m_current_cost = result;
+			m_gstate->m_previous_results[l] = result; // Store NEW result (legacy behavior)
+		}
+		++m_gstate->m_previous_results_index;
+		out.accepted = accept;
+		out.improved = (result < m_gstate->m_best_result);
 	} else {
 		if (result <= m_gstate->m_current_cost + drift || result < m_gstate->m_cost_max + drift) {
 			m_gstate->m_current_cost = result;
@@ -684,10 +696,10 @@ void Evaluator::Run() {
 		// Initialize DLAS on first evaluation
 		if (!m_gstate->m_initialized) {
 			if (m_gstate->m_previous_results.empty()) {
-				if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {
+				if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC || m_gstate->m_optimizer == EvalGlobalState::OPT_LEGACY) {
 					m_gstate->m_current_cost = result;
 					m_gstate->m_previous_results.resize(m_solutions, result);
-					m_gstate->m_cost_max = result; // not used by LAHC, kept for completeness
+					m_gstate->m_cost_max = result; // not used by LAHC/Legacy, kept for completeness
 					m_gstate->m_N = m_solutions;
 				} else {
 					// DLAS initialization per paper: fill history with F, set Φmax = F, N = L
@@ -1151,20 +1163,26 @@ void Evaluator::StartSpriteShift(int mem_reg)
 
 void Evaluator::MutateLine(raster_line& prog, raster_picture& pic)
 {
-	// Apply a batch of mutations based on line complexity
-	int mutation_count = std::min(3 + (int)(prog.instructions.size() / 5), 8);
-
-	// Escalate only if stuck beyond threshold (/unstuck_after)
+	// Use legacy approach for better exploration: random number of mutations based on line complexity
+	int r = Random(prog.instructions.size());
+	
+	// Escalate mutation count if stuck beyond threshold (/unstuck_after)
 	if (m_gstate) {
 		unsigned long long thr = m_gstate->m_unstuck_after;
 		if (thr > 0 && m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
 			unsigned long long plateau = m_gstate->m_evaluations - m_gstate->m_last_best_evaluation;
-			if (plateau >= thr) mutation_count = std::min(mutation_count + 6, 16);
+			if (plateau >= thr) {
+				// When stuck, do more mutations: add extra random mutations
+				int extra_mutations = Random(10) + 5; // 5-14 extra mutations
+				r += extra_mutations;
+			}
 		}
 	}
-
-	// Call the batch mutation method instead of doing individual mutations
-	BatchMutateLine(prog, pic, mutation_count);
+	
+	for (int i = 0; i <= r; ++i) {
+		MutateOnce(prog, pic);
+	}
+	prog.rehash();
 }
 
 void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
@@ -1498,14 +1516,6 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 	}
 }
 
-void Evaluator::BatchMutateLine(raster_line& prog, raster_picture& pic, int count)
-{
-	for (int i = 0; i < count; i++) {
-		MutateOnce(prog, pic);
-	}
-	prog.rehash();
-	prog.cache_key = NULL; // Explicitly mark for recaching
-}
 
 void Evaluator::MutateRasterProgram(raster_picture* pic)
 {
@@ -1527,16 +1537,25 @@ void Evaluator::MutateRasterProgram(raster_picture* pic)
 	int region_end = (m_thread_id == thread_count - 1) ?
 		m_height : region_start + lines_per_thread;
 
-	// Prefer mutating lines in this thread's region (80% of the time)
-	if (Random(100) < 80 && region_end > region_start) {
-		m_currently_mutated_y = region_start + Random(region_end - region_start);
-	}
-	// Otherwise, allow some exploration outside the region (20% of time)
-	else if (m_currently_mutated_y >= (int)pic->raster_lines.size()) {
-		m_currently_mutated_y = 0;
-	}
-	else if (m_currently_mutated_y < 0) {
-		m_currently_mutated_y = pic->raster_lines.size() - 1;
+	if (m_gstate->m_optimizer == EvalGlobalState::OPT_LEGACY) {
+		// Legacy mutation strategy: simple line decrement
+		--m_currently_mutated_y;
+		if (m_currently_mutated_y < 0)
+			m_currently_mutated_y = pic->raster_lines.size() - 1;
+		if (m_currently_mutated_y >= (int)pic->raster_lines.size())
+			m_currently_mutated_y = 0;
+	} else {
+		// Prefer mutating lines in this thread's region (80% of the time)
+		if (Random(100) < 80 && region_end > region_start) {
+			m_currently_mutated_y = region_start + Random(region_end - region_start);
+		}
+		// Otherwise, allow some exploration outside the region (20% of time)
+		else if (m_currently_mutated_y >= (int)pic->raster_lines.size()) {
+			m_currently_mutated_y = 0;
+		}
+		else if (m_currently_mutated_y < 0) {
+			m_currently_mutated_y = pic->raster_lines.size() - 1;
+		}
 	}
 
 	// Batch memory register mutations (more frequent when stuck)
@@ -1567,14 +1586,22 @@ void Evaluator::MutateRasterProgram(raster_picture* pic)
 	{
 		for (int t = 0; t < steps; ++t)
 		{
-			// When jumping, prefer to stay within this thread's region
-			if (Random(2) && m_currently_mutated_y > region_start)
-				--m_currently_mutated_y;
-			else if (m_currently_mutated_y < region_end - 1)
-				++m_currently_mutated_y;
-			else {
-				// Fall back to anywhere in the thread's region
-				m_currently_mutated_y = region_start + Random(region_end - region_start);
+			if (m_gstate->m_optimizer == EvalGlobalState::OPT_LEGACY) {
+				// Legacy chain mutation: simple decrement or random
+				if (Random(2) && m_currently_mutated_y > 0)
+					--m_currently_mutated_y;
+				else
+					m_currently_mutated_y = Random(pic->raster_lines.size());
+			} else {
+				// When jumping, prefer to stay within this thread's region
+				if (Random(2) && m_currently_mutated_y > region_start)
+					--m_currently_mutated_y;
+				else if (m_currently_mutated_y < region_end - 1)
+					++m_currently_mutated_y;
+				else {
+					// Fall back to anywhere in the thread's region
+					m_currently_mutated_y = region_start + Random(region_end - region_start);
+				}
 			}
 
 			raster_line& current_line = pic->raster_lines[m_currently_mutated_y];

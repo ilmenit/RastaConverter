@@ -238,7 +238,16 @@ void RastaConverter::SaveOptimizerState(const char* fn) {
 		return;
 
 	// Optimizer kind
-	const char* opt = (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LAHC) ? "lahc" : "dlas";
+	const char* opt;
+	if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LAHC) {
+		opt = "lahc";
+	} else if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_DLAS) {
+		opt = "dlas";
+	} else if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LEGACY) {
+		opt = "legacy";
+	} else {
+		opt = "lahc"; // fallback
+	}
 	fprintf(f, "%s\n", opt);
 
 	// Persist evaluation counters as unsigned long long
@@ -269,7 +278,15 @@ void RastaConverter::LoadOptimizerState(string name)
 	for (int i = 0; optbuf[i]; ++i) { if (optbuf[i] == '\n' || optbuf[i] == '\r') { optbuf[i] = 0; break; } }
 	std::string opt = optbuf;
 	for (auto &c : opt) c = (char)tolower(c);
-	m_eval_gstate.m_optimizer = (opt == "lahc") ? EvalGlobalState::OPT_LAHC : EvalGlobalState::OPT_DLAS;
+	if (opt == "lahc") {
+		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LAHC;
+	} else if (opt == "dlas") {
+		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_DLAS;
+	} else if (opt == "legacy") {
+		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LEGACY;
+	} else {
+		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LAHC; // fallback
+	}
 
 	// Load evaluation counters as unsigned long long
 	unsigned long long evals = 0ULL;
@@ -844,7 +861,15 @@ bool RastaConverter::ProcessInit()
 
 	m_eval_gstate.m_thread_count = cfg.threads;
 	// Propagate optimizer selection (default LAHC)
-	m_eval_gstate.m_optimizer = (cfg.optimizer == Configuration::E_OPT_LAHC) ? EvalGlobalState::OPT_LAHC : EvalGlobalState::OPT_DLAS;
+	if (cfg.optimizer == Configuration::E_OPT_LAHC) {
+		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LAHC;
+	} else if (cfg.optimizer == Configuration::E_OPT_DLAS) {
+		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_DLAS;
+	} else if (cfg.optimizer == Configuration::E_OPT_LEGACY) {
+		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LEGACY;
+	} else {
+		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LAHC; // fallback
+	}
 	// Configure aggressive search trigger
 	m_eval_gstate.m_unstuck_after = cfg.unstuck_after;
 	m_eval_gstate.m_unstuck_drift_norm = cfg.unstuck_drift_norm;

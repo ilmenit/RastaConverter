@@ -144,8 +144,8 @@ void Configuration::Process(int argc, char *argv[])
 		"General options");
 
 	// Optimizer selection
-	parser.addOption("optimizer", {"opt"}, "lahc|dlas", "lahc",
-		"Select optimization algorithm: lahc (late acceptance, default) or dlas (delayed acceptance).",
+	parser.addOption("optimizer", {"opt"}, "lahc|dlas|legacy", "lahc",
+		"Select optimization algorithm: lahc (late acceptance, default), dlas (delayed acceptance), or legacy (legacy LAHC behavior).",
 		"General options");
 
 	// Aggressive search threshold (0 = never escalate)
@@ -328,6 +328,7 @@ void Configuration::Process(int argc, char *argv[])
 		for (auto &c : opt) c = (char)tolower(c);
 		if (opt == "lahc") optimizer = E_OPT_LAHC;
 		else if (opt == "dlas") optimizer = E_OPT_DLAS;
+		else if (opt == "legacy") optimizer = E_OPT_LEGACY;
 		else {
 			warning_messages.push_back("Unknown optimizer='" + opt + "', using 'lahc'.");
 			optimizer = E_OPT_LAHC;
@@ -344,7 +345,7 @@ void Configuration::Process(int argc, char *argv[])
 
 	// Parse normalized drift per evaluation when stuck
 	{
-		std::string ud = parser.getValue("unstuck_drift_norm", "0");
+		std::string ud = parser.getValue("unstuck_drift", "0.00001");
 		std::string ud2 = parser.getValue("ud", "");
 		if (!ud2.empty()) ud = ud2;
 		unstuck_drift_norm = String2Value<double>(ud);
