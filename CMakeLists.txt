@@ -24,6 +24,7 @@ option(ENABLE_MSVC_FAST_MATH "Use /fp:fast on MSVC/clang-cl in Release/RelWithDe
 option(ENABLE_AVX2 "Enable AVX2 in Release/RelWithDebInfo" OFF)
 option(ENABLE_UNITY_BUILD "Enable unity build for faster compiles" OFF)
 option(COPY_ALL_RUNTIME_DLLS "Copy all dependent runtime DLLs on Windows" OFF)
+option(BUILD_STATIC "Build with static linking for easier distribution" OFF)
 
 if(NO_GUI)
     set(BUILD_NO_GUI ON)
@@ -299,6 +300,32 @@ if(NOT BUILD_NO_GUI)
             endif()
         endif()
     endif()
+endif()
+
+# Static linking configuration
+if(BUILD_STATIC)
+    # Force static linking for all libraries
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .a .lib)
+    set(BUILD_SHARED_LIBS OFF)
+    
+    # Add static linking flags
+    if(WIN32)
+        # Windows static linking
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /NODEFAULTLIB:msvcrt")
+        target_compile_definitions(RastaConverter PRIVATE FREEIMAGE_LIB)
+        if(BUILD_NO_GUI)
+            target_compile_definitions(RastaConverter-NO_GUI PRIVATE FREEIMAGE_LIB)
+        endif()
+    else()
+        # Linux/macOS static linking
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
+        # Note: Full static linking on Linux requires static versions of all dependencies
+        message(STATUS "Static linking enabled - ensure static versions of FreeImage and SDL2 are available")
+    endif()
+    
+    message(STATUS "Static linking enabled")
+else()
+    message(STATUS "Dynamic linking (default)")
 endif()
 
 # Windows-specific compile definitions

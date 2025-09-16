@@ -17,6 +17,7 @@ build/
 [Oo]bj/
 [Oo]ut/
 pgo/
+dist/
 
 # MSTest test Results
 [Tt]est[Rr]esult*/

@@ -25,14 +25,23 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-where llvm-profdata >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [error] llvm-profdata not found in PATH.
-    echo [hint] Open an Intel oneAPI Developer Command Prompt, or run oneAPI setvars.bat, then re-run this script.
-    echo [hint] Example: ^"C:\Program Files ^(x86^)\Intel\oneAPI\setvars.bat^" intel64
-    exit /b 1
+REM Try Intel's llvm-profdata first, then fall back to system one
+set LLVM_PROFDATA=
+if exist "C:\Program Files (x86)\Intel\oneAPI\compiler\2025.2\bin\compiler\llvm-profdata.exe" (
+    set LLVM_PROFDATA="C:\Program Files (x86)\Intel\oneAPI\compiler\2025.2\bin\compiler\llvm-profdata.exe"
+) else if exist "C:\Program Files\Intel\oneAPI\compiler\2025.2\bin\compiler\llvm-profdata.exe" (
+    set LLVM_PROFDATA="C:\Program Files\Intel\oneAPI\compiler\2025.2\bin\compiler\llvm-profdata.exe"
+) else (
+    where llvm-profdata >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [error] llvm-profdata not found in PATH.
+        echo [hint] Open an Intel oneAPI Developer Command Prompt, or run oneAPI setvars.bat, then re-run this script.
+        echo [hint] Example: ^"C:\Program Files ^(x86^)\Intel\oneAPI\setvars.bat^" intel64
+        exit /b 1
+    )
+    set LLVM_PROFDATA=llvm-profdata
 )
-for /f "usebackq tokens=*" %%v in (`llvm-profdata --version 2^>^&1`) do set LLVMPROFDATA_VERSION=%%v
+for /f "usebackq tokens=*" %%v in (`%LLVM_PROFDATA% --version 2^>^&1`) do set LLVMPROFDATA_VERSION=%%v
 echo [info] llvm-profdata: %LLVMPROFDATA_VERSION%
 
 set PRESET_GEN=ninja-pgo-icx-gen
@@ -92,38 +101,38 @@ echo [step] Run training scenarios (writing .profraw into %PROFDIR%)
 pushd "%RUNDIR%" >nul
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-01-base.profraw"
-echo [run] 01 base: %RUNEXE% %TESTIMG% /max_evals=1000000
-"%RUNEXE%" "%TESTIMG%" /max_evals=1000000
+echo [run] 01 base: %RUNEXE% %TESTIMG% /max_evals=100000
+"%RUNEXE%" "%TESTIMG%" /max_evals=100000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-02-t4.profraw"
-echo [run] 02 t4: %RUNEXE% %TESTIMG% /threads=4 /max_evals=1000000
-"%RUNEXE%" "%TESTIMG%" /threads=4 /max_evals=1000000
+echo [run] 02 t4: %RUNEXE% %TESTIMG% /threads=4 /max_evals=100000
+"%RUNEXE%" "%TESTIMG%" /threads=4 /max_evals=100000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-03-t8.profraw"
-echo [run] 03 t8: %RUNEXE% %TESTIMG% /threads=8 /max_evals=1000000
-"%RUNEXE%" "%TESTIMG%" /threads=8 /max_evals=1000000
+echo [run] 03 t8: %RUNEXE% %TESTIMG% /threads=8 /max_evals=100000
+"%RUNEXE%" "%TESTIMG%" /threads=8 /max_evals=100000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-04-dual.profraw"
-echo [run] 04 dual: %RUNEXE% %TESTIMG% /dual /max_evals=1000000
-"%RUNEXE%" "%TESTIMG%" /dual /max_evals=1000000
+echo [run] 04 dual: %RUNEXE% %TESTIMG% /dual /max_evals=100000
+"%RUNEXE%" "%TESTIMG%" /dual /max_evals=100000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-05-dual-t4.profraw"
-echo [run] 05 dual t4: %RUNEXE% %TESTIMG% /dual /threads=4 /max_evals=1000000
-"%RUNEXE%" "%TESTIMG%" /dual /threads=4 /max_evals=1000000
+echo [run] 05 dual t4: %RUNEXE% %TESTIMG% /dual /threads=4 /max_evals=100000
+"%RUNEXE%" "%TESTIMG%" /dual /threads=4 /max_evals=100000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-06-dual-t8.profraw"
-echo [run] 06 dual t8: %RUNEXE% %TESTIMG% /dual /threads=8 /max_evals=1000000
-"%RUNEXE%" "%TESTIMG%" /dual /threads=8 /max_evals=1000000
+echo [run] 06 dual t8: %RUNEXE% %TESTIMG% /dual /threads=8 /max_evals=100000
+"%RUNEXE%" "%TESTIMG%" /dual /threads=8 /max_evals=100000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
@@ -140,7 +149,7 @@ if "!FILELIST!"=="" (
 
 echo [step] Merge profiles into merged.profdata
 echo   Input: %PROFDIR%\*.profraw
-llvm-profdata merge -output="%PROFDIR%\merged.profdata" !FILELIST!
+%LLVM_PROFDATA% merge -output="%PROFDIR%\merged.profdata" !FILELIST!
 if %errorlevel% neq 0 (
     echo [error] llvm-profdata merge failed.
     exit /b 1
