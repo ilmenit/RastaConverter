@@ -14,6 +14,8 @@
     { "name": "ninja-release-legacy", "displayName": "Ninja Release (Legacy ISA, precise math)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/ninja-release-legacy", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ENABLE_AVX2": "OFF", "ENABLE_MSVC_FAST_MATH": "OFF", "ENABLE_FAST_MATH": "OFF" } },
     { "name": "ninja-pgo-icx-gen", "displayName": "Ninja PGO (Intel icx) - Generate", "generator": "Ninja", "binaryDir": "${sourceDir}/build/ninja-pgo-icx-gen", "cacheVariables": { "CMAKE_C_COMPILER": "icx", "CMAKE_CXX_COMPILER": "icx", "CMAKE_BUILD_TYPE": "Release", "CMAKE_C_FLAGS_RELEASE": "-fprofile-instr-generate", "CMAKE_CXX_FLAGS_RELEASE": "-fprofile-instr-generate" } },
     { "name": "ninja-pgo-icx-use", "displayName": "Ninja PGO (Intel icx) - Use", "generator": "Ninja", "binaryDir": "${sourceDir}/build/ninja-pgo-icx-use", "cacheVariables": { "CMAKE_C_COMPILER": "icx", "CMAKE_CXX_COMPILER": "icx", "CMAKE_BUILD_TYPE": "Release", "CMAKE_C_FLAGS_RELEASE": "-fprofile-instr-use=${sourceDir}/pgo/icx/merged.profdata", "CMAKE_CXX_FLAGS_RELEASE": "-fprofile-instr-use=${sourceDir}/pgo/icx/merged.profdata" } },
+    { "name": "x64-pgo-icx-gen", "displayName": "Windows x64 PGO (Intel icx) - Generate", "generator": "Visual Studio 17 2022", "architecture": "x64", "binaryDir": "${sourceDir}/build/x64-pgo-icx-gen", "cacheVariables": { "CMAKE_C_COMPILER": "icx", "CMAKE_CXX_COMPILER": "icx", "CMAKE_BUILD_TYPE": "Release", "CMAKE_C_FLAGS_RELEASE": "-fprofile-instr-generate", "CMAKE_CXX_FLAGS_RELEASE": "-fprofile-instr-generate" } },
+    { "name": "x64-pgo-icx-use", "displayName": "Windows x64 PGO (Intel icx) - Use", "generator": "Visual Studio 17 2022", "architecture": "x64", "binaryDir": "${sourceDir}/build/x64-pgo-icx-use", "cacheVariables": { "CMAKE_C_COMPILER": "icx", "CMAKE_CXX_COMPILER": "icx", "CMAKE_BUILD_TYPE": "Release", "CMAKE_C_FLAGS_RELEASE": "-fprofile-instr-use=${sourceDir}/pgo/icx/merged.profdata", "CMAKE_CXX_FLAGS_RELEASE": "-fprofile-instr-use=${sourceDir}/pgo/icx/merged.profdata" } },
 
     { "name": "linux-gcc", "displayName": "Linux GCC (Ninja)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/linux-gcc", "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++", "ENABLE_FAST_MATH": "ON", "ENABLE_AVX2": "ON" } },
     { "name": "linux-clang", "displayName": "Linux Clang (Ninja)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/linux-clang", "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++", "ENABLE_FAST_MATH": "ON", "ENABLE_AVX2": "ON" } },
@@ -45,6 +47,8 @@
     { "name": "ninja-release", "configurePreset": "ninja-release", "configuration": "Release" },
     { "name": "ninja-pgo-icx-gen", "configurePreset": "ninja-pgo-icx-gen", "configuration": "Release" },
     { "name": "ninja-pgo-icx-use", "configurePreset": "ninja-pgo-icx-use", "configuration": "Release" },
+    { "name": "x64-pgo-icx-gen", "configurePreset": "x64-pgo-icx-gen", "configuration": "Release" },
+    { "name": "x64-pgo-icx-use", "configurePreset": "x64-pgo-icx-use", "configuration": "Release" },
 
     { "name": "linux-gcc-debug", "configurePreset": "linux-gcc", "configuration": "Debug" },
     { "name": "linux-gcc-release", "configurePreset": "linux-gcc", "configuration": "Release" },

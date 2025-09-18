@@ -10,6 +10,10 @@ Requirements
   - Windows: Visual Studio 2022 (MSVC) or Ninja + cl/clang-cl
   - macOS: Apple Clang (Xcode tools) and optionally Ninja
   - Linux: GCC or Clang and optionally Ninja/Make
+- Optional: Ninja build system (for faster builds and PGO automation)
+  - Windows: Download from https://github.com/ninja-build/ninja/releases
+  - macOS: `brew install ninja`
+  - Linux: `sudo apt install ninja-build` (Ubuntu) or `sudo dnf install ninja-build` (Fedora)
 
 Dependencies
 ------------
@@ -328,7 +332,11 @@ Use the provided automation to run the entire flow:
 build-pgo.bat                 # uses test.jpg from repo root by default
 build-pgo.bat examples\test.jpg  # or specify a custom input image
 ```
-It will build instrumented, run multiple scenarios (writing distinct .profraw files), merge to `pgo\icx\merged.profdata`, then build the optimized binary.
+The script automatically detects if Ninja is available in PATH:
+- If Ninja is found: uses `ninja-pgo-icx-gen` and `ninja-pgo-icx-use` presets
+- If Ninja is not found: falls back to `x64-pgo-icx-gen` and `x64-pgo-icx-use` presets (Visual Studio)
+
+It will build instrumented, run multiple scenarios (500K-4M evaluations scaled by thread count, writing distinct .profraw files), merge to `pgo\icx\merged.profdata`, then build the optimized binary.
 
 Ad‑hoc flags (no presets)
 ```

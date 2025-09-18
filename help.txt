@@ -33,6 +33,9 @@ Command line options (accept '/', '-' or '--' prefixes; aliases included under e
 
 General options:
 
+/v, --version
+  Show version information and exit.
+
 /o=Output File
   Output file names. The default names are 'output.*' and 'out_dual.*' in dual mode.
   Using a different name you have to change the file names used in the Generator.

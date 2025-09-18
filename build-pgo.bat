@@ -13,7 +13,7 @@ echo === RastaConverter PGO (Intel icx, LLVM) ===
 echo.
 echo This script will:
 echo   1) Configure and build an instrumented binary (icx -fprofile-generate)
-echo   2) Run multiple training scenarios to produce .profraw files
+echo   2) Run multiple training scenarios (500K-4M evaluations scaled by thread count) to produce .profraw files
 echo   3) Merge profiles to merged.profdata using llvm-profdata
 echo   4) Configure and build an optimized binary (icx -fprofile-use)
 echo.
@@ -44,8 +44,22 @@ if exist "C:\Program Files (x86)\Intel\oneAPI\compiler\2025.2\bin\compiler\llvm-
 for /f "usebackq tokens=*" %%v in (`%LLVM_PROFDATA% --version 2^>^&1`) do set LLVMPROFDATA_VERSION=%%v
 echo [info] llvm-profdata: %LLVMPROFDATA_VERSION%
 
-set PRESET_GEN=ninja-pgo-icx-gen
-set PRESET_USE=ninja-pgo-icx-use
+REM Check if Ninja is available, otherwise use Visual Studio
+where ninja >nul 2>&1
+if %errorlevel% equ 0 (
+    set PRESET_GEN=ninja-pgo-icx-gen
+    set PRESET_USE=ninja-pgo-icx-use
+    echo [info] Using Ninja generator (ninja found in PATH)
+) else (
+    set PRESET_GEN=x64-pgo-icx-gen
+    set PRESET_USE=x64-pgo-icx-use
+    echo [info] Using Visual Studio generator (ninja not found in PATH)
+)
+
+echo [info] PGO Profile Generation Preset: %PRESET_GEN%
+echo [info] PGO Profile Usage Preset: %PRESET_USE%
+echo [info] Profile Directory: %PROFDIR%
+echo [info] Test Image: %TESTIMG%
 set PROFDIR=%CD%\pgo\icx
 set RUNDIR_PREFERRED=%CD%\build\%PRESET_GEN%\Release
 set RUNDIR_FALLBACK=%CD%\build\%PRESET_GEN%
@@ -63,6 +77,8 @@ if %errorlevel% neq 0 (
 )
 
 echo [step] Build (instrumented)
+echo [info] Compiler and build configuration:
+cmake -LA -N build\%PRESET_GEN% 2>nul | findstr /i "CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_BUILD_TYPE CMAKE_C_FLAGS CMAKE_CXX_FLAGS"
 cmake --build --preset %PRESET_GEN%
 if %errorlevel% neq 0 (
     echo [error] Build [gen] failed.
@@ -98,41 +114,48 @@ if not exist "%RUNDIR%\%TESTIMG%" (
 )
 
 echo [step] Run training scenarios (writing .profraw into %PROFDIR%)
+echo [info] Training scenarios:
+echo [info]   01 base: 500K evaluations (1 thread)
+echo [info]   02 t4:   2M evaluations (4 threads)
+echo [info]   03 t8:   4M evaluations (8 threads)
+echo [info]   04 dual: 500K evaluations (1 thread, dual mode)
+echo [info]   05 dual t4: 2M evaluations (4 threads, dual mode)
+echo [info]   06 dual t8: 4M evaluations (8 threads, dual mode)
 pushd "%RUNDIR%" >nul
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-01-base.profraw"
-echo [run] 01 base: %RUNEXE% %TESTIMG% /max_evals=100000
-"%RUNEXE%" "%TESTIMG%" /max_evals=100000
+echo [run] 01 base: %RUNEXE% %TESTIMG% /max_evals=500000
+"%RUNEXE%" "%TESTIMG%" /max_evals=500000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-02-t4.profraw"
-echo [run] 02 t4: %RUNEXE% %TESTIMG% /threads=4 /max_evals=100000
-"%RUNEXE%" "%TESTIMG%" /threads=4 /max_evals=100000
+echo [run] 02 t4: %RUNEXE% %TESTIMG% /threads=4 /max_evals=2000000
+"%RUNEXE%" "%TESTIMG%" /threads=4 /max_evals=2000000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-03-t8.profraw"
-echo [run] 03 t8: %RUNEXE% %TESTIMG% /threads=8 /max_evals=100000
-"%RUNEXE%" "%TESTIMG%" /threads=8 /max_evals=100000
+echo [run] 03 t8: %RUNEXE% %TESTIMG% /threads=8 /max_evals=4000000
+"%RUNEXE%" "%TESTIMG%" /threads=8 /max_evals=4000000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-04-dual.profraw"
-echo [run] 04 dual: %RUNEXE% %TESTIMG% /dual /max_evals=100000
-"%RUNEXE%" "%TESTIMG%" /dual /max_evals=100000
+echo [run] 04 dual: %RUNEXE% %TESTIMG% /dual /max_evals=500000
+"%RUNEXE%" "%TESTIMG%" /dual /max_evals=500000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-05-dual-t4.profraw"
-echo [run] 05 dual t4: %RUNEXE% %TESTIMG% /dual /threads=4 /max_evals=100000
-"%RUNEXE%" "%TESTIMG%" /dual /threads=4 /max_evals=100000
+echo [run] 05 dual t4: %RUNEXE% %TESTIMG% /dual /threads=4 /max_evals=2000000
+"%RUNEXE%" "%TESTIMG%" /dual /threads=4 /max_evals=2000000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 
 set "LLVM_PROFILE_FILE=%PROFDIR%\rasta-06-dual-t8.profraw"
-echo [run] 06 dual t8: %RUNEXE% %TESTIMG% /dual /threads=8 /max_evals=100000
-"%RUNEXE%" "%TESTIMG%" /dual /threads=8 /max_evals=100000
+echo [run] 06 dual t8: %RUNEXE% %TESTIMG% /dual /threads=8 /max_evals=4000000
+"%RUNEXE%" "%TESTIMG%" /dual /threads=8 /max_evals=4000000
 if %errorlevel% neq 0 goto run_fail
 if not exist "%LLVM_PROFILE_FILE%" ( echo [error] Expected profile not written: %LLVM_PROFILE_FILE% & goto run_fail )
 

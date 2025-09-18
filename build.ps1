@@ -62,6 +62,14 @@ if ($Clean) {
 }
 
 Write-Host "[info] Configuring (preset=$Preset, config=$Config, nogui=$($NoGui.IsPresent)$(if($Compiler){", compiler=$Compiler"})) ..."
+if ($Compiler) {
+    Write-Host "[info] Compiler: $Compiler"
+} else {
+    Write-Host "[info] Compiler: auto-detected from preset"
+}
+if ($Extra) {
+    Write-Host "[info] Extra CMake args: $($Extra -join ' ')"
+}
 & cmake -S . @cfgArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[error] Configuration failed." -ForegroundColor Red
@@ -79,8 +87,15 @@ if ($LASTEXITCODE -ne 0) {
 
 if ($CleanOnly) {
 	Write-Host "[info] CLEANONLY requested, exiting after configure."
+	Write-Host "[info] Detected compiler information:"
+	$compilerInfo = & cmake -LA -N $binaryDir 2>$null | Select-String -Pattern "CMAKE_C_COMPILER|CMAKE_CXX_COMPILER|CMAKE_BUILD_TYPE|ENABLE_" | Select-Object -First 10
+	if ($compilerInfo) { $compilerInfo | ForEach-Object { Write-Host "[info] $_" } }
 	exit 0
 }
+
+Write-Host "[info] Detected compiler information:"
+$compilerInfo = & cmake -LA -N $binaryDir 2>$null | Select-String -Pattern "CMAKE_C_COMPILER|CMAKE_CXX_COMPILER|CMAKE_BUILD_TYPE|ENABLE_" | Select-Object -First 10
+if ($compilerInfo) { $compilerInfo | ForEach-Object { Write-Host "[info] $_" } }
 
 Write-Host "[info] Building ..."
 & cmake --build $binaryDir --config $Config

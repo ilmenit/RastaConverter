@@ -16,7 +16,7 @@ echo "=== RastaConverter PGO (Linux) ==="
 echo
 echo "This script will:"
 echo "  1) Configure and build an instrumented binary (with -fprofile-generate or -fprofile-instr-generate)"
-echo "  2) Run multiple training scenarios to produce profile data"
+echo "  2) Run multiple training scenarios (500K-4M evaluations scaled by thread count) to produce profile data"
 echo "  3) Merge profiles (LLVM) or use directly (GCC)"
 echo "  4) Configure and build an optimized binary (with -fprofile-use or -fprofile-instr-use)"
 echo
@@ -126,6 +126,9 @@ RUNDIR_FALLBACK="$PWD/build/$PRESET_GEN"
 
 echo "[info] Using compiler: $COMPILER ($PROFILE_TYPE profile type)"
 echo "[info] Test image: $TESTIMG"
+echo "[info] PGO Profile Generation Preset: $PRESET_GEN"
+echo "[info] PGO Profile Usage Preset: $PRESET_USE"
+echo "[info] Profile Directory: $PROFDIR"
 
 # Check tools
 if ! command -v cmake >/dev/null 2>&1; then
@@ -167,6 +170,8 @@ if ! cmake --preset "$PRESET_GEN"; then
 fi
 
 echo "[step] Build (instrumented)"
+echo "[info] Compiler and build configuration:"
+cmake -LA -N "build/$PRESET_GEN" 2>/dev/null | grep -i "CMAKE_C_COMPILER\|CMAKE_CXX_COMPILER\|CMAKE_BUILD_TYPE\|CMAKE_C_FLAGS\|CMAKE_CXX_FLAGS" | head -10
 if ! cmake --build --preset "$PRESET_GEN"; then
     echo "[error] Build [gen] failed." >&2
     exit 1
@@ -199,6 +204,13 @@ if [[ ! -f "$RUNDIR/$TESTIMG" ]]; then
 fi
 
 echo "[step] Run training scenarios (writing profile data into $PROFDIR)"
+echo "[info] Training scenarios:"
+echo "[info]   01 base: 500K evaluations (1 thread)"
+echo "[info]   02 t4:   2M evaluations (4 threads)"
+echo "[info]   03 t8:   4M evaluations (8 threads)"
+echo "[info]   04 dual: 500K evaluations (1 thread, dual mode)"
+echo "[info]   05 dual t4: 2M evaluations (4 threads, dual mode)"
+echo "[info]   06 dual t8: 4M evaluations (8 threads, dual mode)"
 cd "$RUNDIR"
 
 # Function to run a training scenario
@@ -230,20 +242,20 @@ run_scenario() {
 # Run training scenarios
 if [[ "$PROFILE_TYPE" == "llvm" ]]; then
     # LLVM PGO scenarios
-    run_scenario "01 base" "$PROFDIR/rasta-01-base.profraw" "./$RUNEXE $TESTIMG /max_evals=100000" || exit 1
-    run_scenario "02 t4" "$PROFDIR/rasta-02-t4.profraw" "./$RUNEXE $TESTIMG /threads=4 /max_evals=100000" || exit 1
-    run_scenario "03 t8" "$PROFDIR/rasta-03-t8.profraw" "./$RUNEXE $TESTIMG /threads=8 /max_evals=100000" || exit 1
-    run_scenario "04 dual" "$PROFDIR/rasta-04-dual.profraw" "./$RUNEXE $TESTIMG /dual /max_evals=100000" || exit 1
-    run_scenario "05 dual t4" "$PROFDIR/rasta-05-dual-t4.profraw" "./$RUNEXE $TESTIMG /dual /threads=4 /max_evals=100000" || exit 1
-    run_scenario "06 dual t8" "$PROFDIR/rasta-06-dual-t8.profraw" "./$RUNEXE $TESTIMG /dual /threads=8 /max_evals=100000" || exit 1
+    run_scenario "01 base" "$PROFDIR/rasta-01-base.profraw" "./$RUNEXE $TESTIMG /max_evals=500000" || exit 1
+    run_scenario "02 t4" "$PROFDIR/rasta-02-t4.profraw" "./$RUNEXE $TESTIMG /threads=4 /max_evals=2000000" || exit 1
+    run_scenario "03 t8" "$PROFDIR/rasta-03-t8.profraw" "./$RUNEXE $TESTIMG /threads=8 /max_evals=4000000" || exit 1
+    run_scenario "04 dual" "$PROFDIR/rasta-04-dual.profraw" "./$RUNEXE $TESTIMG /dual /max_evals=500000" || exit 1
+    run_scenario "05 dual t4" "$PROFDIR/rasta-05-dual-t4.profraw" "./$RUNEXE $TESTIMG /dual /threads=4 /max_evals=2000000" || exit 1
+    run_scenario "06 dual t8" "$PROFDIR/rasta-06-dual-t8.profraw" "./$RUNEXE $TESTIMG /dual /threads=8 /max_evals=4000000" || exit 1
 else
     # GCC PGO scenarios (profile data goes to current directory)
-    run_scenario "01 base" "" "./$RUNEXE $TESTIMG /max_evals=100000" || exit 1
-    run_scenario "02 t4" "" "./$RUNEXE $TESTIMG /threads=4 /max_evals=100000" || exit 1
-    run_scenario "03 t8" "" "./$RUNEXE $TESTIMG /threads=8 /max_evals=100000" || exit 1
-    run_scenario "04 dual" "" "./$RUNEXE $TESTIMG /dual /max_evals=100000" || exit 1
-    run_scenario "05 dual t4" "" "./$RUNEXE $TESTIMG /dual /threads=4 /max_evals=100000" || exit 1
-    run_scenario "06 dual t8" "" "./$RUNEXE $TESTIMG /dual /threads=8 /max_evals=100000" || exit 1
+    run_scenario "01 base" "" "./$RUNEXE $TESTIMG /max_evals=500000" || exit 1
+    run_scenario "02 t4" "" "./$RUNEXE $TESTIMG /threads=4 /max_evals=2000000" || exit 1
+    run_scenario "03 t8" "" "./$RUNEXE $TESTIMG /threads=8 /max_evals=4000000" || exit 1
+    run_scenario "04 dual" "" "./$RUNEXE $TESTIMG /dual /max_evals=500000" || exit 1
+    run_scenario "05 dual t4" "" "./$RUNEXE $TESTIMG /dual /threads=4 /max_evals=2000000" || exit 1
+    run_scenario "06 dual t8" "" "./$RUNEXE $TESTIMG /dual /threads=8 /max_evals=4000000" || exit 1
 fi
 
 cd "$REPO_ROOT"

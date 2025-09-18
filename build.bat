@@ -106,6 +106,18 @@ if %BUILD_NO_GUI% EQU 1 (
     echo [info] Building GUI
 )
 
+REM Show compiler information
+if defined COMPILER (
+    echo [info] Compiler: %COMPILER%
+) else (
+    echo [info] Compiler: auto-detected from preset
+)
+
+REM Show extra CMake arguments
+if not "%EXTRA_CMAKE_ARGS%"=="" (
+    echo [info] Extra CMake args: %EXTRA_CMAKE_ARGS%
+)
+
 REM Configure
 set CFG_ARGS=--preset %PRESET%
 if %BUILD_NO_GUI% EQU 1 set CFG_ARGS=%CFG_ARGS% -DBUILD_NO_GUI=ON
@@ -136,7 +148,16 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-if %CLEANONLY% EQU 1 goto end
+if %CLEANONLY% EQU 1 (
+    echo [info] CLEANONLY requested, exiting after configure.
+    echo [info] Detected compiler information:
+    cmake -LA -N build\%PRESET% 2>nul | findstr /i "CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_BUILD_TYPE ENABLE_"
+    goto end
+)
+
+REM Show actual compiler being used (after configuration)
+echo [info] Detected compiler information:
+cmake -LA -N build\%PRESET% 2>nul | findstr /i "CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_BUILD_TYPE ENABLE_"
 
 echo [info] Building project...
 cmake --build --preset %PRESET% --config %CONFIG%

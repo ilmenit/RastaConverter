@@ -90,6 +90,14 @@ if [[ $clean -eq 1 && -d "$binary_dir" ]]; then
 fi
 
 echo "[info] Configuring (preset=$preset, config=$config, nogui=$build_no_gui${compiler:+, compiler=$compiler}) ..."
+if [[ -n "$compiler" ]]; then
+    echo "[info] Compiler: $compiler"
+else
+    echo "[info] Compiler: auto-detected from preset"
+fi
+if [[ ${#extra[@]} -gt 0 ]]; then
+    echo "[info] Extra CMake args: ${extra[*]}"
+fi
 set +e
 cmake -S . "${cfg[@]}"
 status=$?
@@ -111,8 +119,13 @@ fi
 
 if [[ $cleanonly -eq 1 ]]; then
   echo "[info] CLEANONLY requested, exiting after configure."
+  echo "[info] Detected compiler information:"
+  cmake -LA -N "$binary_dir" 2>/dev/null | grep -i "CMAKE_C_COMPILER\|CMAKE_CXX_COMPILER\|CMAKE_BUILD_TYPE\|ENABLE_" | head -10
   exit 0
 fi
+
+echo "[info] Detected compiler information:"
+cmake -LA -N "$binary_dir" 2>/dev/null | grep -i "CMAKE_C_COMPILER\|CMAKE_CXX_COMPILER\|CMAKE_BUILD_TYPE\|ENABLE_" | head -10
 
 echo "[info] Building ..."
 cores=1

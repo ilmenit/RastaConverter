@@ -69,6 +69,7 @@ struct Configuration {
 	bool quiet;
 	// CLI handling flags
 	bool show_help = false;
+	bool show_version = false;
 	bool bad_arguments = false;
 	std::vector<std::string> error_messages; // fatal issues to show user
 	std::vector<std::string> warning_messages; // non-fatal issues

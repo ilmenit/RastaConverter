@@ -3,6 +3,7 @@
 #include "config.h"
 #include "string_conv.h"
 #include "prng_xoroshiro.h"
+#include "version.h"
 
 using namespace std;
 
@@ -55,6 +56,9 @@ void Configuration::Process(int argc, char *argv[])
 	// Groups: Input, General options, Image processing, Dual-frame mode
 	parser.addFlag("help", {"?"},
 		"Show this help and exit.",
+		"General options");
+	parser.addFlag("version", {"v"},
+		"Show version information and exit.",
 		"General options");
 	parser.addFlag("continue", {},
 		"Resume previously stopped process (uses existing output*.* files).",
@@ -193,6 +197,11 @@ void Configuration::Process(int argc, char *argv[])
 	// unified help switches (do not treat "-h" as help to avoid conflict with height)
 	if (parser.switchExists("help") || parser.switchExists("?")) {
 		show_help = true;
+	}
+	
+	// version flag
+	if (parser.switchExists("version") || parser.switchExists("v")) {
+		show_version = true;
 	}
 
 	// If there are any fatal CLI issues, stop early so user sees errors and help immediately
