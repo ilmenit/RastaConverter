@@ -229,6 +229,13 @@ private:
 	int m_mutation_attempt_count[E_MUTATION_MAX];
 	int SelectMutation(); 
 
+	// Cached selection weights to reduce per-call FP work
+	double m_cached_weights[E_MUTATION_MAX] = {0};
+	double m_cached_total_weight = 0.0;
+	unsigned long long m_weights_valid_until_eval = 0ULL; // recompute after TTL or when stuck changes
+	static constexpr unsigned long long k_weights_ttl_evals = 128ULL;
+	bool m_last_dual_ok = false; // track dual availability changes for weight cache
+
 
 	void CaptureRegisterState(register_state& rs) const;
 	void ApplyRegisterState(const register_state& rs);
@@ -312,8 +319,16 @@ private:
 	float m_dual_lambda_luma = 1.0f;
 	float m_dual_lambda_chroma = 0.25f;
 
+	// Precomputed scale to convert normalized drift to raw distance units
+	double m_drift_scale = 0.0;
+
 	// Pointer to the other frame rows for dual-aware mutation (lifetime: around MutateRasterProgram call)
 	const std::vector<const unsigned char*>* m_dual_mutation_other_rows = nullptr;
+
+	// Cached stuck flag with TTL to avoid recomputing on every call outside acceptance
+	bool m_cached_stuck = false;
+	unsigned long long m_stuck_valid_until_eval = 0ULL; // recompute after TTL
+	static constexpr unsigned long long k_stuck_ttl_evals = 1024ULL;
 };
 
 #endif

@@ -122,18 +122,16 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
 
 	// Apply normalized drift to acceptance thresholds if stuck beyond /unstuck_after
 	// This emulates slowly raising the baseline to allow accepting slightly worse solutions.
-	double drift = 0.0;
-	if (m_gstate->m_unstuck_drift_norm > 0.0 && m_gstate->m_unstuck_after > 0) {
+    double drift = 0.0;
+    if (m_gstate->m_unstuck_drift_norm > 0.0 && m_gstate->m_unstuck_after > 0) {
 		if (m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
 			unsigned long long plateau = m_gstate->m_evaluations - m_gstate->m_last_best_evaluation;
 			if (plateau >= m_gstate->m_unstuck_after) {
 				// Accumulate normalized drift per evaluation since threshold
 				unsigned long long evals_since_threshold = plateau - m_gstate->m_unstuck_after + 1ULL;
-				double norm_drift_total = m_gstate->m_unstuck_drift_norm * (double)evals_since_threshold;
-				// Convert normalized drift to raw distance scale using current width/height and MAX_COLOR_DISTANCE
-				// NormalizeScore(raw) = raw / (w*h*(MAX_COLOR_DISTANCE/10000)). So raw = norm * w*h*(MAX_COLOR_DISTANCE/10000).
-				double scale = (double)m_width * (double)m_height * (MAX_COLOR_DISTANCE/10000.0);
-				drift = norm_drift_total * scale;
+                double norm_drift_total = m_gstate->m_unstuck_drift_norm * (double)evals_since_threshold;
+                // Use precomputed scale to minimize per-iteration work
+                drift = norm_drift_total * m_drift_scale;
 				m_gstate->m_current_norm_drift = norm_drift_total;
 			}
 		}
@@ -149,14 +147,14 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
 		m_gstate->m_N = m_solutions;
 	}
 
-	const size_t l = m_gstate->m_previous_results_index % (size_t)m_solutions;
+    size_t l = m_gstate->m_previous_results_index;
+    if (++m_gstate->m_previous_results_index == (size_t)m_solutions) m_gstate->m_previous_results_index = 0;
 	double prev_cost = m_gstate->m_current_cost;
 
 	if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {
 		bool accept = (result <= m_gstate->m_current_cost + drift) || (result <= m_gstate->m_previous_results[l] + drift);
 		if (accept) m_gstate->m_current_cost = result;
-		m_gstate->m_previous_results[l] = prev_cost;
-		++m_gstate->m_previous_results_index;
+        m_gstate->m_previous_results[l] = prev_cost;
 		out.accepted = accept;
 	} else if (m_gstate->m_optimizer == EvalGlobalState::OPT_LEGACY) {
 		// Legacy LAHC: accept if result < historical value (like original LAHC but stricter)
@@ -167,7 +165,6 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
 			m_gstate->m_current_cost = result;
 			m_gstate->m_previous_results[l] = result; // Store NEW result (legacy behavior)
 		}
-		++m_gstate->m_previous_results_index;
 		out.accepted = accept;
 		out.improved = (result < m_gstate->m_best_result);
 	} else {
@@ -195,7 +192,6 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
 				m_gstate->m_N = std::count(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end(), m_gstate->m_cost_max);
 			}
 		}
-		++m_gstate->m_previous_results_index;
 		out.accepted = (m_gstate->m_current_cost == result);
 	}
 
@@ -525,62 +521,69 @@ void Evaluator::RecachePicture(raster_picture* pic, bool force)
 
 int Evaluator::SelectMutation()
 {
-	// Consider all mutations but gate dual-only one if no dual context
-	const int active_mutations = E_MUTATION_MAX;
+    // Consider all mutations but gate dual-only one if no dual context
+    const int active_mutations = E_MUTATION_MAX;
 
-	double weights[E_MUTATION_MAX];
-	double total_weight = 0.0;
+    // Cache stuck state with TTL to avoid repeated recompute
+    bool stuck = false;
+    if (m_gstate) {
+        if (m_gstate->m_evaluations >= m_stuck_valid_until_eval) {
+            unsigned long long thr = m_gstate->m_unstuck_after;
+            if (thr > 0 && m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
+                m_cached_stuck = (m_gstate->m_evaluations - m_gstate->m_last_best_evaluation) >= thr;
+            } else {
+                m_cached_stuck = false;
+            }
+            m_stuck_valid_until_eval = m_gstate->m_evaluations + k_stuck_ttl_evals;
+        }
+        stuck = m_cached_stuck;
+    }
 
-	// Determine if we are stuck based on /unstuck_after
-	bool stuck = false;
-	if (m_gstate) {
-		unsigned long long thr = m_gstate->m_unstuck_after;
-		if (thr > 0 && m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
-			stuck = (m_gstate->m_evaluations - m_gstate->m_last_best_evaluation) >= thr;
-		}
-	}
+    // Recompute weights rarely when not stuck; recompute immediately when stuck
+    // Detect dual availability for gating
+    bool dual_ok_now = (m_dual_pairYsum || m_dual_pairYsum8) && m_dual_mutation_other_rows != nullptr;
+    bool need_recompute = (m_cached_total_weight <= 0.0) || stuck || (m_gstate && m_gstate->m_evaluations >= m_weights_valid_until_eval) || (dual_ok_now != m_last_dual_ok);
+    if (need_recompute) {
+        m_cached_total_weight = 0.0;
+        for (int i = 0; i < active_mutations; i++) {
+            // Gate dual-only mutation unless dual LUTs and rows are available
+            if (i == E_MUTATION_COMPLEMENT_VALUE_DUAL) {
+                if (!dual_ok_now) { m_cached_weights[i] = 0.0; continue; }
+            }
 
-	for (int i = 0; i < active_mutations; i++) {
-		// Use success rate if we have enough samples, otherwise use default weight
-		double success_rate = (m_mutation_attempt_count[i] > 10) ?
-			(double)m_mutation_success_count[i] / m_mutation_attempt_count[i] : 0.1;
+            double success_rate = (m_mutation_attempt_count[i] > 10) ?
+                (double)m_mutation_success_count[i] / m_mutation_attempt_count[i] : 0.1;
+            double w = 0.1 + 0.9 * success_rate;
+            if (stuck) {
+                if (i == E_MUTATION_ADD_INSTRUCTION ||
+                    i == E_MUTATION_REMOVE_INSTRUCTION ||
+                    i == E_MUTATION_CHANGE_VALUE_TO_COLOR ||
+                    i == E_MUTATION_COMPLEMENT_VALUE_DUAL ||
+                    i == E_MUTATION_SWAP_LINE_WITH_PREV_ONE ||
+                    i == E_MUTATION_COPY_LINE_TO_NEXT_ONE) {
+                    w *= 2.0;
+                }
+            }
+            m_cached_weights[i] = w;
+            m_cached_total_weight += w;
+        }
+        // set TTL only in not-stuck mode to amortize cost and record dual gate state
+        if (m_gstate && !stuck) {
+            m_weights_valid_until_eval = m_gstate->m_evaluations + k_weights_ttl_evals;
+        } else {
+            m_weights_valid_until_eval = m_gstate ? m_gstate->m_evaluations : 0ULL;
+        }
+        m_last_dual_ok = dual_ok_now;
+    }
 
-		// Gate dual-only mutation unless dual LUTs and rows are available
-		if (i == E_MUTATION_COMPLEMENT_VALUE_DUAL) {
-			bool dual_ok = (m_dual_pairYsum || m_dual_pairYsum8) && m_dual_mutation_other_rows != nullptr;
-			if (!dual_ok) { weights[i] = 0.0; continue; }
-		}
-
-		double w = 0.1 + 0.9 * success_rate; // base weight
-
-		// When stuck, slightly favor bigger-impact operations
-		if (stuck) {
-			if (i == E_MUTATION_ADD_INSTRUCTION ||
-				i == E_MUTATION_REMOVE_INSTRUCTION ||
-				i == E_MUTATION_CHANGE_VALUE_TO_COLOR ||
-				i == E_MUTATION_COMPLEMENT_VALUE_DUAL ||
-				i == E_MUTATION_SWAP_LINE_WITH_PREV_ONE ||
-				i == E_MUTATION_COPY_LINE_TO_NEXT_ONE) {
-				w *= 2.0;
-			}
-		}
-
-		weights[i] = w;
-		total_weight += w;
-	}
-
-	// Select based on weights using a fair distribution
-	if (total_weight <= 0.0) return Random(active_mutations);
-	double r = (double)Random(10000) / 10000.0 * total_weight;
-	double sum = 0;
-
-	for (int i = 0; i < active_mutations; i++) {
-		sum += weights[i];
-		if (r <= sum) return i;
-	}
-
-	// Fallback (should rarely happen)
-	return Random(active_mutations);
+    if (m_cached_total_weight <= 0.0) return Random(active_mutations);
+    double r = (double)Random(10000) / 10000.0 * m_cached_total_weight;
+    double sum = 0;
+    for (int i = 0; i < active_mutations; i++) {
+        sum += m_cached_weights[i];
+        if (r <= sum) return i;
+    }
+    return Random(active_mutations);
 }
 
 void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* errmap, const screen_line* picture, const OnOffMap* onoff, EvalGlobalState* gstate, int solutions, unsigned long long randseed, size_t cache_size, int thread_id)
@@ -618,6 +621,10 @@ void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* e
 
 	// Initialize squared difference LUT for optional 8-bit dual distance
 	for (int i=0;i<256;++i) { m_sq_lut[i] = (unsigned short)(i*i); }
+
+	// Precompute drift scale once (NormalizeScore(raw) = raw / (w*h*(MAX_COLOR_DISTANCE/10000)))
+	// So raw = norm * w*h*(MAX_COLOR_DISTANCE/10000).
+	m_drift_scale = (double)m_width * (double)m_height * (MAX_COLOR_DISTANCE/10000.0);
 }
 
 void Evaluator::Start()
@@ -1163,26 +1170,27 @@ void Evaluator::StartSpriteShift(int mem_reg)
 
 void Evaluator::MutateLine(raster_line& prog, raster_picture& pic)
 {
-	// Use legacy approach for better exploration: random number of mutations based on line complexity
-	int r = Random(prog.instructions.size());
-	
-	// Escalate mutation count if stuck beyond threshold (/unstuck_after)
-	if (m_gstate) {
-		unsigned long long thr = m_gstate->m_unstuck_after;
-		if (thr > 0 && m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
-			unsigned long long plateau = m_gstate->m_evaluations - m_gstate->m_last_best_evaluation;
-			if (plateau >= thr) {
-				// When stuck, do more mutations: add extra random mutations
-				int extra_mutations = Random(10) + 5; // 5-14 extra mutations
-				r += extra_mutations;
-			}
-		}
-	}
-	
-	for (int i = 0; i <= r; ++i) {
-		MutateOnce(prog, pic);
-	}
-	prog.rehash();
+    // Small batch normally; escalate only when stuck
+    int mutation_count = std::min(3 + (int)(prog.instructions.size() / 5), 8);
+
+    bool stuck = false;
+    if (m_gstate) {
+        unsigned long long thr = m_gstate->m_unstuck_after;
+        if (thr > 0 && m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
+            unsigned long long plateau = m_gstate->m_evaluations - m_gstate->m_last_best_evaluation;
+            stuck = (plateau >= thr);
+        }
+    }
+
+    if (stuck) {
+        // Escalate mutations when stuck for stronger exploration
+        mutation_count += 5 + Random(10); // +[5..14]
+    }
+
+    for (int i = 0; i < mutation_count; ++i) {
+        MutateOnce(prog, pic);
+    }
+    prog.rehash();
 }
 
 void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
@@ -1558,9 +1566,9 @@ void Evaluator::MutateRasterProgram(raster_picture* pic)
 		}
 	}
 
-	// Batch memory register mutations (more frequent when stuck)
-	int mem_prob = stuck ? 3 : 10;
-	if (Random(mem_prob) == 0) // mutate random init mem reg
+    // Batch memory register mutations: fixed probability 1/10 always
+    int mem_prob = 10;
+    if (Random(mem_prob) == 0) // mutate random init mem reg
 	{
 		int c = 1;
 		if (Random(2))
@@ -1579,9 +1587,9 @@ void Evaluator::MutateRasterProgram(raster_picture* pic)
 	raster_line& current_line = pic->raster_lines[m_currently_mutated_y];
 	MutateLine(current_line, *pic);
 
-	// Longer multi-line chains when stuck
-	int chain_prob = stuck ? 5 : 20;
-	int steps = stuck ? 30 : 10;
+    // Longer multi-line chains when stuck
+    int chain_prob = stuck ? 5 : 20;
+    int steps = stuck ? 30 : 10;
 	if (Random(chain_prob) == 0)
 	{
 		for (int t = 0; t < steps; ++t)

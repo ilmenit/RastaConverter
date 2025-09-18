@@ -11,6 +11,7 @@ RastaConverterBeta17      2025-09-?? [AI RELEASE]
 * add to Linux build process copying ttf font to output directory so GUI version can work
 * Added /opt=legacy option - legacy LAHC behavior
 * Added /unstuck_after and /unstuck_drift options to help with leaving local optimum
+* Added /v /version parameter to return the current version (useful for making GUI)
 
 RastaConverterBeta16      2025-08-24 [AI RELEASE]
 * Fix to ommited Change Value mutation - should reach better Norm. Distance.

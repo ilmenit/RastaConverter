@@ -152,13 +152,17 @@ void Configuration::Process(int argc, char *argv[])
 		"Select optimization algorithm: lahc (late acceptance, default), dlas (delayed acceptance), or legacy (legacy LAHC behavior).",
 		"General options");
 
-	// Aggressive search threshold (0 = never escalate)
-	parser.addOption("unstuck_after", {"ua"}, "N", "1000000",
+    // Aggressive search threshold (0 = never escalate)
+    parser.addOption("unstuck_after", {"ua"}, "N", "1000000",
 		"Escalate exploration after this many evaluations without improvement (0=never).",
 		"General options");
-	parser.addOption("unstuck_drift_norm", {"ud"}, "FLOAT", "0",
-		"When stuck, add this normalized drift per evaluation to acceptance thresholds (0=off).",
-		"General options");
+    // Drift: support both --unstuck_drift (primary) and --unstuck_drift_norm (alias)
+    parser.addOption("unstuck_drift", {"ud"}, "FLOAT", "0.00001",
+        "When stuck, add this normalized drift per evaluation to acceptance thresholds (0=off).",
+        "General options");
+    parser.addOption("unstuck_drift_norm", {}, "FLOAT", "0.00001",
+        "Alias for --unstuck_drift.",
+        "General options");
 
 	// Dual mode
 	parser.addOption("dual", {}, "on|off", "off",
@@ -352,14 +356,16 @@ void Configuration::Process(int argc, char *argv[])
 		unstuck_after = String2Value<unsigned long long>(ua);
 	}
 
-	// Parse normalized drift per evaluation when stuck
-	{
-		std::string ud = parser.getValue("unstuck_drift", "0.00001");
-		std::string ud2 = parser.getValue("ud", "");
-		if (!ud2.empty()) ud = ud2;
-		unstuck_drift_norm = String2Value<double>(ud);
-		if (unstuck_drift_norm < 0) unstuck_drift_norm = 0;
-	}
+    // Parse normalized drift per evaluation when stuck (prefer primary name, accept alias)
+    {
+        std::string ud = parser.getValue("unstuck_drift", "0.00001");
+        std::string ud2 = parser.getValue("ud", "");
+        if (!ud2.empty()) ud = ud2;
+        std::string ud_alt = parser.getValue("unstuck_drift_norm", "");
+        if (!ud_alt.empty()) ud = ud_alt;
+        unstuck_drift_norm = String2Value<double>(ud);
+        if (unstuck_drift_norm < 0) unstuck_drift_norm = 0;
+    }
 
 	if (parser.switchExists("preprocess"))
 		preprocess_only=true;

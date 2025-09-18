@@ -298,6 +298,10 @@ cmake --build build/ninja-pgo-icx-use --config Release
 Details:
 - Phase 1 uses `-fprofile-generate` to emit `.profraw` files at runtime; `LLVM_PROFILE_FILE` controls naming/location.
 - The `merged.profdata` is consumed by `-fprofile-use=<path>` in the "use" preset.
+- Phase 3 (optimized build) includes additional performance optimizations:
+  - **LTO**: `-flto` (Ninja) or `-Qipo` (Visual Studio) for Link Time Optimization
+  - **CPU Tuning**: `-xHost` (Ninja) or `-QxHost` (Visual Studio) for optimal CPU-specific optimizations
+  - **LAHC Scaling**: Solutions count scales with thread count (`/s=1` for 1 thread, `/s=5000` for 4 threads, `/s=50000` for 8 threads)
 - Alternative with wrapper (PowerShell):
 ```
 ./build.ps1 -Preset ninja-pgo-icx-gen -Config Release -Extra -DCOPY_ALL_RUNTIME_DLLS=ON
@@ -336,7 +340,7 @@ The script automatically detects if Ninja is available in PATH:
 - If Ninja is found: uses `ninja-pgo-icx-gen` and `ninja-pgo-icx-use` presets
 - If Ninja is not found: falls back to `x64-pgo-icx-gen` and `x64-pgo-icx-use` presets (Visual Studio)
 
-It will build instrumented, run multiple scenarios (500K-4M evaluations scaled by thread count, writing distinct .profraw files), merge to `pgo\icx\merged.profdata`, then build the optimized binary.
+It will build instrumented, run multiple scenarios (500K-4M evaluations and LAHC solutions scaled by thread count, writing distinct .profraw files), merge to `pgo\icx\merged.profdata`, then build the optimized binary with LTO and CPU tuning enabled.
 
 Ad‑hoc flags (no presets)
 ```
