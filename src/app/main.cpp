@@ -10,6 +10,7 @@
 #include "platform/win/ConsoleCtrlWin.h" 
 #include "rasta.h"
 #include "debug_log.h"
+#include "version.h"
 #include <iostream>
 
 extern bool quiet;
@@ -42,6 +43,12 @@ int main(int argc, char *argv[])
 		for (const auto &w : cfg.warning_messages) std::cerr << "Warning: " << w << "\n";
 		std::cout << cfg.parser.formatHelp("rasta");
 		return (argc <= 1) ? 1 : 0; // no args -> treat as usage error
+	}
+
+	// Version display
+	if (cfg.show_version) {
+		std::cout << "RastaConverter " << RASTA_CONVERTER_VERSION << std::endl;
+		return 0;
 	}
 
 	if (cfg.bad_arguments || !cfg.error_messages.empty()) {
