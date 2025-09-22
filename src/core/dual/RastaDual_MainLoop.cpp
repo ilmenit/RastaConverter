@@ -177,7 +177,7 @@ void RastaConverter::MainLoopDual()
 					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 					if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_A) break;
 					++m_eval_gstate.m_evaluations;
-					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost);
+					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost, false);
 					if (out.improved) {
 						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						m_eval_gstate.m_best_result = (double)cost;
@@ -334,7 +334,7 @@ void RastaConverter::MainLoopDual()
 						std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 						if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_B) break;
 						++m_eval_gstate.m_evaluations;
-						Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost);
+						Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost, false);
 						if (out.improved) {
 							m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
@@ -598,10 +598,10 @@ void RastaConverter::MainLoopDual()
 					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 					if (m_eval_gstate.m_finished || (cfg.max_evals > 0 && m_eval_gstate.m_evaluations >= m_eval_gstate.m_max_evals)) {
 						break;
-					}
-					++m_eval_gstate.m_evaluations;
-					out = ev.ApplyAcceptanceCore((double)cost);
-					if (out.improved) {
+				}
+				++m_eval_gstate.m_evaluations;
+				out = ev.ApplyAcceptanceCore((double)cost, false);
+				if (out.improved) {
 						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						m_eval_gstate.m_best_result = (double)cost;
 						if (mutateB) {

@@ -205,7 +205,8 @@ public:
 		bool improved;
 		double previousCost;
 	};
-	AcceptanceOutcome ApplyAcceptanceCore(double result);
+	AcceptanceOutcome ApplyAcceptanceCore(double result, bool force_best = false, 
+		const raster_picture* new_picture = nullptr, const line_cache_result** line_results = nullptr);
 
 	// Thin wrappers for clarity (no extra runtime cost expected)
 	inline distance_accum_t EvaluateSingle(raster_picture* pic, const line_cache_result** line_results) {

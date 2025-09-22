@@ -115,14 +115,16 @@ void Evaluator::FlushMutationStatsToGlobal()
 	}
 }
 
-Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
+Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result, bool force_best,
+	const raster_picture* new_picture, const line_cache_result** line_results)
 {
 	AcceptanceOutcome out{false, false, m_gstate ? m_gstate->m_current_cost : result};
 	if (!m_gstate) return out;
 
 	// Apply normalized drift to acceptance thresholds if stuck beyond /unstuck_after
-	// This emulates slowly raising the baseline to allow accepting slightly worse solutions.
+	// This gradually allows worse solutions until one is accepted, then resets to explore from new position
     double drift = 0.0;
+    bool drift_active = false;
     if (m_gstate->m_unstuck_drift_norm > 0.0 && m_gstate->m_unstuck_after > 0) {
 		if (m_gstate->m_evaluations > m_gstate->m_last_best_evaluation) {
 			unsigned long long plateau = m_gstate->m_evaluations - m_gstate->m_last_best_evaluation;
@@ -133,6 +135,7 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
                 // Use precomputed scale to minimize per-iteration work
                 drift = norm_drift_total * m_drift_scale;
 				m_gstate->m_current_norm_drift = norm_drift_total;
+				drift_active = true;
 			}
 		}
 	}
@@ -147,52 +150,134 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result)
 		m_gstate->m_N = m_solutions;
 	}
 
-    size_t l = m_gstate->m_previous_results_index;
-    if (++m_gstate->m_previous_results_index == (size_t)m_solutions) m_gstate->m_previous_results_index = 0;
-	double prev_cost = m_gstate->m_current_cost;
-
-	if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {
-		bool accept = (result <= m_gstate->m_current_cost + drift) || (result <= m_gstate->m_previous_results[l] + drift);
-		if (accept) m_gstate->m_current_cost = result;
-        m_gstate->m_previous_results[l] = prev_cost;
-		out.accepted = accept;
-	} else if (m_gstate->m_optimizer == EvalGlobalState::OPT_LEGACY) {
-		// Legacy LAHC: accept if result < historical value (like original LAHC but stricter)
-		// Also support drift for better exploration when stuck
-		// FIXED: Remove thread serialization bottleneck - allow all threads to contribute
-		bool accept = (result < m_gstate->m_previous_results[l] + drift);
+	if (m_gstate->m_optimizer == EvalGlobalState::OPT_LEGACY) {
+		// Original legacy LAHC algorithm - EXACT match to !legacy/Evaluator.cpp:164-208
+		size_t v = m_gstate->m_previous_results_index % m_solutions;
+		double current_distance = m_gstate->m_previous_results[v];
+		
+		// Original acceptance condition: (result < current_distance && m_best_result == m_gstate->m_best_result) || force_best
+		bool accept = (result < current_distance && m_best_result == m_gstate->m_best_result) || force_best;
+		
 		if (accept) {
-			m_gstate->m_current_cost = result;
-			m_gstate->m_previous_results[l] = result; // Store NEW result (legacy behavior)
+			// Store NEW result in history (original behavior)
+			m_gstate->m_previous_results[v] = result;
+			
+			// IMMEDIATE global best update (just like original) - this is CRITICAL for thread sync!
+			m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
+			if (new_picture) {
+				m_gstate->m_best_pic = *new_picture;
+				m_gstate->m_best_pic.uncache_insns();
+			}
+			m_gstate->m_best_result = result;  // ← CRITICAL: immediate global update for thread sync
+			
+			// Update created picture and targets (original behavior)
+			if (line_results) {
+				m_gstate->m_created_picture.resize(m_height);
+				m_gstate->m_created_picture_targets.resize(m_height);
+				
+				for(int y = 0; y < (int)m_height; ++y) {
+					const line_cache_result& lcr = *line_results[y];
+					m_gstate->m_created_picture[y].assign(lcr.color_row, lcr.color_row + m_width);
+					m_gstate->m_created_picture_targets[y].assign(lcr.target_row, lcr.target_row + m_width);
+				}
+			}
+			
+			// Update sprites memory (original behavior)
+			memcpy(&m_gstate->m_sprites_memory, m_sprites_memory, sizeof m_gstate->m_sprites_memory);
+			
+			// Update mutation stats (original behavior)
+			for(int i = 0; i < E_MUTATION_MAX; ++i) {
+				if (m_current_mutations[i]) {
+					m_gstate->m_mutation_stats[i] += m_current_mutations[i];
+					m_current_mutations[i] = 0;
+				}
+			}
+			
+			m_gstate->m_update_improvement = true;
+			
+			// Check for perfect solution (original behavior)
+			if (result == 0) {
+				m_gstate->m_finished = true;
+			}
+			
+			m_gstate->m_condvar_update.notify_one();
 		}
+		
+		// Update index AFTER processing (original legacy timing)
+		++m_gstate->m_previous_results_index;
+		
+		// Update local best to match global (original behavior)
+		if (m_best_result != m_gstate->m_best_result) {
+			m_best_result = m_gstate->m_best_result;
+			m_best_pic = m_gstate->m_best_pic;
+			m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
+		}
+		
 		out.accepted = accept;
-		out.improved = (result < m_gstate->m_best_result);
+		out.improved = accept; // In legacy mode, acceptance == improvement
 	} else {
-		if (result <= m_gstate->m_current_cost + drift || result < m_gstate->m_cost_max + drift) {
-			m_gstate->m_current_cost = result;
-		}
-		double old_value = m_gstate->m_previous_results[l];
-		double currentF = m_gstate->m_current_cost;
-		if (currentF > old_value) {
-			m_gstate->m_previous_results[l] = currentF;
-			if (currentF > m_gstate->m_cost_max) { m_gstate->m_cost_max = currentF; m_gstate->m_N = 1; }
-			else if (currentF == m_gstate->m_cost_max) { if (old_value != m_gstate->m_cost_max) ++m_gstate->m_N; }
-			else if (old_value == m_gstate->m_cost_max) {
-				--m_gstate->m_N;
+		// Non-legacy algorithms use drift and pre-increment index
+		size_t l = m_gstate->m_previous_results_index;
+		if (++m_gstate->m_previous_results_index == (size_t)m_solutions) m_gstate->m_previous_results_index = 0;
+		double prev_cost = m_gstate->m_current_cost;
+
+		if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {
+			// Pure LAHC: Accept ONLY if better than historical cost (allows diversity)
+			bool would_accept_without_drift = (result <= m_gstate->m_previous_results[l]);
+			bool accept = (result <= m_gstate->m_previous_results[l] + drift);
+			
+			if (accept) {
+				m_gstate->m_current_cost = result;
+				
+				// Reset drift when it facilitates acceptance (move to new search region)
+				if (drift_active && !would_accept_without_drift) {
+					// Drift helped us accept a solution - reset to continue optimizing from this new position
+					m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
+					m_gstate->m_current_norm_drift = 0.0;
+				}
+			}
+			
+			// Store current cost AFTER acceptance decision (matches reference LAHC algorithm)
+			m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
+			out.accepted = accept;
+		} else {
+			// DLAS algorithm
+			bool would_accept_without_drift = (result <= m_gstate->m_current_cost) || (result < m_gstate->m_cost_max);
+			bool accept_dlas = (result <= m_gstate->m_current_cost + drift) || (result < m_gstate->m_cost_max + drift);
+			
+			if (accept_dlas) {
+				m_gstate->m_current_cost = result;
+				
+				// Reset drift when it facilitates acceptance (move to new search region) 
+				if (drift_active && !would_accept_without_drift) {
+					// Drift helped us accept a solution - reset to continue optimizing from this new position
+					m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
+					m_gstate->m_current_norm_drift = 0.0;
+				}
+			}
+			double old_value = m_gstate->m_previous_results[l];
+			double currentF = m_gstate->m_current_cost;
+			if (currentF > old_value) {
+				m_gstate->m_previous_results[l] = currentF;
+				if (currentF > m_gstate->m_cost_max) { m_gstate->m_cost_max = currentF; m_gstate->m_N = 1; }
+				else if (currentF == m_gstate->m_cost_max) { if (old_value != m_gstate->m_cost_max) ++m_gstate->m_N; }
+				else if (old_value == m_gstate->m_cost_max) {
+					--m_gstate->m_N;
+					if (m_gstate->m_N <= 0) {
+						m_gstate->m_cost_max = *std::max_element(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end());
+						m_gstate->m_N = std::count(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end(), m_gstate->m_cost_max);
+					}
+				}
+			} else if (currentF < old_value && currentF < prev_cost) {
+				if (old_value == m_gstate->m_cost_max) --m_gstate->m_N;
+				m_gstate->m_previous_results[l] = currentF;
 				if (m_gstate->m_N <= 0) {
 					m_gstate->m_cost_max = *std::max_element(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end());
 					m_gstate->m_N = std::count(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end(), m_gstate->m_cost_max);
 				}
 			}
-		} else if (currentF < old_value && currentF < prev_cost) {
-			if (old_value == m_gstate->m_cost_max) --m_gstate->m_N;
-			m_gstate->m_previous_results[l] = currentF;
-			if (m_gstate->m_N <= 0) {
-				m_gstate->m_cost_max = *std::max_element(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end());
-				m_gstate->m_N = std::count(m_gstate->m_previous_results.begin(), m_gstate->m_previous_results.end(), m_gstate->m_cost_max);
-			}
+			out.accepted = accept_dlas;
 		}
-		out.accepted = (m_gstate->m_current_cost == result);
 	}
 
 	out.improved = (result < m_gstate->m_best_result);
@@ -722,8 +807,10 @@ void Evaluator::Run() {
 		}
 
 		// Unified acceptance with drift via core helper
-		Evaluator::AcceptanceOutcome out = ApplyAcceptanceCore(result);
-		if (out.improved) {
+		Evaluator::AcceptanceOutcome out = ApplyAcceptanceCore(result, force_best, &new_picture, line_results.data());
+		
+		// For non-legacy modes, handle global updates here (legacy handles them internally)
+		if (out.improved && m_gstate->m_optimizer != EvalGlobalState::OPT_LEGACY) {
 			m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
 			m_gstate->m_best_pic = new_picture;
 			m_gstate->m_best_pic.uncache_insns();
@@ -757,7 +844,8 @@ void Evaluator::Run() {
 			m_gstate->m_condvar_update.notify_one();
 		}
 
-		if (m_best_result != m_gstate->m_best_result) {
+		// Update local best to match global (for non-legacy modes; legacy handles this internally)
+		if (m_gstate->m_optimizer != EvalGlobalState::OPT_LEGACY && m_best_result != m_gstate->m_best_result) {
 			m_best_result = m_gstate->m_best_result;
 			m_best_pic = m_gstate->m_best_pic;
 			m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
