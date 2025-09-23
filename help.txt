@@ -175,15 +175,15 @@ Input:
   Aliases: --opt, --optimizer
   
 /unstuck_after=<N>
-  Default: 1000000
+  Default: 1000
   Escalate exploration only after N evaluations without improvement (0=never). 
   When triggered, the search uses larger mutation batches and more exploratory edits
   to escape local minima, especially useful in dual mode with anti-flicker. Aliases: /ua, --unstuck_after
   
 /unstuck_drift=<FLOAT>
-  Default: 0.00001
+  Default: 0.1
   When stuck (as per /unstuck_after), slowly relax acceptance by adding FLOAT to the normalized
-  distance threshold per evaluation (0=off). Typical small value: 0.00001. This allows accepting
+  distance threshold per evaluation (0=off). Typical small value: 0.1. This allows accepting
   slightly worse, but different, solutions to escape deep local minima. Aliases: /ud, --unstuck_drift, --unstuck_drift_norm
   
 /distance=Color distance function

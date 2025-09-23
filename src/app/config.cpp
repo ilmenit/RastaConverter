@@ -153,14 +153,14 @@ void Configuration::Process(int argc, char *argv[])
 		"General options");
 
     // Aggressive search threshold (0 = never escalate)
-    parser.addOption("unstuck_after", {"ua"}, "N", "1000000",
+    parser.addOption("unstuck_after", {"ua"}, "N", "1000",
 		"Escalate exploration after this many evaluations without improvement (0=never).",
 		"General options");
     // Drift: support both --unstuck_drift (primary) and --unstuck_drift_norm (alias)
-    parser.addOption("unstuck_drift", {"ud"}, "FLOAT", "0.00001",
+    parser.addOption("unstuck_drift", {"ud"}, "FLOAT", "0.1",
         "When stuck, add this normalized drift per evaluation to acceptance thresholds (0=off).",
         "General options");
-    parser.addOption("unstuck_drift_norm", {}, "FLOAT", "0.00001",
+    parser.addOption("unstuck_drift_norm", {}, "FLOAT", "0.1",
         "Alias for --unstuck_drift.",
         "General options");
 
@@ -350,7 +350,7 @@ void Configuration::Process(int argc, char *argv[])
 
 	// Parse aggressive search threshold
 	{
-		std::string ua = parser.getValue("unstuck_after", "1000000");
+		std::string ua = parser.getValue("unstuck_after", "1000");
 		std::string ua2 = parser.getValue("ua", "");
 		if (!ua2.empty()) ua = ua2;
 		unstuck_after = String2Value<unsigned long long>(ua);
@@ -358,7 +358,7 @@ void Configuration::Process(int argc, char *argv[])
 
     // Parse normalized drift per evaluation when stuck (prefer primary name, accept alias)
     {
-        std::string ud = parser.getValue("unstuck_drift", "0.00001");
+        std::string ud = parser.getValue("unstuck_drift", "0.1");
         std::string ud2 = parser.getValue("ud", "");
         if (!ud2.empty()) ud = ud2;
         std::string ud_alt = parser.getValue("unstuck_drift_norm", "");
