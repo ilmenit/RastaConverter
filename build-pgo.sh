@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# RastaConverter PGO automation for Linux (GCC/Clang)
+# RastaConverter PGO automation for Linux (GCC/Clang/Intel ICX)
 # - Phase 1: configure+build instrumented, run scenarios to create profile data
 # - Phase 2: merge profiles (if using LLVM) or use directly (GCC)
 # - Phase 3: configure+build optimized with profile data
@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "Usage: $0 [--compiler=gcc|clang] [test_image]"
+            echo "Usage: $0 [--compiler=gcc|clang|icx] [test_image]"
             echo
             echo "Options:"
             echo "  --compiler=COMPILER    Use specific compiler (gcc, clang, icx)"
@@ -222,10 +222,10 @@ run_scenario() {
     echo "[run] $scenario_name: $cmd"
     
     if [[ "$PROFILE_TYPE" == "llvm" ]]; then
-        LLVM_PROFILE_FILE="$profile_file" $cmd
+        LLVM_PROFILE_FILE="$profile_file" eval "$cmd"
     else
         # GCC PGO - profile data is written to current directory
-        $cmd
+        eval "$cmd"
     fi
     
     if [[ $? -ne 0 ]]; then
