@@ -90,11 +90,11 @@ struct Configuration {
 
 	// Aggressive search trigger: escalate exploration after this many
 	// evaluations without improvement (0 = never escalate)
-	unsigned long long unstuck_after = 1000000ULL;
+	unsigned long long unstuck_after = 1000ULL;
 
 	// When stuck, add this normalized drift to acceptance thresholds per evaluation
 	// Units: normalized distance (same scale as Norm. Dist). 0 = disabled.
-	double unstuck_drift_norm = 0.0;
+	double unstuck_drift_norm = 0.1;
 
 
 	CommandLineParser parser; 

@@ -169,6 +169,7 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result, bool 
 				m_gstate->m_best_pic.uncache_insns();
 			}
 			m_gstate->m_best_result = result;  // ← CRITICAL: immediate global update for thread sync
+			m_gstate->m_current_cost = result; // ← FIX: Update current_cost for proper statistics collection
 			
 			// Update created picture and targets (original behavior)
 			if (line_results) {

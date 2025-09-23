@@ -1,7 +1,12 @@
 ChangeLog
 =========
 
-RastaConverterBeta17      2025-09-?? [AI RELEASE]
+RastaConverterBeta18      2025-09-23 [AI RELEASE]
+* Reworked acceptance criteria in optimization algorithms
+* Default drift values significantly increased to /ua=1000 /ud=0.1 (for high /s it may be worth /ua=100000 /ud=0.00001)
+* /opt=legacy mode adjusted to reflect Beta10 algorithm
+
+RastaConverterBeta17      2025-09-19 [AI RELEASE]
 * SDL2 version on Linux and flickering of input/destination images fixed
 * Showing conversion rate fixed on Linux
 * Fixed /continue - shouldn't crash anymore
