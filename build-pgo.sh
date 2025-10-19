@@ -80,7 +80,7 @@ if [[ -z "$COMPILER" ]]; then
     elif command -v icx >/dev/null 2>&1; then
         COMPILER="icx"
     else
-        echo "[error] No suitable compiler found. Please install gcc, clang, or icx." >&2
+        echo "[error] No suitable compiler found. Please install gcc, clang, or icx" >&2
         exit 1
     fi
 fi
@@ -90,6 +90,13 @@ case "$COMPILER" in
     gcc|clang|icx)
         if ! command -v "$COMPILER" >/dev/null 2>&1; then
             echo "[error] Compiler '$COMPILER' not found in PATH." >&2
+			# Set up Intel Compiler vars
+			case "$COMPILER" in
+				icx)
+					echo "Did you setup vars?"
+					echo "  source /opt/intel/oneapi/setvars.sh"
+					;;
+			esac            
             exit 1
         fi
         ;;
