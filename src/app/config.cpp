@@ -248,7 +248,7 @@ else
 	dstf=E_DISTANCE_YUV;
 }
 
-	dst_name = parser.getValue("predistance","ciede");
+	dst_name = parser.getValue("predistance","rasta");
 	if (dst_name=="euclid")
 		pre_dstf=E_DISTANCE_EUCLID;
 	else if (dst_name=="ciede" || dst_name=="ciede2000")
