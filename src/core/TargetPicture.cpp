@@ -58,6 +58,12 @@ void SetDistanceFunction(e_distance_function dst)
 	case E_DISTANCE_CIE94:
 		distance_function = RGBCIE94Distance;
 		break;
+	case E_DISTANCE_OKLAB:
+		distance_function = RGBOklabScaledDistance;
+		break;
+	case E_DISTANCE_RASTA:
+		distance_function = RGBRastaDistance;
+		break;
 	default:
 		distance_function = RGByuvDistance;
 	}

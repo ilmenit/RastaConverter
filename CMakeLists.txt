@@ -98,6 +98,7 @@ set(COMMON_SOURCE_FILES
 
 set(GUI_SOURCE_FILES
     src/frontend/gui/RastaSDL.cpp
+    src/frontend/gui/WindowIconHelper.cpp
 )
 
 set(ALL_SOURCE_FILES ${COMMON_SOURCE_FILES} ${GUI_SOURCE_FILES})

@@ -990,6 +990,50 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 	if (!pic) { DBG_PRINT("[EVAL] ExecuteRasterProgram: pic=null"); return 0; }
 #endif
 
+	// Memory guard: keep single-frame path bounded like worker loop and dual path
+	// Prevent unbounded growth of m_linear_allocator and caches during long bootstrap runs
+	if (m_linear_allocator.size() > m_cache_size)
+	{
+		// Acquire a mutex to coordinate cache clearing across evaluators
+		std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);
+		// Check again after acquiring the lock (another thread might have cleared)
+		if (m_linear_allocator.size() > m_cache_size)
+		{
+			// First, try clearing least recently used lines (25% of height)
+			size_t lines_to_clear = std::max((size_t)m_height / 4, (size_t)1);
+			size_t cleared = 0;
+			while (cleared < lines_to_clear && !m_lru_lines.empty())
+			{
+				int ly = m_lru_lines.front();
+				m_lru_lines.pop_front();
+				m_lru_set.erase(ly);
+				m_line_caches[ly].clear();
+				++cleared;
+			}
+
+			// If still above threshold, perform a full clear similar to worker loop
+			if (m_linear_allocator.size() > m_cache_size * 0.9)
+			{
+				m_insn_seq_cache.clear();
+				for (int y2 = 0; y2 < (int)m_height; ++y2)
+					m_line_caches[y2].clear();
+				m_linear_allocator.clear();
+				// Invalidate any cached instruction sequence pointers on the current picture to avoid dangling pointers
+				if (pic)
+				{
+					const size_t lines = pic->raster_lines.size();
+					for (size_t i = 0; i < lines; ++i)
+					{
+						pic->raster_lines[i].cache_key = NULL;
+					}
+				}
+				// Reset LRU tracking
+				m_lru_lines.clear();
+				m_lru_set.clear();
+			}
+		}
+	}
+
 	// Single-frame path: keep hot; picture should have been recached by caller (m_best_pic.recache_insns).
 
 	int cycle;
@@ -1027,6 +1071,8 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 		// snapshot current machine state
 		raster_line& rline = pic->raster_lines[y];
+		// Ensure instruction sequence pointer is valid before hashing/lookup in case allocator was cleared above
+		if (!rline.cache_key) { rline.recache_insns(m_insn_seq_cache, m_linear_allocator); }
 
 		line_cache_key lck;
 		CaptureRegisterState(lck.entry_state);

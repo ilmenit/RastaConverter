@@ -31,6 +31,7 @@ public:
     void DisplayBitmap(int x, int y, FIBITMAP* fiBitmap);
     void Present();
     GUI_command NextFrame();
+    bool SetIcon(FIBITMAP* bitmap);
 
 };
 

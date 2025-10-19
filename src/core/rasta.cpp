@@ -327,7 +327,12 @@ void RastaConverter::LoadOptimizerState(string name)
 bool RastaConverter::LoadInputBitmap()
 {
 	Message("Loading and initializing file");
-	input_bitmap = FreeImage_Load(FreeImage_GetFileType(cfg.input_file.c_str()), cfg.input_file.c_str(), 0);
+	FREE_IMAGE_FORMAT fif = FreeImage_GetFileType(cfg.input_file.c_str(), 0);
+	if (fif == FIF_UNKNOWN)
+		fif = FreeImage_GetFIFFromFilename(cfg.input_file.c_str());
+	if (fif == FIF_UNKNOWN)
+		Error(std::string("Unrecognized input image format: ") + cfg.input_file);
+	input_bitmap = FreeImage_Load(fif, cfg.input_file.c_str());
 	if (!input_bitmap)
 		Error(string("Error loading input file: ") + cfg.input_file);
 
@@ -808,6 +813,14 @@ bool RastaConverter::ProcessInit()
 	DBG_PRINT("[RASTA] LoadInputBitmap");
 	if (!LoadInputBitmap())
 		Error("Error loading Input Bitmap!");
+
+#ifndef NO_GUI
+	if (input_bitmap) {
+		if (!gui.SetIcon(input_bitmap)) {
+			DBG_PRINT("[RASTA] Failed to set window icon from input bitmap");
+		}
+	}
+#endif
 
 	DBG_PRINT("[RASTA] InitLocalStructure");
 	InitLocalStructure();

@@ -33,6 +33,8 @@ enum e_distance_function {
 	E_DISTANCE_YUV,
 	E_DISTANCE_CIEDE,
 	E_DISTANCE_CIE94,
+	E_DISTANCE_OKLAB,
+	E_DISTANCE_RASTA,
 };
 
 struct Configuration {

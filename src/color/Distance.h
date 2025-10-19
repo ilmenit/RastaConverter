@@ -15,6 +15,9 @@ distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2);
 distance_t RGBCIEDE2000Distance(const rgb &col1, const rgb &col2);
 distance_t RGByuvDistance(const rgb &col1, const rgb &col2);
 distance_t RGBCIE94Distance(const rgb &col1, const rgb &col2);
+distance_t RGBOklabDistance(const rgb &col1, const rgb &col2);
+distance_t RGBOklabScaledDistance(const rgb &col1, const rgb &col2);
+distance_t RGBRastaDistance(const rgb &col1, const rgb &col2);
 
 
 #endif

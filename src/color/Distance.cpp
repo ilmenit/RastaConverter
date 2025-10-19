@@ -2,6 +2,8 @@
 #include <map>
 #include <unordered_map>
 #include <shared_mutex>
+#include <algorithm>
+#include <cmath>
 #include "Distance.h"
 #include "rgb.h"
 
@@ -12,9 +14,9 @@ using namespace std;
 
 inline void RGBtoYUV(double r, double g, double b, double &y, double &u, double &v)
 {
-	y = 0.299*r + 0.587*g + 0.114*b;
-	u= (b-y)*0.565;
-	v= (r-y)*0.713;
+    y = 0.299*r + 0.587*g + 0.114*b;
+    u= (b-y)*0.565;
+    v= (r-y)*0.713;
 }
 
 distance_t RGByuvDistance(const rgb &col1, const rgb &col2)
@@ -48,6 +50,101 @@ double cbrt(double d) {
 
 typedef std::unordered_map < rgb, Lab, rgb_hash > rgb_lab_map_t;
 rgb_lab_map_t rgb_lab_map;
+
+typedef std::unordered_map < rgb, Lab, rgb_hash > rgb_oklab_map_t;
+rgb_oklab_map_t rgb_oklab_map;
+
+static const double OKLAB_DISTANCE_SCALE = 200000.0; // maps perceptual energy (~0-1) to integer range
+// Rasta distance: Fast YUV-based metric optimized for Atari palette conversion
+// Simpler than CIEDE2000, better at avoiding unwanted gray mapping
+static const float RASTA_GRAY_PENALTY = 28.0f;        // penalty for mapping chromatic source to near-gray palette
+static const float RASTA_GRAY_THRESHOLD = 30.0f;      // squared chroma below this = "near gray"
+
+static inline double srgb_comp_to_linear(double c)
+{
+	if (c <= 0.04045)
+		return c / 12.92;
+	return pow((c + 0.055) / 1.055, 2.4);
+}
+
+static inline void RGB2OKLABDirect(const rgb &c, Lab &result)
+{
+	const double fr = srgb_comp_to_linear(c.r / 255.0);
+	const double fg = srgb_comp_to_linear(c.g / 255.0);
+	const double fb = srgb_comp_to_linear(c.b / 255.0);
+
+	const double l = 0.4122214708 * fr + 0.5363325363 * fg + 0.0514459929 * fb;
+	const double m = 0.2119034982 * fr + 0.6806995451 * fg + 0.1073969566 * fb;
+	const double s = 0.0883024619 * fr + 0.2817188376 * fg + 0.6299787005 * fb;
+
+	const double l_ = cbrt(l);
+	const double m_ = cbrt(m);
+	const double s_ = cbrt(s);
+
+	result.L = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+	result.a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+	result.b = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+}
+
+static void RGB2OKLAB(const rgb &c, Lab &result)
+{
+	static std::shared_mutex rwlock{};
+	rwlock.lock_shared();
+	rgb_oklab_map_t::iterator it = rgb_oklab_map.find(c);
+	if (it != rgb_oklab_map.end())
+	{
+		result = it->second;
+		rwlock.unlock_shared();
+		return;
+	}
+	rwlock.unlock_shared();
+
+	rwlock.lock();
+	auto r = rgb_oklab_map.insert(rgb_oklab_map_t::value_type(c, Lab()));
+	rwlock.unlock();
+
+	if (!r.second)
+	{
+		result = r.first->second;
+	}
+	else
+	{
+		RGB2OKLABDirect(c, result);
+		r.first->second = result;
+	}
+}
+
+static inline distance_t OklabDistanceEnergy(const Lab &first, const Lab &second)
+{
+	const double dL = first.L - second.L;
+	const double da = first.a - second.a;
+	const double db = first.b - second.b;
+	double dist = (dL * dL + da * da + db * db) * OKLAB_DISTANCE_SCALE;
+	if (dist > (double)DISTANCE_MAX)
+		dist = (double)DISTANCE_MAX;
+	return (distance_t)(dist + 0.5);
+}
+
+static inline distance_t OklabScaledDistanceEnergy(const Lab &first, const Lab &second)
+{
+	double Lmean = 0.5 * (first.L + second.L);
+	if (Lmean < 0.0)
+		Lmean = 0.0;
+	else if (Lmean > 1.0)
+		Lmean = 1.0;
+
+	const double beta = 3.0;
+	const double scale = 1.0 + beta * (1.0 - Lmean);
+
+	const double dL = first.L - second.L;
+	const double da = (first.a - second.a) * scale;
+	const double db = (first.b - second.b) * scale;
+
+	double dist = (dL * dL + da * da + db * db) * OKLAB_DISTANCE_SCALE;
+	if (dist > (double)DISTANCE_MAX)
+		dist = (double)DISTANCE_MAX;
+	return (distance_t)(dist + 0.5);
+}
 
 static void RGB2LAB(const rgb &c, Lab &result)
 {
@@ -243,6 +340,51 @@ distance_t RGBEuclidianDistance(const rgb &col1, const rgb &col2)
 		d = DISTANCE_MAX;
 
 	return (distance_t)d;
+}
+
+distance_t RGBRastaDistance(const rgb &col1, const rgb &col2)
+{
+	// YUV deltas
+	int dr = col2.r - col1.r, dg = col2.g - col1.g, db = col2.b - col1.b;
+	float dy = 0.299f*dr + 0.587f*dg + 0.114f*db;
+	float du = (db - dy) * 0.565f, dv = (dr - dy) * 0.713f;
+
+	// Source and palette luminance
+	float y1 = 0.299f*col1.r + 0.587f*col1.g + 0.114f*col1.b;
+	float y2 = 0.299f*col2.r + 0.587f*col2.g + 0.114f*col2.b;
+	float ymean = (y1 + y2) * 0.5f;
+	
+	// Base YUV distance with chroma boost
+	float dist = dy*dy + (du*du + dv*dv);
+
+	// Gray penalty: if source has color but palette is near-gray, add penalty
+	float u1 = (col1.b - y1) * 0.565f, v1 = (col1.r - y1) * 0.713f;
+	float u2 = (col2.b - y2) * 0.565f, v2 = (col2.r - y2) * 0.713f;
+	float chroma_src = u1*u1 + v1*v1;
+	float chroma_pal = u2*u2 + v2*v2;
+	
+	if (chroma_src > 4.0f && chroma_pal < RASTA_GRAY_THRESHOLD) {
+		dist += RASTA_GRAY_PENALTY * (RASTA_GRAY_THRESHOLD - chroma_pal);
+	}
+	
+	return (dist > (float)DISTANCE_MAX) ? DISTANCE_MAX : (distance_t)dist;
+}
+
+
+distance_t RGBOklabDistance(const rgb &col1, const rgb &col2)
+{
+	Lab first, second;
+	RGB2OKLAB(col1, first);
+	RGB2OKLAB(col2, second);
+	return OklabDistanceEnergy(first, second);
+}
+
+distance_t RGBOklabScaledDistance(const rgb &col1, const rgb &col2)
+{
+	Lab first, second;
+	RGB2OKLAB(col1, first);
+	RGB2OKLAB(col2, second);
+	return OklabScaledDistanceEnergy(first, second);
 }
 
 

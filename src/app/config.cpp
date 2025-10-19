@@ -96,10 +96,10 @@ void Configuration::Process(int argc, char *argv[])
 		"General options");
 
 	// Image processing
-	parser.addOption("distance", {}, "yuv|euclid|ciede|cie94", "yuv",
+parser.addOption("distance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta",
 		"Distance function used during optimization.",
 		"Image processing");
-	parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94", "ciede",
+parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta",
 		"Distance function used during preprocess (destination picture).",
 		"Image processing");
 	parser.addOption("dither", {}, "none|floyd|rfloyd|line|line2|chess|2d|jarvis|simple|knoll", "none",
@@ -231,18 +231,22 @@ void Configuration::Process(int argc, char *argv[])
 		if (!p2.empty()) palette_file = p2;
 	}
 
-	string dst_name = parser.getValue("distance","yuv");
-	if (dst_name=="euclid")
-		dstf=E_DISTANCE_EUCLID;
-	else if (dst_name=="ciede" || dst_name=="ciede2000")
-		dstf=E_DISTANCE_CIEDE;
-	else if (dst_name=="cie94")
-		dstf=E_DISTANCE_CIE94;
-	else 
-	{
-		if (dst_name != "yuv") warning_messages.push_back("Unknown distance='" + dst_name + "', using 'yuv'.");
-		dstf=E_DISTANCE_YUV;
-	}
+string dst_name = parser.getValue("distance","yuv");
+if (dst_name=="euclid")
+	dstf=E_DISTANCE_EUCLID;
+else if (dst_name=="ciede" || dst_name=="ciede2000")
+	dstf=E_DISTANCE_CIEDE;
+else if (dst_name=="cie94")
+	dstf=E_DISTANCE_CIE94;
+else if (dst_name=="oklab")
+	dstf=E_DISTANCE_OKLAB;
+else if (dst_name=="rasta")
+	dstf=E_DISTANCE_RASTA;
+else 
+{
+	if (dst_name != "yuv") warning_messages.push_back("Unknown distance='" + dst_name + "', using 'yuv'.");
+	dstf=E_DISTANCE_YUV;
+}
 
 	dst_name = parser.getValue("predistance","ciede");
 	if (dst_name=="euclid")
@@ -251,6 +255,10 @@ void Configuration::Process(int argc, char *argv[])
 		pre_dstf=E_DISTANCE_CIEDE;
 	else if (dst_name=="cie94")
 		pre_dstf=E_DISTANCE_CIE94;
+else if (dst_name=="oklab")
+	pre_dstf=E_DISTANCE_OKLAB;
+else if (dst_name=="rasta")
+	pre_dstf=E_DISTANCE_RASTA;
 	else 
 	{
 		if (dst_name != "yuv") warning_messages.push_back("Unknown predistance='" + dst_name + "', using 'yuv'.");

@@ -103,7 +103,7 @@ Input:
   'floyd' is Floyd-Steinberg dithering - more "random" than chessboard dithering
   '2d' and 'simple' are between chess and floyd.
   'jarvis' dithering is more artistic
-  'knoll' is similar to Adobe patented pattern dithering algorithm. Very slow with /predistance=ciede (which is default!).
+  'knoll' is similar to Adobe patented pattern dithering algorithm. Very slow with /predistance=ciede.
   'line' dithering that tries to keep a low number of color changes on the line
   'line2' similar to 'line'
   Aliases: --dither
@@ -187,19 +187,23 @@ Input:
   slightly worse, but different, solutions to escape deep local minima. Aliases: /ud, --unstuck_drift, --unstuck_drift_norm
   
 /distance=Color distance function
-  Default: yuv, other options: euclid, ciede
+  Default: rasta, other options: yuv, euclid, ciede, cie94, oklab
  
-  euclid - Use Euclidian RGB distance for colors instead of default YUV distance. This function is fast.
-  yuv - produces usually better color mapping than Euclidian, but for some pictures RGB distance is also useful.
-  ciede - uses the best visual color distance algorithm CIEDE2000, but can be very slow.
+  rasta - fast YUV-based distance optimized for Atari palettes. Boosts chroma for dark colors and 
+          strongly avoids mapping colored sources to gray palette entries. Best balance of speed and quality.
+  yuv - simple YUV distance, fast but tends to map low-saturation colors to grays.
+  euclid - Euclidian RGB distance. Fast but not perceptually accurate.
+  ciede - CIEDE2000, the most perceptually accurate but VERY slow (not recommended for large images).
+  cie94 - legacy CIE94 distance (faster than CIEDE2000, less accurate).
+  oklab - modern perceptual distance with good balance of accuracy and speed.
   Aliases: --distance
 
 /predistance=Color distance function for preprocess
-  Default: ciede, other options: euclid, yuv
+  Default: rasta, other options: ciede, yuv, euclid, cie94, oklab
 
   This option sets the preprocess color distance function to create destination picture.
   For the rest of the optimization the distance set by the /distance is used.
-  The default option /predistance=ciede is VERY slow with Knoll dithering.
+  Note: /predistance=ciede is VERY slow with Knoll dithering (use rasta for faster preprocessing).
   Aliases: --predistance
     
 /max_evals=Maximum number of evaluations

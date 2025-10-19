@@ -1,6 +1,7 @@
 #ifndef NO_GUI
 #include "RastaSDL.h"
 #include "debug_log.h"
+#include "WindowIconHelper.h"
 #include <iostream>
 #include <time.h>
 
@@ -184,6 +185,11 @@ void RastaSDL::DisplayBitmap(int x, int y, FIBITMAP* fiBitmap)
 	SDL_FreeSurface(surface);
 
 //	SDL_RenderPresent(renderer);
+}
+
+bool RastaSDL::SetIcon(FIBITMAP* bitmap)
+{
+	return WindowIconHelper::SetWindowIconFromBitmap(window, bitmap);
 }
 
 void RastaSDL::Present()
