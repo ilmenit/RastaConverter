@@ -3,7 +3,19 @@
 #ifndef NO_GUI
 
 #include <SDL.h>
+
+#if defined(__APPLE__)
+#define FREEIMAGE_H_BOOL_OVERRIDE
+#define BOOL FreeImageBOOL
+#endif
+
 #include <FreeImage.h>
+
+#if defined(FREEIMAGE_H_BOOL_OVERRIDE)
+#undef BOOL
+#undef FREEIMAGE_H_BOOL_OVERRIDE
+#endif
+
 #include <SDL_ttf.h>
 #include <string>
 #include "gui.h"

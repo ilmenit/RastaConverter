@@ -3,7 +3,18 @@
 
 #include <vector>
 #include <string>
+
+#if defined(__APPLE__)
+#define FREEIMAGE_H_BOOL_OVERRIDE
+#define BOOL FreeImageBOOL
+#endif
+
 #include "FreeImage.h"
+
+#if defined(FREEIMAGE_H_BOOL_OVERRIDE)
+#undef BOOL
+#undef FREEIMAGE_H_BOOL_OVERRIDE
+#endif
 #include "CommandLineParser.h"
 #include <assert.h>
 #include "rgb.h"

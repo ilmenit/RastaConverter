@@ -28,7 +28,21 @@
 #endif
 
 #include <SDL.h>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+#define FREEIMAGE_H_BOOL_OVERRIDE
+#define BOOL FreeImageBOOL
+#endif
+#endif
+
 #include <FreeImage.h>
+
+#if defined(FREEIMAGE_H_BOOL_OVERRIDE)
+#undef BOOL
+#undef FREEIMAGE_H_BOOL_OVERRIDE
+#endif
 
 #if SDL_VERSION_ATLEAST(2,0,2)
 #include <SDL_syswm.h>
