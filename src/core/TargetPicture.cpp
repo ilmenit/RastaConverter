@@ -16,13 +16,13 @@ bool LoadAtariPalette(const std::string& filename)
 	FILE *fp=fopen(filename.c_str(),"rb");
 	if (!fp)
 	{
-		fp=fopen((string("palettes/")+filename).c_str(),"rb");
+		fp=fopen((string("Palettes/")+filename).c_str(),"rb");
 		if (!fp)
 		{
-			fp=fopen((string("palettes/")+filename+string(".act")).c_str(),"rb");
+			fp=fopen((string("Palettes/")+filename+string(".act")).c_str(),"rb");
 			if (!fp)
 			{
-				fp=fopen((string("palettes/")+filename+string(".pal")).c_str(),"rb");
+				fp=fopen((string("Palettes/")+filename+string(".pal")).c_str(),"rb");
 				if (!fp)
 					return false;
 			}
