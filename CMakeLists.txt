@@ -541,7 +541,7 @@ if(NOT BUILD_NO_GUI)
         ${RESOLVED_FREEIMAGE_LIBS}
         ${RESOLVED_SDL_LIBS}
         Threads::Threads
-        $<$<PLATFORM_ID:Windows>:Dbghelp>
+        $<$<PLATFORM_ID:Windows>:Dbghelp;shell32>
     )
 endif()
 if(BUILD_NO_GUI)

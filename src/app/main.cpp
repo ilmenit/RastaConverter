@@ -1,3 +1,8 @@
+#if defined(_WIN32)
+#define NOMINMAX
+#undef small // In case of macro conflict
+#endif
+
 #undef int8_t
 #undef uint8_t
 #undef int16_t
@@ -13,6 +18,12 @@
 #include "version.h"
 #include <iostream>
 
+#if defined(_WIN32)
+// Forward declare the function to avoid including the entire <shobjidl.h> header,
+// which causes numerous compilation conflicts with other libraries.
+extern "C" long __stdcall SetCurrentProcessExplicitAppUserModelID(const wchar_t *AppID);
+#endif
+
 extern bool quiet;
 
 bool LoadAtariPalette(string filename);
@@ -22,6 +33,12 @@ RastaConverter rasta;
 
 int main(int argc, char *argv[])
 {	
+#if defined(_WIN32)
+    // Set a unique AppUserModelID to ensure the taskbar icon is handled correctly on Windows 11/10/7.
+    // This allows Windows to group the app correctly and use the runtime-set icon.
+    SetCurrentProcessExplicitAppUserModelID(L"RastaConverter.MainUI.1");
+#endif
+
 	//////////////////////////////////////////////////////////////////////////
     // Log console control events (CTRL+C, console close, etc.) and crashes
     RegisterConsoleCtrlLogger();
