@@ -231,7 +231,7 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta
 		if (!p2.empty()) palette_file = p2;
 	}
 
-string dst_name = parser.getValue("distance","yuv");
+string dst_name = parser.getValue("distance","rasta");
 if (dst_name=="euclid")
 	dstf=E_DISTANCE_EUCLID;
 else if (dst_name=="ciede" || dst_name=="ciede2000")

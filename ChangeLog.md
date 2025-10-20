@@ -1,7 +1,7 @@
 ChangeLog
 =========
 
-RastaConverterBeta19      2025-10-?? [AI RELEASE]
+RastaConverterBeta19      2025-10-20 [AI RELEASE]
 * Added extra color distance functions: oklab, cie94 and rasta (boosts chroma for dark grey colors to prevent too gray destination picture)
 * "rasta" color distance is now default for both /predistance and /distance - should bring better conversion results with default parameters
 * Running GUI conversion is getting a taskbar icon equal to converted image (a gimmick for more parallel conversions).
