@@ -240,12 +240,12 @@ else if (dst_name=="cie94")
 	dstf=E_DISTANCE_CIE94;
 else if (dst_name=="oklab")
 	dstf=E_DISTANCE_OKLAB;
-else if (dst_name=="rasta")
-	dstf=E_DISTANCE_RASTA;
+else if (dst_name=="yuv")
+	dstf=E_DISTANCE_YUV;
 else 
 {
-	if (dst_name != "yuv") warning_messages.push_back("Unknown distance='" + dst_name + "', using 'yuv'.");
-	dstf=E_DISTANCE_YUV;
+	if (dst_name != "rasta") warning_messages.push_back("Unknown distance='" + dst_name + "', using 'rasta'.");
+	dstf=E_DISTANCE_RASTA;
 }
 
 	dst_name = parser.getValue("predistance","rasta");
@@ -257,12 +257,12 @@ else
 		pre_dstf=E_DISTANCE_CIE94;
 else if (dst_name=="oklab")
 	pre_dstf=E_DISTANCE_OKLAB;
-else if (dst_name=="rasta")
-	pre_dstf=E_DISTANCE_RASTA;
+else if (dst_name=="yuv")
+	pre_dstf=E_DISTANCE_YUV;
 	else 
 	{
-		if (dst_name != "yuv") warning_messages.push_back("Unknown predistance='" + dst_name + "', using 'yuv'.");
-		pre_dstf=E_DISTANCE_YUV;
+		if (dst_name != "rasta") warning_messages.push_back("Unknown predistance='" + dst_name + "', using 'rasta'.");
+		pre_dstf=E_DISTANCE_RASTA;
 	}
 
 
