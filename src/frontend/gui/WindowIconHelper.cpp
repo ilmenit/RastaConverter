@@ -3,21 +3,21 @@
 #include "WindowIconHelper.h"
 #include "debug_log.h"
 
-#include <SDL.h>
-#include <FreeImage.h>
-
 #include <memory>
 #include <string>
 #include <cstdint>
 #include <cstring>
 
-#if SDL_VERSION_ATLEAST(2,0,2)
-#include <SDL_syswm.h>
+#if defined(_WIN32)
+#define NOMINMAX
+#include <Windows.h>
 #endif
 
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+#include <SDL.h>
+#include <FreeImage.h>
+
+#if SDL_VERSION_ATLEAST(2,0,2)
+#include <SDL_syswm.h>
 #endif
 
 #if defined(__APPLE__)
@@ -132,12 +132,14 @@ static std::unique_ptr<FIBITMAP, FreeImageBitmapDeleter> LoadFreeImage(const std
 
 #if defined(_WIN32)
 struct IconHolder {
-    HICON big = nullptr;
-    HICON small = nullptr;
+    HICON bigIcon;
+    HICON smallIcon;
+
+    IconHolder() : bigIcon(NULL), smallIcon(NULL) {}
 
     ~IconHolder() {
-        if (big) DestroyIcon(big);
-        if (small) DestroyIcon(small);
+        if (bigIcon) DestroyIcon(bigIcon);
+        if (smallIcon) DestroyIcon(smallIcon);
     }
 };
 
@@ -146,7 +148,8 @@ static HICON CreateWin32Icon(SDL_Surface* surface)
     if (!surface) return nullptr;
 
     // Create an HBITMAP from the SDL surface
-    BITMAPV5HEADER bi = {};
+    BITMAPV5HEADER bi;
+    memset(&bi, 0, sizeof(BITMAPV5HEADER));
     bi.bV5Size = sizeof(BITMAPV5HEADER);
     bi.bV5Width = surface->w;
     bi.bV5Height = -surface->h; // top-down DIB
@@ -188,7 +191,8 @@ static HICON CreateWin32Icon(SDL_Surface* surface)
         return nullptr;
     }
 
-    ICONINFO iconInfo = {};
+    ICONINFO iconInfo;
+    memset(&iconInfo, 0, sizeof(ICONINFO));
     iconInfo.fIcon = TRUE;
     iconInfo.hbmColor = hBitmap;
     iconInfo.hbmMask = hMask;
@@ -234,20 +238,20 @@ static bool SetTaskbarIconWin32(SDL_Window* window, SDL_Surface* surface)
 
     static IconHolder s_icons;
 
-    if (s_icons.big) {
-        DestroyIcon(s_icons.big);
-        s_icons.big = nullptr;
+    if (s_icons.bigIcon) {
+        DestroyIcon(s_icons.bigIcon);
+        s_icons.bigIcon = nullptr;
     }
-    if (s_icons.small) {
-        DestroyIcon(s_icons.small);
-        s_icons.small = nullptr;
+    if (s_icons.smallIcon) {
+        DestroyIcon(s_icons.smallIcon);
+        s_icons.smallIcon = nullptr;
     }
 
     SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)bigIcon);
     SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)smallIcon);
 
-    s_icons.big = bigIcon;
-    s_icons.small = smallIcon;
+    s_icons.bigIcon = bigIcon;
+    s_icons.smallIcon = smallIcon;
 
     return true;
 #else
