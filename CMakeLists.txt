@@ -543,6 +543,14 @@ if(NOT BUILD_NO_GUI)
         Threads::Threads
         $<$<PLATFORM_ID:Windows>:Dbghelp;shell32>
     )
+
+    if(APPLE)
+        # Needed for Objective-C runtime and CoreGraphics APIs used in WindowIconHelper
+        target_link_libraries(RastaConverter PRIVATE
+            "-framework AppKit"
+            "-framework CoreGraphics"
+        )
+    endif()
 endif()
 if(BUILD_NO_GUI)
     target_link_libraries(RastaConverter-NO_GUI PRIVATE

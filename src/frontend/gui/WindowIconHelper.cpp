@@ -31,10 +31,11 @@
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
-#if TARGET_OS_OSX
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_OSX
 #define FREEIMAGE_H_BOOL_OVERRIDE
 #define BOOL FreeImageBOOL
-#endif
 #endif
 
 #include <FreeImage.h>
@@ -44,19 +45,17 @@
 #undef FREEIMAGE_H_BOOL_OVERRIDE
 #endif
 
-#if SDL_VERSION_ATLEAST(2,0,2)
-#include <SDL_syswm.h>
-#endif
-
-#if defined(__APPLE__)
-#include <TargetConditionals.h>
-#if TARGET_OS_OSX
+#if defined(__APPLE__) && TARGET_OS_OSX
 #include <CoreGraphics/CoreGraphics.h>
 #include <objc/objc.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
 #endif
+
+#if SDL_VERSION_ATLEAST(2,0,2)
+#include <SDL_syswm.h>
 #endif
+
 
 namespace
 {
