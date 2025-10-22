@@ -178,7 +178,7 @@ static SDL_Surface* ScaleSurface(SDL_Surface* src, int targetWidth, int targetHe
     SDL_Surface* scaled = SDL_CreateRGBSurfaceWithFormat(0, targetWidth, targetHeight, 32, SDL_PIXELFORMAT_RGBA8888);
     if (!scaled) return nullptr;
 
-    // Simple nearest-neighbor scaling with pre-multiplied alpha
+    // Simple nearest-neighbor scaling
     const float xRatio = static_cast<float>(src->w) / targetWidth;
     const float yRatio = static_cast<float>(src->h) / targetHeight;
 
@@ -201,11 +201,8 @@ static SDL_Surface* ScaleSurface(SDL_Surface* src, int targetWidth, int targetHe
             Uint8 r, g, b, a;
             SDL_GetRGBA(srcPixel, src->format, &r, &g, &b, &a);
 
-            // Pre-multiply alpha
-            r = (r * a) / 255;
-            g = (g * a) / 255;
-            b = (b * a) / 255;
-
+            // Keep colors in straight (non-pre-multiplied) alpha format
+            // Pre-multiplication will be done during final conversion to Windows format
             dstPixels[(y * targetWidth) + x] = SDL_MapRGBA(scaled->format, r, g, b, a);
         }
     }
@@ -234,7 +231,7 @@ static HICON CreateWin32Icon(SDL_Surface* surface, int targetSize)
         workingSurface = scaled;
     }
 
-    // Create an HBITMAP from the SDL surface
+    // Create an HBITMAP from the SDL surface with proper color space metadata
     BITMAPV5HEADER bi;
     memset(&bi, 0, sizeof(BITMAPV5HEADER));
     bi.bV5Size = sizeof(BITMAPV5HEADER);
@@ -243,10 +240,14 @@ static HICON CreateWin32Icon(SDL_Surface* surface, int targetSize)
     bi.bV5Planes = 1;
     bi.bV5BitCount = 32;
     bi.bV5Compression = BI_BITFIELDS;
+    // Windows expects BGRA format
     bi.bV5RedMask   = 0x00FF0000;
     bi.bV5GreenMask = 0x0000FF00;
     bi.bV5BlueMask  = 0x000000FF;
     bi.bV5AlphaMask = 0xFF000000;
+    // Set color space for proper HDR/SDR handling
+    bi.bV5CSType = LCS_sRGB;
+    bi.bV5Intent = LCS_GM_IMAGES;
 
     HDC hdc = GetDC(nullptr);
     if (!hdc) return nullptr;
@@ -261,16 +262,46 @@ static HICON CreateWin32Icon(SDL_Surface* surface, int targetSize)
         return nullptr;
     }
 
+    // Convert SDL surface to Windows DIB format
+    // Windows icons with alpha channel expect pre-multiplied alpha for proper rendering
     const uint8_t* src = static_cast<const uint8_t*>(workingSurface->pixels);
     const int src_pitch = workingSurface->pitch;
-    uint8_t* dst = static_cast<uint8_t*>(dibBits);
+    uint32_t* dst = static_cast<uint32_t*>(dibBits);
 
     for (int y = 0; y < workingSurface->h; ++y)
     {
-        memcpy(dst + y * workingSurface->w * 4, src + y * src_pitch, static_cast<size_t>(workingSurface->w) * 4);
+        const uint32_t* srcRow = reinterpret_cast<const uint32_t*>(src + y * src_pitch);
+        uint32_t* dstRow = dst + y * workingSurface->w;
+        
+        for (int x = 0; x < workingSurface->w; ++x)
+        {
+            Uint8 r, g, b, a;
+            SDL_GetRGBA(srcRow[x], workingSurface->format, &r, &g, &b, &a);
+            
+            // Pre-multiply alpha for proper blending and anti-aliasing
+            // This is required for correct rendering on all Windows versions including HDR
+            if (a < 255)
+            {
+                r = static_cast<Uint8>((r * a + 127) / 255);
+                g = static_cast<Uint8>((g * a + 127) / 255);
+                b = static_cast<Uint8>((b * a + 127) / 255);
+            }
+            
+            // Windows expects ARGB format matching the bV5 masks (0xAARRGGBB)
+            dstRow[x] = (static_cast<uint32_t>(a) << 24) |
+                       (static_cast<uint32_t>(r) << 16) |
+                       (static_cast<uint32_t>(g) << 8)  |
+                       (static_cast<uint32_t>(b));
+        }
     }
 
-    HBITMAP hMask = CreateBitmap(workingSurface->w, workingSurface->h, 1, 1, NULL);
+    // Create mask bitmap - for 32-bit icons with alpha, mask should be all black (0)
+    // to let the alpha channel handle transparency
+    // Mask rows must be padded to DWORD (32-bit) boundary
+    const size_t maskStride = ((workingSurface->w + 31) / 32) * 4;
+    const size_t maskSize = maskStride * workingSurface->h;
+    std::vector<uint8_t> maskData(maskSize, 0x00);
+    HBITMAP hMask = CreateBitmap(workingSurface->w, workingSurface->h, 1, 1, maskData.data());
     if (!hMask)
     {
         DBG_PRINT("[ICON] CreateBitmap mask failed (err=%lu)", GetLastError());
@@ -522,12 +553,34 @@ static ResourceIconData SurfaceToResourceIcon(SDL_Surface* surface)
     const size_t xorSize = static_cast<size_t>(surface->w) * surface->h * 4;
     data.xorBitmap.resize(xorSize);
 
+    // Convert SDL surface to Windows icon format
+    // Windows .ico format with 32-bit alpha expects pre-multiplied alpha
     const uint8_t* src = static_cast<const uint8_t*>(surface->pixels);
     for (int y = 0; y < surface->h; ++y)
     {
-        const uint8_t* srcRow = src + (surface->h - 1 - y) * surface->pitch;
-        uint8_t* dstRow = data.xorBitmap.data() + static_cast<size_t>(y) * surface->w * 4;
-        memcpy(dstRow, srcRow, static_cast<size_t>(surface->w) * 4);
+        // Icon data is stored bottom-up
+        const uint32_t* srcRow = reinterpret_cast<const uint32_t*>(src + (surface->h - 1 - y) * surface->pitch);
+        uint32_t* dstRow = reinterpret_cast<uint32_t*>(data.xorBitmap.data() + static_cast<size_t>(y) * surface->w * 4);
+        
+        for (int x = 0; x < surface->w; ++x)
+        {
+            Uint8 r, g, b, a;
+            SDL_GetRGBA(srcRow[x], surface->format, &r, &g, &b, &a);
+            
+            // Pre-multiply alpha for proper rendering across all configurations
+            if (a < 255)
+            {
+                r = static_cast<Uint8>((r * a + 127) / 255);
+                g = static_cast<Uint8>((g * a + 127) / 255);
+                b = static_cast<Uint8>((b * a + 127) / 255);
+            }
+            
+            // Windows .ico format: ARGB (0xAARRGGBB)
+            dstRow[x] = (static_cast<uint32_t>(a) << 24) |
+                       (static_cast<uint32_t>(r) << 16) |
+                       (static_cast<uint32_t>(g) << 8)  |
+                       (static_cast<uint32_t>(b));
+        }
     }
 
     size_t maskStride = ((surface->w + 31) / 32) * 4;
