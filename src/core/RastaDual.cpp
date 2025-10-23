@@ -13,7 +13,7 @@
 #include <cstdio>
 
 // Externs and forward declarations from other translation units
-extern const char *program_version;
+extern const char* program_version;
 extern OnOffMap on_off;
 extern int solutions;
 extern bool quiet;
@@ -218,25 +218,28 @@ bool RastaConverter::SaveScreenDataFromTargets(const char *filename, const std::
 void RastaConverter::SavePMGWithSprites(std::string name, const sprites_memory_t& sprites)
 {
 	size_t sprite,y,bit; unsigned char b;
-	FILE *fp=fopen(name.c_str(),"wt+"); if (!fp) return;
-	fprintf(fp,"; ---------------------------------- \n");
-	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
-	fprintf(fp,"; ---------------------------------- \n");
-	fprintf(fp,"missiles\n");
-	fprintf(fp,"\t.ds $100\n");
+    std::ofstream out(name, std::ios::out | std::ios::trunc);
+    if (!out) return;
+    out << "; ---------------------------------- \n";
+    out << "; RastaConverter by Ilmenit v." << program_version << '\n';
+    out << "; ---------------------------------- \n";
+    out << "missiles\n";
+    out << "\t.ds $100\n";
 	for(sprite=0;sprite<4;++sprite)
 	{
-		fprintf(fp,"player%zu\n",sprite);
-		fprintf(fp,"\t.he 00 00 00 00 00 00 00 00");
+        out << "player" << sprite << '\n';
+        out << "\t.he 00 00 00 00 00 00 00 00";
 		for (y=0;y<240;++y)
 		{
 			b=0; for (bit=0;bit<8;++bit) { b|=(sprites[y][sprite][bit])<<(7-bit); }
-			fprintf(fp," %02X",b);
-			if (y%16==7) fprintf(fp,"\n\t.he");
+            out << ' ' << std::uppercase << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+            out << std::nouppercase << std::dec;
+            if (y%16==7) out << "\n\t.he";
 		}
-		fprintf(fp," 00 00 00 00 00 00 00 00\n");
+        out << " 00 00 00 00 00 00 00 00\n";
 	}
-	fclose(fp);
+    if (!out)
+        DBG_PRINT("[RASTA] Error writing PMG handler to %s", name.c_str());
 }
 
 void RastaConverter::MainLoopDual()

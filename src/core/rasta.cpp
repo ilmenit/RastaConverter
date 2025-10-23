@@ -1,4 +1,6 @@
-const char *program_version="Beta8";
+#include "version.h"
+
+const char* program_version = RASTA_CONVERTER_VERSION;
 
 #ifdef _MSC_VER
 #pragma warning (disable: 4312)
@@ -18,6 +20,7 @@ const char *program_version="Beta8";
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <memory>
 #include "FreeImage.h"
 
 #undef int8_t
@@ -42,6 +45,8 @@ const char *program_version="Beta8";
 #include <ctype.h>
 #include <iomanip>
 #include <iterator>
+#include <optional>
+#include <limits>
 
 #include "rasta.h"
 #include "prng_xoroshiro.h"
@@ -175,153 +180,211 @@ void RastaConverter::LoadAtariPalette()
 		Error("Error opening .act palette file");
 }
 
+// RAII helper for FreeImage bitmaps
+struct FreeImageBitmapDeleter {
+    void operator()(FIBITMAP* bmp) const {
+        if (bmp) {
+            FreeImage_Unload(bmp);
+        }
+    }
+};
+
+using FreeImageBitmapPtr = std::unique_ptr<FIBITMAP, FreeImageBitmapDeleter>;
+
 // Function to rescale FIBITMAP to double its width
-FIBITMAP* RescaleFIBitmapDoubleWidth(FIBITMAP* originalFiBitmap) {
-	int originalWidth = FreeImage_GetWidth(originalFiBitmap);
-	int originalHeight = FreeImage_GetHeight(originalFiBitmap);
+static FIBITMAP* RescaleFIBitmapDoubleWidth(FIBITMAP* originalFiBitmap) {
+    if (!originalFiBitmap) {
+        DBG_PRINT("[RASTA] RescaleFIBitmapDoubleWidth called with null bitmap");
+        return nullptr;
+    }
 
-	// Calculate the new width as double the original width
-	int newWidth = originalWidth * 2;
+    const int originalWidth = FreeImage_GetWidth(originalFiBitmap);
+    const int originalHeight = FreeImage_GetHeight(originalFiBitmap);
 
-	// Use FreeImage_Rescale to create a new bitmap with the new dimensions
-	FIBITMAP* rescaledFiBitmap = FreeImage_Rescale(originalFiBitmap, newWidth, originalHeight, FILTER_BOX);
+    if (originalWidth <= 0 || originalHeight <= 0) {
+        DBG_PRINT("[RASTA] Invalid bitmap dimensions for rescale: %dx%d", originalWidth, originalHeight);
+        return nullptr;
+    }
 
-	return rescaledFiBitmap;
+    // Calculate the new width as double the original width
+    const int newWidth = originalWidth * 2;
+
+    // Use FreeImage_Rescale to create a new bitmap with the new dimensions
+    FIBITMAP* rescaledFiBitmap = FreeImage_Rescale(originalFiBitmap, newWidth, originalHeight, FILTER_BOX);
+    if (!rescaledFiBitmap) {
+        DBG_PRINT("[RASTA] FreeImage_Rescale failed for %dx%d -> %dx%d", originalWidth, originalHeight, newWidth, originalHeight);
+    }
+
+    return rescaledFiBitmap;
 }
 
 bool RastaConverter::SavePicture(const std::string& filename, FIBITMAP* to_save)
 {
-	// Assuming to_save is already in the correct format and size
-	// No need to create a new bitmap or stretch_blit
+    if (!to_save) {
+        Error(string("SavePicture called with null bitmap: ") + filename);
+        return false;
+    }
 
-	FIBITMAP* stretched = RescaleFIBitmapDoubleWidth(to_save);
+    FreeImageBitmapPtr stretched(RescaleFIBitmapDoubleWidth(to_save));
+    if (!stretched) {
+        Error(string("Failed to rescale bitmap for saving: ") + filename);
+        return false;
+    }
 
-	// Flip the image vertically
-	FreeImage_FlipVertical(stretched);
+    if (!FreeImage_FlipVertical(stretched.get())) {
+        Error(string("Error flipping picture vertically: ") + filename);
+        return false;
+    }
 
-	// Save the image as a PNG
-	if (FreeImage_Save(FIF_PNG, stretched, filename.c_str()))
-	{
-		// If the image is saved successfully
-		FreeImage_Unload(stretched);
-		return true;
-	}
-	else
-	{
-		// If there was an error saving the image
-		Error(string("Error saving picture.")+filename);
-		return false;
-	}
+    if (!FreeImage_Save(FIF_PNG, stretched.get(), filename.c_str()))
+    {
+        Error(string("Error saving picture.") + filename);
+        return false;
+    }
+
+    return true;
 }
 void RastaConverter::SaveStatistics(const char *fn)
 {
-	FILE *f = fopen(fn, "w");
-	if (!f)
-		return;
+    std::ofstream out(fn, std::ios::out | std::ios::trunc);
+    if (!out)
+    {
+        DBG_PRINT("[RASTA] Unable to write statistics to %s", fn);
+        return;
+    }
 
-	fprintf(f, "Iterations,Seconds,Score\n");
-	for(statistics_list::const_iterator it(m_eval_gstate.m_statistics.begin()), itEnd(m_eval_gstate.m_statistics.end());
-		it != itEnd;
-		++it)
-	{
-		const statistics_point& pt = *it;
+    out << "Iterations,Seconds,Score\n";
+    out << std::fixed << std::setprecision(6);
+    for (const statistics_point& pt : m_eval_gstate.m_statistics)
+    {
+        out << static_cast<unsigned long long>(pt.evaluations) << ','
+            << pt.seconds << ','
+            << NormalizeScore(pt.distance) << '\n';
+    }
 
-		fprintf(f, "%llu,%u,%.6f\n", (unsigned long long)pt.evaluations, pt.seconds, NormalizeScore(pt.distance));
-	}
-
-	fclose(f);
+    if (!out)
+    {
+        DBG_PRINT("[RASTA] Error while writing statistics to %s", fn);
+    }
 }
 
 void RastaConverter::SaveOptimizerState(const char* fn) {
-	FILE* f = fopen(fn, "wt+");
-	if (!f)
-		return;
+    std::ofstream out(fn, std::ios::out | std::ios::trunc);
+    if (!out)
+    {
+        DBG_PRINT("[RASTA] Unable to write optimizer state to %s", fn);
+        return;
+    }
 
-	// Optimizer kind
-	const char* opt;
-	if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LAHC) {
-		opt = "lahc";
-	} else if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_DLAS) {
-		opt = "dlas";
-	} else if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LEGACY) {
-		opt = "legacy";
-	} else {
-		opt = "lahc"; // fallback
-	}
-	fprintf(f, "%s\n", opt);
+    const char* opt;
+    if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LAHC) {
+        opt = "lahc";
+    } else if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_DLAS) {
+        opt = "dlas";
+    } else if (m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LEGACY) {
+        opt = "legacy";
+    } else {
+        opt = "lahc"; // fallback
+    }
+    out << opt << '\n';
 
-	// Persist evaluation counters as unsigned long long
-	fprintf(f, "%llu\n", (unsigned long long)m_eval_gstate.m_evaluations);
-	fprintf(f, "%llu\n", (unsigned long long)m_eval_gstate.m_last_best_evaluation);
+    out << static_cast<unsigned long long>(m_eval_gstate.m_evaluations) << '\n';
+    out << static_cast<unsigned long long>(m_eval_gstate.m_last_best_evaluation) << '\n';
 
-	// DLAS/LAHC state
-	fprintf(f, "%lu\n", (unsigned long)m_eval_gstate.m_previous_results.size());
-	fprintf(f, "%lu\n", (unsigned long)m_eval_gstate.m_previous_results_index);
-	fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_cost_max);
-	fprintf(f, "%d\n", m_eval_gstate.m_N);
-	fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_current_cost);
+    out << static_cast<unsigned long>(m_eval_gstate.m_previous_results.size()) << '\n';
+    out << static_cast<unsigned long>(m_eval_gstate.m_previous_results_index) << '\n';
+    out << std::setprecision(21) << static_cast<long double>(m_eval_gstate.m_cost_max) << '\n';
+    out << m_eval_gstate.m_N << '\n';
+    out << std::setprecision(21) << static_cast<long double>(m_eval_gstate.m_current_cost) << '\n';
 
-	for (size_t i = 0; i < m_eval_gstate.m_previous_results.size(); ++i) {
-		fprintf(f, "%Lf\n", (long double)m_eval_gstate.m_previous_results[i]);
-	}
-	fclose(f);
+    out << std::setprecision(21);
+    for (double value : m_eval_gstate.m_previous_results)
+    {
+        out << static_cast<long double>(value) << '\n';
+    }
+
+    if (!out)
+    {
+        DBG_PRINT("[RASTA] Error while writing optimizer state to %s", fn);
+    }
 }
 
 void RastaConverter::LoadOptimizerState(string name)
 {
-	FILE* f = fopen(name.c_str(), "rt");
-	if (!f)
-		return;
+    std::ifstream in(name);
+    if (!in)
+        return;
 
-	char optbuf[32] = {0};
-	if (!fgets(optbuf, sizeof(optbuf), f)) { fclose(f); return; }
-	for (int i = 0; optbuf[i]; ++i) { if (optbuf[i] == '\n' || optbuf[i] == '\r') { optbuf[i] = 0; break; } }
-	std::string opt = optbuf;
-	for (auto &c : opt) c = (char)tolower(c);
-	if (opt == "lahc") {
-		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LAHC;
-	} else if (opt == "dlas") {
-		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_DLAS;
-	} else if (opt == "legacy") {
-		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LEGACY;
-	} else {
-		m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LAHC; // fallback
-	}
+    auto lowercase = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value;
+    };
 
-	// Load evaluation counters as unsigned long long
-	unsigned long long evals = 0ULL;
-	unsigned long long lastbest = 0ULL;
-	fscanf(f, "%llu\n", &evals);
-	fscanf(f, "%llu\n", &lastbest);
-	m_eval_gstate.m_evaluations = evals;
-	m_eval_gstate.m_last_best_evaluation = lastbest;
+    auto read_line = [&](std::string& line) -> bool {
+        if (!std::getline(in, line))
+        {
+            DBG_PRINT("[RASTA] Unexpected end of optimizer state file: %s", name.c_str());
+            return false;
+        }
+        return true;
+    };
 
-	unsigned long no_elements = 0;
-	unsigned long index = 0;
-	long double cost_max = 0;
-	int N = 0;
-	long double current_cost = 0;
+    std::string line;
+    if (!read_line(line)) return;
+    std::string opt = lowercase(line);
 
-	fscanf(f, "%lu\n", &no_elements);
-	fscanf(f, "%lu\n", &index);
-	fscanf(f, "%Lf\n", &cost_max);
-	fscanf(f, "%d\n", &N);
-	fscanf(f, "%Lf\n", &current_cost);
+    if (opt == "lahc") {
+        m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LAHC;
+    } else if (opt == "dlas") {
+        m_eval_gstate.m_optimizer = EvalGlobalState::OPT_DLAS;
+    } else if (opt == "legacy") {
+        m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LEGACY;
+    } else {
+        m_eval_gstate.m_optimizer = EvalGlobalState::OPT_LAHC; // fallback
+    }
 
-	m_eval_gstate.m_previous_results.clear();
-	m_eval_gstate.m_previous_results.reserve(no_elements);
-	for (size_t i = 0; i < (size_t)no_elements; ++i) {
-		long double v = 0;
-		fscanf(f, "%Lf\n", &v);
-		m_eval_gstate.m_previous_results.push_back((double)v);
-	}
+    auto read_numeric = [&](auto& out) -> bool {
+        if (!read_line(line)) return false;
+        std::istringstream iss(line);
+        if (!(iss >> out))
+        {
+            DBG_PRINT("[RASTA] Failed to parse optimizer state value: %s", line.c_str());
+            return false;
+        }
+        return true;
+    };
 
-	m_eval_gstate.m_previous_results_index = index;
-	m_eval_gstate.m_cost_max = (double)cost_max;
-	m_eval_gstate.m_N = N;
-	m_eval_gstate.m_current_cost = (double)current_cost;
+    unsigned long long evals = 0ULL;
+    unsigned long long lastbest = 0ULL;
+    if (!read_numeric(evals)) return;
+    if (!read_numeric(lastbest)) return;
+    m_eval_gstate.m_evaluations = evals;
+    m_eval_gstate.m_last_best_evaluation = lastbest;
 
-	fclose(f);
+    unsigned long no_elements = 0;
+    unsigned long index = 0;
+    long double cost_max = 0;
+    int N = 0;
+    long double current_cost = 0;
+
+    if (!read_numeric(no_elements)) return;
+    if (!read_numeric(index)) return;
+    if (!read_numeric(cost_max)) return;
+    if (!read_numeric(N)) return;
+    if (!read_numeric(current_cost)) return;
+
+    m_eval_gstate.m_previous_results.clear();
+    m_eval_gstate.m_previous_results.reserve(no_elements);
+    for (size_t i = 0; i < static_cast<size_t>(no_elements); ++i) {
+        long double v = 0;
+        if (!read_numeric(v)) return;
+        m_eval_gstate.m_previous_results.push_back(static_cast<double>(v));
+    }
+
+    m_eval_gstate.m_previous_results_index = index;
+    m_eval_gstate.m_cost_max = static_cast<double>(cost_max);
+    m_eval_gstate.m_N = N;
+    m_eval_gstate.m_current_cost = static_cast<double>(current_cost);
 }
 
 bool RastaConverter::LoadInputBitmap()
@@ -352,8 +415,25 @@ bool RastaConverter::LoadInputBitmap()
 			cfg.height=240;
 	}
 	
-	input_bitmap = FreeImage_Rescale(input_bitmap,cfg.width,cfg.height,cfg.rescale_filter);
-	input_bitmap = FreeImage_ConvertTo24Bits(input_bitmap);
+    {
+        FIBITMAP* rescaled = FreeImage_Rescale(input_bitmap, cfg.width, cfg.height, cfg.rescale_filter);
+        if (!rescaled) {
+            FreeImage_Unload(input_bitmap);
+            Error(string("Error rescaling input file: ") + cfg.input_file);
+        }
+        FreeImage_Unload(input_bitmap);
+        input_bitmap = rescaled;
+    }
+
+    {
+        FIBITMAP* converted = FreeImage_ConvertTo24Bits(input_bitmap);
+        if (!converted) {
+            FreeImage_Unload(input_bitmap);
+            Error(string("Error converting input file to 24-bit: ") + cfg.input_file);
+        }
+        FreeImage_Unload(input_bitmap);
+        input_bitmap = converted;
+    }
 
 	FreeImage_AdjustBrightness(input_bitmap,cfg.brightness);
 	FreeImage_AdjustContrast(input_bitmap,cfg.contrast);
@@ -928,32 +1008,40 @@ unsigned char ConvertColorRegisterToRawData(e_target t)
 
 bool RastaConverter::SaveScreenData(const char *filename)
 {
-	int x,y,a=0,b=0,c=0,d=0;
-	FILE *fp=fopen(filename,"wb+");
-	if (!fp)
-		Error("Error saving MIC screen data");
+    int x,y,a=0,b=0,c=0,d=0;
+    std::ofstream out(filename, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out)
+        Error("Error saving MIC screen data");
 
-	Message("Saving screen data");
-	for(y=0;y<m_height;++y)
-	{
-		// encode 4 pixel colors in byte
+    Message("Saving screen data");
+    for(y=0;y<m_height;++y)
+    {
+        // encode 4 pixel colors in byte
 
-		for (x=0;x<m_width;x+=4)
-		{
-			unsigned char pix=0;
-			a=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x]);
-			b=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+1]);
-			c=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+2]);
-			d=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+3]);
-			pix |= a<<6;
-			pix |= b<<4;
-			pix |= c<<2;
-			pix |= d;
-			fwrite(&pix,1,1,fp);
-		}
-	}
-	fclose(fp);
-	return true;
+        for (x=0;x<m_width;x+=4)
+        {
+            unsigned char pix=0;
+            a=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x]);
+            b=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+1]);
+            c=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+2]);
+            d=ConvertColorRegisterToRawData((e_target)m_eval_gstate.m_created_picture_targets[y][x+3]);
+            pix |= a<<6;
+            pix |= b<<4;
+            pix |= c<<2;
+            pix |= d;
+            out.put(static_cast<char>(pix));
+            if (!out)
+            {
+                Error("Error writing MIC screen data");
+            }
+        }
+    }
+    out.flush();
+    if (!out)
+    {
+        Error("Error finalizing MIC screen data");
+    }
+    return true;
 }
 
 
@@ -1918,44 +2006,46 @@ void RastaConverter::ShowLastCreatedPicture()
 
 void RastaConverter::SavePMG(string name)
 {
-	size_t sprite,y,bit;
-	unsigned char b;
-	Message("Saving sprites (PMG)");
+    size_t sprite,y,bit;
+    unsigned char b;
+    Message("Saving sprites (PMG)");
 
-	FILE *fp=fopen(name.c_str(),"wt+");
-	if (!fp)
-		Error("Error saving PMG handler");
+    std::ofstream out(name, std::ios::out | std::ios::trunc);
+    if (!out)
+        Error("Error saving PMG handler");
 
-	fprintf(fp,"; ---------------------------------- \n");
-	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
-	fprintf(fp,"; ---------------------------------- \n");
+    out << "; ---------------------------------- \n";
+    out << "; RastaConverter by Ilmenit v." << program_version << '\n';
+    out << "; ---------------------------------- \n";
 
-	fprintf(fp,"missiles\n");
+    out << "missiles\n";
 
-	fprintf(fp,"\t.ds $100\n");
+    out << "\t.ds $100\n";
 
 
-	for(sprite=0;sprite<4;++sprite)
-	{
-		fprintf(fp,"player%d\n",(int)sprite);
-		fprintf(fp,"\t.he 00 00 00 00 00 00 00 00");
-		for (y=0;y<240;++y)
-		{
-			b=0;
-			for (bit=0;bit<8;++bit)
-			{
-				if (y > (size_t)m_height)
-					m_eval_gstate.m_sprites_memory[y][sprite][bit]=0;
+    for(sprite=0;sprite<4;++sprite)
+    {
+        out << "player" << static_cast<int>(sprite) << '\n';
+        out << "\t.he 00 00 00 00 00 00 00 00";
+        for (y=0;y<240;++y)
+        {
+            b=0;
+            for (bit=0;bit<8;++bit)
+            {
+                if (y > (size_t)m_height)
+                    m_eval_gstate.m_sprites_memory[y][sprite][bit]=0;
 
-				b|=(m_eval_gstate.m_sprites_memory[y][sprite][bit])<<(7-bit);
-			}
-			fprintf(fp," %02X",b);
-			if (y%16==7)
-				fprintf(fp,"\n\t.he");
-		}
-		fprintf(fp," 00 00 00 00 00 00 00 00\n");
-	}
-	fclose(fp);
+                b|=(m_eval_gstate.m_sprites_memory[y][sprite][bit])<<(7-bit);
+            }
+            out << ' ' << std::uppercase << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+            out << std::nouppercase << std::dec;
+            if (y%16==7)
+                out << "\n\t.he";
+        }
+        out << " 00 00 00 00 00 00 00 00\n";
+    }
+    if (!out)
+        Error("Error finalizing PMG handler");
 }
 
 bool RastaConverter::GetInstructionFromString(const string& line, SRasterInstruction &instr)
@@ -2238,127 +2328,135 @@ bool RastaConverter::Resume()
 
 void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 {
-	Message("Saving Raster Program");
+    Message("Saving Raster Program");
 
-	FILE *fp=fopen(string(name+".ini").c_str(),"wt+");
-	if (!fp)
-		Error("Error saving Raster Program");
+    {
+        std::ofstream iniOut(name + ".ini", std::ios::out | std::ios::trunc);
+        if (!iniOut)
+            Error("Error saving Raster Program");
 
-	fprintf(fp,"; ---------------------------------- \n");
-	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
-	fprintf(fp,"; ---------------------------------- \n");
+        iniOut << "; ---------------------------------- \n";
+        iniOut << "; RastaConverter by Ilmenit v." << program_version << '\n';
+        iniOut << "; ---------------------------------- \n";
+        iniOut << "\n; Initial values \n";
 
-	fprintf(fp,"\n; Initial values \n");
+        iniOut << std::uppercase << std::hex;
+        for (size_t y = 0; y < sizeof(pic->mem_regs_init); ++y)
+        {
+            iniOut << "\tlda #$" << std::setw(2) << std::setfill('0') << static_cast<int>(pic->mem_regs_init[y]) << '\n';
+            iniOut << "\tsta " << mem_regs_names[y] << '\n';
+        }
+        iniOut << std::nouppercase << std::dec;
 
-	for(size_t y=0;y<sizeof(pic->mem_regs_init);++y)
-	{
-		fprintf(fp,"\tlda ");
-		fprintf(fp,"#$%02X\n",pic->mem_regs_init[y]);		
-		fprintf(fp,"\tsta ");
-		fprintf(fp,"%s\n",mem_regs_names[y]);		
-	}
+        iniOut << "\tlda #$0\n";
+        iniOut << "\ttax\n";
+        iniOut << "\ttay\n";
 
-	// zero registers
-	fprintf(fp,"\tlda #$0\n");
-	fprintf(fp,"\ttax\n");
-	fprintf(fp,"\ttay\n");
+        iniOut << "\n; Set proper count of wsyncs \n";
+        iniOut << "\n\t:2 sta wsync\n";
 
-	fprintf(fp,"\n; Set proper count of wsyncs \n");
-	fprintf(fp,"\n\t:2 sta wsync\n");
+        if (!iniOut)
+            Error("Error finalizing Raster Program ini file");
+    }
 
-	fclose(fp);
+    {
+        std::ofstream heightOut(name + ".h", std::ios::out | std::ios::trunc);
+        if (!heightOut)
+            Error("Error saving picture height header file");
+        heightOut << "; Set proper picture height\n";
+        heightOut << "PIC_HEIGHT = " << m_height << '\n';
+        if (!heightOut)
+            Error("Error finalizing picture height header file");
+    }
 
-	// Save picture height into a separate header file
-	FILE *fh=fopen(string(name+".h").c_str(),"wt+");
-	if (!fh)
-		Error("Error saving picture height header file");
-	fprintf(fh,"; Set proper picture height\n");
-	fprintf(fh,"PIC_HEIGHT = %d\n",m_height);
-	fclose(fh);
+    std::ofstream asmOut(name, std::ios::out | std::ios::trunc);
+    if (!asmOut)
+        Error("Error saving DLI handler");
 
-	fp=fopen(name.c_str(),"wt+");
-	if (!fp)
-		Error("Error saving DLI handler");
+    asmOut << "; ---------------------------------- \n";
+    asmOut << "; RastaConverter by Ilmenit v." << program_version << '\n';
+    asmOut << "; InputName: " << cfg.input_file << '\n';
+    asmOut << "; CmdLine: " << cfg.command_line << '\n';
+    asmOut << "; Evaluations: " << static_cast<unsigned long long>(m_eval_gstate.m_evaluations) << '\n';
+    asmOut << "; Score: " << NormalizeScore(m_eval_gstate.m_best_result) << '\n';
+    asmOut << "; ---------------------------------- \n";
 
-	fprintf(fp,"; ---------------------------------- \n");
-	fprintf(fp,"; RastaConverter by Ilmenit v.%s\n",program_version);
-	fprintf(fp,"; InputName: %s\n",cfg.input_file.c_str());
-	fprintf(fp,"; CmdLine: %s\n",cfg.command_line.c_str());
-	fprintf(fp,"; Evaluations: %llu\n", (unsigned long long)m_eval_gstate.m_evaluations);
-	fprintf(fp,"; Score: %g\n",NormalizeScore(m_eval_gstate.m_best_result));
-	fprintf(fp,"; ---------------------------------- \n");
+    asmOut << "; Proper offset \n";
+    asmOut << "\tnop\n\tnop\n\tnop\n\tnop\n\tcmp byt2;\n";
 
-	fprintf(fp,"; Proper offset \n");
-	fprintf(fp,"\tnop\n");
-	fprintf(fp,"\tnop\n");
-	fprintf(fp,"\tnop\n");
-	fprintf(fp,"\tnop\n");
-	fprintf(fp,"\tcmp byt2;\n");
+    int h = FreeImage_GetHeight(input_bitmap);
 
-	int h = FreeImage_GetHeight(input_bitmap);
+    asmOut << std::uppercase << std::hex;
+    for (int y = 0; y < h; ++y)
+    {
+        asmOut << "line" << y << '\n';
+        size_t prog_len = pic->raster_lines[y].instructions.size();
+        for (size_t i = 0; i < prog_len; ++i)
+        {
+            SRasterInstruction instr = pic->raster_lines[y].instructions[i];
+            bool save_target = false;
+            bool save_value = false;
+            asmOut << "\t";
+            switch (instr.loose.instruction)
+            {
+            case E_RASTER_LDA:
+                asmOut << "lda ";
+                save_value = true;
+                break;
+            case E_RASTER_LDX:
+                asmOut << "ldx ";
+                save_value = true;
+                break;
+            case E_RASTER_LDY:
+                asmOut << "ldy ";
+                save_value = true;
+                break;
+            case E_RASTER_NOP:
+                asmOut << "nop ";
+                break;
+            case E_RASTER_STA:
+                asmOut << "sta ";
+                save_target = true;
+                break;
+            case E_RASTER_STX:
+                asmOut << "stx ";
+                save_target = true;
+                break;
+            case E_RASTER_STY:
+                asmOut << "sty ";
+                save_target = true;
+                break;
+            default:
+                Error("Unknown instruction!");
+            }
+            if (save_value)
+            {
+        asmOut << std::uppercase << std::hex << "#$" << std::setw(2) << std::setfill('0') << static_cast<int>(instr.loose.value)
+               << std::nouppercase << std::dec
+               << " ; " << static_cast<int>(instr.loose.value)
+               << " (spr=" << static_cast<int>(instr.loose.value - 48) << ")";
+            }
+            else if (save_target)
+            {
+                if (instr.loose.target > E_TARGET_MAX)
+                    Error("Unknown target in instruction!");
+                asmOut << mem_regs_names[instr.loose.target];
+            }
+            asmOut << '\n';
+        }
+        asmOut << std::dec;
+        for (int cycle = pic->raster_lines[y].cycles; cycle < free_cycles; cycle += 2)
+        {
+            asmOut << "\tnop ; filler\n";
+        }
+        asmOut << "\tcmp byt2; on zero page so 3 cycles\n";
+        asmOut << std::uppercase << std::hex;
+    }
+    asmOut << std::nouppercase << std::dec;
+    asmOut << "; ---------------------------------- \n";
 
-	for(int y=0;y<h;++y)
-	{
-		fprintf(fp,"line%d\n",y);
-		size_t prog_len=pic->raster_lines[y].instructions.size();
-		for (size_t i=0;i<prog_len;++i)
-		{
-			SRasterInstruction instr=pic->raster_lines[y].instructions[i];
-			bool save_target=false;
-			bool save_value=false;
-			fprintf(fp,"\t");
-			switch (instr.loose.instruction)
-			{
-			case E_RASTER_LDA:
-				fprintf(fp,"lda ");
-				save_value=true;
-				break;
-			case E_RASTER_LDX:
-				fprintf(fp,"ldx ");
-				save_value=true;
-				break;
-			case E_RASTER_LDY:
-				fprintf(fp,"ldy ");
-				save_value=true;
-				break;
-			case E_RASTER_NOP:
-				fprintf(fp,"nop ");
-				break;
-			case E_RASTER_STA:
-				fprintf(fp,"sta ");
-				save_target=true;
-				break;
-			case E_RASTER_STX:
-				fprintf(fp,"stx ");
-				save_target=true;
-				break;
-			case E_RASTER_STY:
-				fprintf(fp,"sty ");
-				save_target=true;
-				break;
-			default:
-				Error("Unknown instruction!");
-			}
-			if (save_value)
-			{
-				fprintf(fp,"#$%02X ; %d (spr=%d)",instr.loose.value,instr.loose.value,instr.loose.value-48);
-			}
-			else if (save_target)
-			{
-				if (instr.loose.target>E_TARGET_MAX)
-					Error("Unknown target in instruction!");
-				fprintf(fp,"%s",mem_regs_names[instr.loose.target]);
-			}
-			fprintf(fp,"\n");			
-		}
-		for (int cycle=pic->raster_lines[y].cycles;cycle<free_cycles;cycle+=2)
-		{
-			fprintf(fp,"\tnop ; filler\n");
-		}
-		fprintf(fp,"\tcmp byt2; on zero page so 3 cycles\n");
-	}
-	fprintf(fp,"; ---------------------------------- \n");
-	fclose(fp);
+    if (!asmOut)
+        Error("Error finalizing DLI handler");
 }
 
 double RastaConverter::NormalizeScore(double raw_score)
