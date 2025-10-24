@@ -195,24 +195,27 @@ void RastaConverter::UpdateTargetsFromResults(const std::vector<const line_cache
 
 bool RastaConverter::SaveScreenDataFromTargets(const char *filename, const std::vector< std::vector<unsigned char> >& targets)
 {
-	int x,y,a=0,b=0,c=0,d=0;
-	FILE *fp=fopen(filename,"wb+");
-	if (!fp) return false;
-	for(y=0;y<m_height;++y)
-	{
-		for (x=0;x<m_width;x+=4)
-		{
-			unsigned char pix=0;
-			a=ConvertColorRegisterToRawData((e_target)targets[y][x]);
-			b=ConvertColorRegisterToRawData((e_target)targets[y][x+1]);
-			c=ConvertColorRegisterToRawData((e_target)targets[y][x+2]);
-			d=ConvertColorRegisterToRawData((e_target)targets[y][x+3]);
-			pix |= a<<6; pix |= b<<4; pix |= c<<2; pix |= d;
-			fwrite(&pix,1,1,fp);
-		}
-	}
-	fclose(fp);
-	return true;
+    std::ofstream out(filename, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+
+    for (int y = 0; y < m_height; ++y)
+    {
+        for (int x = 0; x < m_width; x += 4)
+        {
+            unsigned char pix = 0;
+            int a = ConvertColorRegisterToRawData((e_target)targets[y][x]);
+            int b = ConvertColorRegisterToRawData((e_target)targets[y][x + 1]);
+            int c = ConvertColorRegisterToRawData((e_target)targets[y][x + 2]);
+            int d = ConvertColorRegisterToRawData((e_target)targets[y][x + 3]);
+            pix |= static_cast<unsigned char>(a << 6);
+            pix |= static_cast<unsigned char>(b << 4);
+            pix |= static_cast<unsigned char>(c << 2);
+            pix |= static_cast<unsigned char>(d);
+            out.put(static_cast<char>(pix));
+        }
+    }
+
+    return static_cast<bool>(out);
 }
 
 void RastaConverter::SavePMGWithSprites(std::string name, const sprites_memory_t& sprites)

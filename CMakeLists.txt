@@ -101,6 +101,12 @@ set(GUI_SOURCE_FILES
     src/frontend/gui/WindowIconHelper.cpp
 )
 
+if(APPLE)
+    list(APPEND GUI_SOURCE_FILES src/frontend/gui/WindowIconHelper_Mac.cpp)
+elseif(WIN32)
+    list(APPEND GUI_SOURCE_FILES src/frontend/gui/WindowIconHelper_Win32.cpp)
+endif()
+
 set(ALL_SOURCE_FILES ${COMMON_SOURCE_FILES} ${GUI_SOURCE_FILES})
 
 set(HEADER_FILES
