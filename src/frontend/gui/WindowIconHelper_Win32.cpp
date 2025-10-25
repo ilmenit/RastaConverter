@@ -10,9 +10,11 @@
 #include <Windows.h>
 #include <KnownFolders.h>
 #include <ShlObj.h>
+#include <Shobjidl.h>
 #include <Shlwapi.h>
 #include <Propkey.h>
 #include <Propvarutil.h>
+#include <propidl.h>
 #include <psapi.h>
 
 #include <SDL.h>
@@ -20,9 +22,9 @@
 #include <SDL_syswm.h>
 #endif
 
+#include <memory>
 #include <vector>
 #include <string>
-#include <fstream>
 #include <mutex>
 #include <unordered_map>
 #include <atomic>
@@ -193,6 +195,23 @@ static HICON CreateWin32Icon(SDL_Surface* surface, int targetSize)
     }
 
     return hIcon;
+}
+
+// Windows Explorer is notoriously sticky about cached icons. After we land a new
+// icon on disk we poke the shell to re-query both the file and the association so
+// the taskbar refreshes without forcing the user to restart Explorer.
+static void NotifyShellOfIconChange(const std::wstring& iconPath)
+{
+    // A tiny delay avoids a race where the shell re-opens the icon before the
+    // filesystem acknowledges the flushed contents on slower disks.
+    Sleep(50);
+    if (!iconPath.empty())
+    {
+        // Tell the shell that the on-disk resource changed so pinned shortcuts
+        // notice the new icon immediately.
+        SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW, iconPath.c_str(), nullptr);
+    }
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 }
 
 static bool SetWindowIcons(HWND hwnd, SDL_Surface* surface)
@@ -369,16 +388,11 @@ static bool WriteIconFile(SDL_Surface* sourceSurface, const std::wstring& path)
         return false;
     }
 
-    std::ofstream out(path, std::ios::binary);
-    if (!out)
-    {
-        DBG_PRINT("[ICON] Failed to open icon file: %ls", path.c_str());
-        return false;
-    }
-
     const uint16_t reserved = 0;
     const uint16_t type = 1;
 
+    // Generate a multi-resolution .ico payload. We always refresh every size so
+    // Windows cannot fall back to an older bitmap in the icon cache.
     std::vector<ResourceIconData> images;
     for (uint16_t size : kIconSizes)
     {
@@ -400,9 +414,6 @@ static bool WriteIconFile(SDL_Surface* sourceSurface, const std::wstring& path)
     }
 
     const uint16_t count = static_cast<uint16_t>(images.size());
-    out.write(reinterpret_cast<const char*>(&reserved), sizeof(reserved));
-    out.write(reinterpret_cast<const char*>(&type), sizeof(type));
-    out.write(reinterpret_cast<const char*>(&count), sizeof(count));
 
     struct IconDirEntry
     {
@@ -439,14 +450,65 @@ static bool WriteIconFile(SDL_Surface* sourceSurface, const std::wstring& path)
         offset += entry.bytesInRes;
     }
 
-    out.write(reinterpret_cast<const char*>(entries.data()), entries.size() * sizeof(IconDirEntry));
+    std::vector<uint8_t> fileBytes;
+    fileBytes.reserve(static_cast<size_t>(offset));
+
+    auto appendBytes = [&fileBytes](const void* data, size_t size)
+    {
+        const uint8_t* bytes = static_cast<const uint8_t*>(data);
+        fileBytes.insert(fileBytes.end(), bytes, bytes + size);
+    };
+
+    appendBytes(&reserved, sizeof(reserved));
+    appendBytes(&type, sizeof(type));
+    appendBytes(&count, sizeof(count));
+    appendBytes(entries.data(), entries.size() * sizeof(IconDirEntry));
 
     for (const auto& image : images)
     {
-        out.write(reinterpret_cast<const char*>(&image.header), sizeof(BITMAPINFOHEADER));
-        out.write(reinterpret_cast<const char*>(image.xorBitmap.data()), image.xorBitmap.size());
-        out.write(reinterpret_cast<const char*>(image.andBitmap.data()), image.andBitmap.size());
+        appendBytes(&image.header, sizeof(BITMAPINFOHEADER));
+        appendBytes(image.xorBitmap.data(), image.xorBitmap.size());
+        appendBytes(image.andBitmap.data(), image.andBitmap.size());
     }
+
+    // Write via the Win32 API so we can request an explicit flush; std::ofstream
+    // may leave the data buffered which confuses Explorer when it reads the icon
+    // immediately after we regenerate it.
+    HANDLE hFile = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        DBG_PRINT("[ICON] CreateFileW failed: %lu", GetLastError());
+        return false;
+    }
+
+    DWORD written = 0;
+    DWORD totalSize = static_cast<DWORD>(fileBytes.size());
+    bool writeOk = true;
+    if (!fileBytes.empty())
+    {
+        if (!WriteFile(hFile, fileBytes.data(), totalSize, &written, nullptr) || written != totalSize)
+        {
+            DBG_PRINT("[ICON] WriteFile failed: %lu", GetLastError());
+            writeOk = false;
+        }
+    }
+
+    if (writeOk)
+    {
+        if (!FlushFileBuffers(hFile))
+        {
+            DBG_PRINT("[ICON] FlushFileBuffers failed: %lu", GetLastError());
+        }
+    }
+
+    CloseHandle(hFile);
+
+    if (!writeOk)
+    {
+        return false;
+    }
+
+    NotifyShellOfIconChange(path);
 
     return true;
 }
@@ -521,6 +583,11 @@ static bool SetAppUserModelProperties(HWND hwnd, const std::wstring& appId, cons
     }
 
     propertyStore->Release();
+    if (success)
+    {
+        NotifyShellOfIconChange(iconPath);
+    }
+
     return success;
 }
 
