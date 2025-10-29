@@ -291,8 +291,13 @@ void RastaConverter::SaveOptimizerState(const char* fn) {
     out << static_cast<unsigned long long>(m_eval_gstate.m_evaluations) << '\n';
     out << static_cast<unsigned long long>(m_eval_gstate.m_last_best_evaluation) << '\n';
 
-    out << static_cast<unsigned long>(m_eval_gstate.m_previous_results.size()) << '\n';
-    out << static_cast<unsigned long>(m_eval_gstate.m_previous_results_index) << '\n';
+	out << static_cast<unsigned long>(m_eval_gstate.m_previous_results.size()) << '\n';
+	{
+		unsigned long history_size = (unsigned long)m_eval_gstate.m_previous_results.size();
+		unsigned long original_index = (unsigned long)m_eval_gstate.m_previous_results_index;
+		unsigned long history_index = (history_size > 0) ? (original_index % history_size) : 0UL;
+		out << history_index << '\n';
+	}
     out << std::setprecision(21) << static_cast<long double>(m_eval_gstate.m_cost_max) << '\n';
     out << m_eval_gstate.m_N << '\n';
     out << std::setprecision(21) << static_cast<long double>(m_eval_gstate.m_current_cost) << '\n';
@@ -381,6 +386,9 @@ void RastaConverter::LoadOptimizerState(string name)
         m_eval_gstate.m_previous_results.push_back(static_cast<double>(v));
     }
 
+    if (!m_eval_gstate.m_previous_results.empty()) {
+        index %= static_cast<unsigned long>(m_eval_gstate.m_previous_results.size());
+    }
     m_eval_gstate.m_previous_results_index = index;
     m_eval_gstate.m_cost_max = static_cast<double>(cost_max);
     m_eval_gstate.m_N = N;
@@ -979,6 +987,10 @@ bool RastaConverter::ProcessInit()
 			&m_eval_gstate, solutions, randseed, cfg.cache_size, i);
 
 		randseed += 187927 * i;
+	}
+
+	if (cfg.continue_processing && m_needs_history_reconfigure && !cfg.dual_mode) {
+		reconfigureAcceptanceHistory();
 	}
 
 	return true;
@@ -1819,6 +1831,7 @@ void RastaConverter::SaveBestSolution()
 
 RastaConverter::RastaConverter()
 	: init_finished(false)
+	, m_needs_history_reconfigure(false)
 {
 }
 
@@ -2321,9 +2334,88 @@ bool RastaConverter::Resume()
 	// Re-parse saved command line to restore other options, but keep current CLI /output if set
 	std::string cli_out = cfg.output_file;
 	bool keep_cli_out = !cli_out.empty();
-	cfg.ProcessCmdLine();
+	cfg.ProcessCmdLine(cfg.resume_override_tokens);
+	m_needs_history_reconfigure = cfg.resume_optimizer_changed || cfg.resume_solutions_changed || cfg.resume_distance_changed || cfg.resume_predistance_changed || cfg.resume_dither_changed;
 	if (keep_cli_out) cfg.output_file = cli_out;
 	return true;
+}
+
+
+void RastaConverter::reconfigureAcceptanceHistory()
+{
+	bool optimizer_changed = cfg.resume_optimizer_changed;
+	bool metric_changed = cfg.resume_distance_changed || cfg.resume_predistance_changed || cfg.resume_dither_changed;
+	bool solutions_changed = cfg.resume_solutions_changed;
+	if (!optimizer_changed && !solutions_changed && !metric_changed) {
+		m_needs_history_reconfigure = false;
+		return;
+	}
+
+	if (m_evaluators.empty()) {
+		cfg.resume_optimizer_changed = false;
+		cfg.resume_solutions_changed = false;
+		cfg.resume_distance_changed = false;
+		cfg.resume_predistance_changed = false;
+		cfg.resume_dither_changed = false;
+		m_needs_history_reconfigure = false;
+		return;
+	}
+
+	std::vector<double>& history = m_eval_gstate.m_previous_results;
+	if (history.empty()) history.push_back(m_eval_gstate.m_best_result);
+
+	size_t target_len = static_cast<size_t>(std::max(1, solutions));
+	double previous_max = history.empty() ? m_eval_gstate.m_best_result : *std::max_element(history.begin(), history.end());
+
+	auto recompute_single_cost = [this]() -> double {
+		Evaluator& ev = m_evaluators.front();
+		raster_picture pic = m_eval_gstate.m_best_pic;
+		std::vector<const line_cache_result*> res(m_height, nullptr);
+		ev.RecachePicture(&pic);
+		double cost = (double)ev.ExecuteRasterProgram(&pic, res.data());
+		return cost;
+	};
+
+	auto recompute_dual_cost = [this]() -> double {
+		Evaluator& ev = m_evaluators.front();
+		raster_picture picA = m_eval_gstate.m_best_pic;
+		std::vector<const line_cache_result*> res(m_height, nullptr);
+		std::vector<const unsigned char*> otherRows((size_t)m_height, nullptr);
+		bool anyRow = false;
+		for (int y = 0; y < m_height; ++y) {
+			if (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) {
+				otherRows[y] = m_created_picture_B[y].data();
+				anyRow = true;
+			}
+		}
+		ev.RecachePicture(&picA);
+		double cost;
+		if (anyRow && m_dual_tables_ready) {
+			cost = (double)ev.ExecuteRasterProgramDual(&picA, res.data(), otherRows, /*mutateB*/false);
+		} else {
+			cost = (double)ev.ExecuteRasterProgram(&picA, res.data());
+		}
+		return cost;
+	};
+
+	double baseline_cost = previous_max;
+	if (metric_changed) {
+		baseline_cost = cfg.dual_mode ? recompute_dual_cost() : recompute_single_cost();
+		m_eval_gstate.m_best_result = baseline_cost;
+	}
+
+	history.assign(target_len, baseline_cost);
+	m_eval_gstate.m_previous_results_index = 0;
+	m_eval_gstate.m_cost_max = baseline_cost;
+	m_eval_gstate.m_current_cost = baseline_cost;
+	m_eval_gstate.m_N = static_cast<int>(target_len);
+
+	cfg.resume_optimizer_changed = false;
+	cfg.resume_solutions_changed = false;
+	cfg.resume_distance_changed = false;
+	cfg.resume_predistance_changed = false;
+	cfg.resume_dither_changed = false;
+	m_needs_history_reconfigure = false;
 }
 
 void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
@@ -2336,7 +2428,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
             Error("Error saving Raster Program");
 
         iniOut << "; ---------------------------------- \n";
-        iniOut << "; RastaConverter by Ilmenit v." << program_version << '\n';
+        iniOut << "; RastaConverter by Ilmenit version " << program_version << '\n';
         iniOut << "; ---------------------------------- \n";
         iniOut << "\n; Initial values \n";
 

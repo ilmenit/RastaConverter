@@ -452,6 +452,10 @@ void RastaConverter::MainLoopDual()
 	// Immediately show initial frame to ensure output is visible in dual mode (only if we didn't already)
 	if (!skip_bootstrap && !quiet) { m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); }
 
+	if (cfg.continue_processing && m_needs_history_reconfigure) {
+		reconfigureAcceptanceHistory();
+	}
+
 	// Loop until finished/max_evals using worker threads and snapshots
 	const unsigned long long E0 = m_eval_gstate.m_evaluations;
 	std::vector<std::thread> workers;

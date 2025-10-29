@@ -5,45 +5,116 @@
 #include "prng_xoroshiro.h"
 #include "version.h"
 
+#include <unordered_map>
+#include <unordered_set>
+#include <sstream>
+#include <cctype>
+
 using namespace std;
 
 extern int solutions;
 
-void Configuration::ProcessCmdLine()
+void Configuration::ProcessCmdLine(const std::vector<std::string>& extraTokens)
 {
-	string cmd=command_line;
-	vector <char *> args;
-	list <string> args_str;
-	list <string>::iterator it;
-
-	args_str.push_back("/");
-	it=args_str.begin();
-	args.push_back( (char *) (it->c_str()) ); // UGLY casting
-	int params=1;
-
-	size_t pos;
-	string current_cmd;
-	for (pos=0;pos<=cmd.size();++pos)
-	{
-		if (pos<cmd.size() && cmd[pos]!=' ')
-		{
-			current_cmd+=cmd[pos];			
+	auto tokenize = [](const std::string& line) {
+		std::vector<std::string> result;
+		std::string current;
+		bool in_quotes = false;
+		char quote_char = '\0';
+		bool escape = false;
+		auto flush = [&]() {
+			if (!current.empty()) {
+				result.push_back(current);
+				current.clear();
+			}
+		};
+		for (char ch : line) {
+			if (escape) {
+				current.push_back(ch);
+				escape = false;
+				continue;
+			}
+			if (in_quotes) {
+				if (ch == '\\') {
+					escape = true;
+					continue;
+				}
+				if (ch == quote_char) {
+					in_quotes = false;
+					quote_char = '\0';
+					continue;
+				}
+				current.push_back(ch);
+				continue;
+			}
+			if (std::isspace(static_cast<unsigned char>(ch))) {
+				flush();
+				continue;
+			}
+			if (ch == '"' || ch == '\'') {
+				in_quotes = true;
+				quote_char = ch;
+				continue;
+			}
+			current.push_back(ch);
 		}
-		else
-		{
-			args_str.push_back(current_cmd);
-			++it;
-			args.push_back( (char *) (it->c_str()) ); // UGLY casting
-			current_cmd.clear();
-			++params;
+		if (escape) {
+			current.push_back('\\');
+			escape = false;
+		}
+		flush();
+		return result;
+	};
+
+	std::vector<std::string> baseTokens = tokenize(command_line);
+
+	auto parseTokens = [&](const std::vector<std::string>& tokens) {
+		if (tokens.empty()) return;
+		std::vector<char*> argv_storage;
+		argv_storage.reserve(tokens.size() + 1);
+		argv_storage.push_back(const_cast<char*>("/"));
+		for (const std::string& tok : tokens) {
+			argv_storage.push_back(const_cast<char*>(tok.c_str()));
+		}
+		Process(static_cast<int>(argv_storage.size()), argv_storage.data(), /*captureOverrides*/ false);
+	};
+
+	bool parsedBaselineThisCall = false;
+	if (!resume_have_baseline) {
+		if (!baseTokens.empty()) {
+			parseTokens(baseTokens);
+			parsedBaselineThisCall = true;
+		}
+		if (!resume_have_baseline) {
+			resume_saved_optimizer = optimizer;
+			resume_saved_solutions = solutions;
+			resume_saved_distance = dstf;
+			resume_saved_predistance = pre_dstf;
+			resume_saved_dither = dither;
+			resume_have_baseline = true;
 		}
 	}
 
-	if (params>1)
-		Process(params,&args[0]);
+	const bool hasOverrides = !extraTokens.empty();
+	if (hasOverrides) {
+		std::vector<std::string> combinedTokens = baseTokens;
+		combinedTokens.insert(combinedTokens.end(), extraTokens.begin(), extraTokens.end());
+		parseTokens(combinedTokens);
+	} else if (!parsedBaselineThisCall && !baseTokens.empty()) {
+		// Ensure current config reflects the saved command line when baseline already existed
+		parseTokens(baseTokens);
+	}
+
+	int normalized_saved_solutions = std::max(1, resume_saved_solutions);
+	int normalized_current_solutions = std::max(1, solutions);
+	resume_optimizer_changed = (resume_saved_optimizer != optimizer);
+	resume_solutions_changed = (normalized_saved_solutions != normalized_current_solutions);
+	resume_distance_changed = (resume_saved_distance != dstf);
+	resume_predistance_changed = (resume_saved_predistance != pre_dstf);
+	resume_dither_changed = (resume_saved_dither != dither);
 }
 
-void Configuration::Process(int argc, char *argv[])
+void Configuration::Process(int argc, char *argv[], bool captureOverrides)
 {
     // Reset parser and diagnostics to allow multiple invocations (e.g., resume path)
     parser = CommandLineParser();
@@ -99,7 +170,7 @@ void Configuration::Process(int argc, char *argv[])
 parser.addOption("distance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta",
 		"Distance function used during optimization.",
 		"Image processing");
-parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta",
+parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede",
 		"Distance function used during preprocess (destination picture).",
 		"Image processing");
 	parser.addOption("dither", {}, "none|floyd|rfloyd|line|line2|chess|2d|jarvis|simple|knoll", "none",
@@ -213,10 +284,15 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta
 		bad_arguments = true;
 	}
 
-	// Set continue flag but do not return early; we still need defaults initialized
+	// Set continue flag and capture overrides if requested
 	continue_processing = parser.switchExists("continue");
+	if (captureOverrides && continue_processing) {
+		resume_override_tokens = parser.getNormalizedTokens();
+		// Force baseline to be captured from resume payload later
+		resume_have_baseline = false;
+	}
 
-	command_line=parser.mn_command_line;
+	command_line = parser.rebuildCommandLine();
 
 	input_file = parser.getValue("i","");
 	if (input_file.empty()) input_file = parser.getValue("input","");
@@ -231,28 +307,28 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta
 		if (!p2.empty()) palette_file = p2;
 	}
 
-string dst_name = parser.getValue("distance","rasta");
-if (dst_name=="euclid")
-	dstf=E_DISTANCE_EUCLID;
-else if (dst_name=="ciede" || dst_name=="ciede2000")
-	dstf=E_DISTANCE_CIEDE;
-else if (dst_name=="cie94")
-	dstf=E_DISTANCE_CIE94;
-else if (dst_name=="oklab")
-	dstf=E_DISTANCE_OKLAB;
-else if (dst_name=="yuv")
-	dstf=E_DISTANCE_YUV;
-else 
-{
-	if (dst_name != "rasta") warning_messages.push_back("Unknown distance='" + dst_name + "', using 'rasta'.");
-	dstf=E_DISTANCE_RASTA;
-}
+	string dst_name = parser.getValue("distance","rasta");
+	if (dst_name=="euclid")
+		dstf=E_DISTANCE_EUCLID;
+	else if (dst_name=="ciede" || dst_name=="ciede2000")
+		dstf=E_DISTANCE_CIEDE;
+	else if (dst_name=="cie94")
+		dstf=E_DISTANCE_CIE94;
+	else if (dst_name=="oklab")
+		dstf=E_DISTANCE_OKLAB;
+	else if (dst_name=="yuv")
+		dstf=E_DISTANCE_YUV;
+	else 
+	{
+		if (dst_name != "rasta") warning_messages.push_back("Unknown distance='" + dst_name + "', using 'rasta'.");
+		dstf=E_DISTANCE_RASTA;
+	}
 
-	dst_name = parser.getValue("predistance","rasta");
+	dst_name = parser.getValue("predistance","ciede");
 	if (dst_name=="euclid")
 		pre_dstf=E_DISTANCE_EUCLID;
-	else if (dst_name=="ciede" || dst_name=="ciede2000")
-		pre_dstf=E_DISTANCE_CIEDE;
+	else if (dst_name=="rasta")
+		pre_dstf=E_DISTANCE_RASTA;
 	else if (dst_name=="cie94")
 		pre_dstf=E_DISTANCE_CIE94;
 else if (dst_name=="oklab")
@@ -261,8 +337,8 @@ else if (dst_name=="yuv")
 	pre_dstf=E_DISTANCE_YUV;
 	else 
 	{
-		if (dst_name != "rasta") warning_messages.push_back("Unknown predistance='" + dst_name + "', using 'rasta'.");
-		pre_dstf=E_DISTANCE_RASTA;
+		if (dst_name != "ciede") warning_messages.push_back("Unknown predistance='" + dst_name + "', using 'ciede'.");
+		pre_dstf=E_DISTANCE_CIEDE;
 	}
 
 
@@ -407,14 +483,18 @@ else if (dst_name=="yuv")
 	// Handle positional input file if not specified via -i or --input
 	if (input_file.empty())
 	{
-		string temp;
-		if (argc>1)
-		{
-			temp=argv[1];
-			// Only reject if it starts with '-' (command line option) or contains '/' (path)
-			// Allow hyphens in filenames as long as they don't start the argument
+		const auto& positional = parser.getPositionalArguments();
+		for (const std::string& candidate : positional) {
+			if (candidate.empty()) continue;
+			if (candidate[0] == '-' || candidate[0] == '/') continue;
+			if (candidate.find('/') != std::string::npos) continue;
+			input_file = candidate;
+			break;
+		}
+		if (input_file.empty() && argc > 1) {
+			std::string temp = argv[1];
 			if (temp.find("/")==string::npos && !temp.empty() && temp[0]!='-')
-				input_file=temp;
+				input_file = temp;
 		}
 	}
 
@@ -507,6 +587,17 @@ else if (dst_name=="yuv")
 		std::string v = parser.getValue("dual_chroma", "0.1");
 		dual_chroma = String2Value<double>(v);
 		if (dual_chroma < 0.0) dual_chroma = 0.0; // clamp
+	}
+
+	if (!captureOverrides) {
+		if (!resume_have_baseline) {
+			resume_saved_optimizer = optimizer;
+			resume_saved_solutions = solutions;
+			resume_saved_distance = dstf;
+			resume_saved_predistance = pre_dstf;
+			resume_saved_dither = dither;
+			resume_have_baseline = true;
+		}
 	}
 }
 

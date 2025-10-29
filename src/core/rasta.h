@@ -175,11 +175,14 @@ public:
 	void LoadAtariPalette();
 	bool LoadInputBitmap();
 	bool Resume();
+	void reconfigureAcceptanceHistory();
+	bool m_needs_history_reconfigure = false;
 
 	void ShowDestinationBitmap();
 	void ShowDestinationLine(int y);
 	void ShowInputBitmap();
 	void ShowDualBitmap();
+
 	// Dual-mode helpers
 	void PrecomputeDualTables();
 	void MainLoopDual();

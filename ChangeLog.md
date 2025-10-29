@@ -1,6 +1,14 @@
 ChangeLog
 =========
 
+RastaConverterBeta20      2025-10-?? [AI RELEASE]
+* When using /continue you can override in the command line parameters e.g., add /opt=legacy in parallel to /continue to switch optimizer to 'legacy'
+* Image file name in command line doesn't need to be the first parameter anymore.
+* Command line accepts now paths with spaces when defined within " "
+* Fixes to taskbar icon caching on Windows 10+
+* Saving proper RC version number to .rp/.opt files
+* Default /predistance reverted to 'ciede' (testing proven that it's more reliable). Default /distance stays 'rasta'.
+
 RastaConverterBeta19      2025-10-20 [AI RELEASE]
 * Added extra color distance functions: oklab, cie94 and rasta (boosts chroma for dark grey colors to prevent too gray destination picture)
 * "rasta" color distance is now default for both /predistance and /distance - should bring better conversion results with default parameters

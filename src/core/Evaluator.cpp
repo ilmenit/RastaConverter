@@ -143,12 +143,13 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result, bool 
 		m_gstate->m_current_norm_drift = 0.0;
 	}
 
-	if (m_gstate->m_previous_results.empty()) {
-		m_gstate->m_current_cost = result;
-		m_gstate->m_previous_results.resize(m_solutions, result);
-		m_gstate->m_cost_max = result;
-		m_gstate->m_N = m_solutions;
-	}
+    if (m_gstate->m_previous_results.empty()) {
+        m_gstate->m_current_cost = result;
+        size_t seed_size = (m_solutions > 0) ? (size_t)m_solutions : 1;
+        m_gstate->m_previous_results.resize(seed_size, result);
+        m_gstate->m_cost_max = result;
+        m_gstate->m_N = static_cast<int>(seed_size);
+    }
 
 	if (m_gstate->m_optimizer == EvalGlobalState::OPT_LEGACY) {
 		// Original legacy LAHC algorithm - EXACT match to !legacy/Evaluator.cpp:164-208
@@ -218,8 +219,21 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result, bool 
 		out.improved = accept; // In legacy mode, acceptance == improvement
 	} else {
 		// Non-legacy algorithms use drift and pre-increment index
-		size_t l = m_gstate->m_previous_results_index;
-		if (++m_gstate->m_previous_results_index == (size_t)m_solutions) m_gstate->m_previous_results_index = 0;
+		size_t history_size = m_gstate->m_previous_results.size();
+		if (history_size == 0) {
+			// History may be empty when switching optimizers mid-run; seed it now
+			history_size = (size_t)((m_solutions > 0) ? m_solutions : 1);
+			m_gstate->m_previous_results.resize(history_size, result);
+			m_gstate->m_current_cost = result;
+			m_gstate->m_cost_max = result;
+			m_gstate->m_N = (int)history_size;
+		}
+		size_t l = (history_size > 0) ? (m_gstate->m_previous_results_index % history_size) : 0;
+		if (history_size > 0) {
+			m_gstate->m_previous_results_index = (l + 1) % history_size;
+		} else {
+			m_gstate->m_previous_results_index = 0;
+		}
 		double prev_cost = m_gstate->m_current_cost;
 
 		if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {

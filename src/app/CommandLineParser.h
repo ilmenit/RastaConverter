@@ -59,6 +59,15 @@ public:
 	bool switchExists(const std::string &name) const; // true if flag present or value provided
 	std::string getValue(const std::string &name, const std::string &defaultValue) const;
 	bool nonInterpretedExists(const std::string &value) const; // positional match (case-insensitive)
+
+	// New helpers for advanced CLI workflows
+	const std::vector<std::string>& getPositionalArguments() const { return positional; }
+	bool valueProvided(const std::string &name) const;
+	bool flagProvided(const std::string &name) const;
+	void parseTokens(const std::vector<std::string>& tokens);
+	void mergeFrom(const CommandLineParser& overrides, bool replacePositionals);
+	std::string rebuildCommandLine() const;
+	std::vector<std::string> getNormalizedTokens() const;
 	bool verifyCompulsory(const std::vector<std::string> &pairs = {},
 					  const std::vector<std::string> &switches = {},
 					  const std::vector<std::string> &nonInterpreted = {});
@@ -94,6 +103,9 @@ private:
 	std::vector<std::string> positional; // non-prefixed tokens
 	std::vector<std::string> unrecognized; // original tokens that didn't match any spec
 	std::vector<std::string> missingValueOptions; // canonical names missing required values
+	std::vector<std::string> buildNormalizedTokens() const;
+
+	static std::string joinTokens(const std::vector<std::string>& tokens);
 };
 
 

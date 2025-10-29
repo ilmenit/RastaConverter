@@ -111,9 +111,21 @@ struct Configuration {
 
 
 	CommandLineParser parser; 
+	std::vector<std::string> resume_override_tokens;
+	bool resume_distance_changed = false;
+	bool resume_predistance_changed = false;
+	bool resume_dither_changed = false;
+	bool resume_optimizer_changed = false;
+	bool resume_solutions_changed = false;
+	bool resume_have_baseline = false;
+	e_optimizer resume_saved_optimizer = E_OPT_LAHC;
+	int resume_saved_solutions = 1;
+	e_distance_function resume_saved_distance = E_DISTANCE_RASTA;
+	e_distance_function resume_saved_predistance = E_DISTANCE_CIEDE;
+	e_dither_type resume_saved_dither = E_DITHER_NONE;
 
-	void ProcessCmdLine();
-	void Process(int argc, char *argv[]);
+	void ProcessCmdLine(const std::vector<std::string>& extraTokens = {});
+	void Process(int argc, char *argv[], bool captureOverrides = true);
 };
 
 #endif

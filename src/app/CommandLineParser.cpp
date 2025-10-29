@@ -17,6 +17,7 @@ It supports:
 #include <map>
 #include <cctype>
 #include <stdexcept>
+#include <unordered_set>
 
 static bool iequals_char(char a, char b) {
 	return (a == b) || (('A' <= a && a <= 'Z') && (a - 'A' + 'a') == b);
@@ -56,6 +57,30 @@ static std::string stripQuotes(const std::string &s) {
 	return s;
 }
 
+static std::string quoteIfNeeded(const std::string& token) {
+	bool needsQuote = token.empty();
+	for (char c : token) {
+		if (std::isspace(static_cast<unsigned char>(c)) || c == '"' || c == '\\') {
+			needsQuote = true;
+			break;
+		}
+	}
+	if (!needsQuote) {
+		return token;
+	}
+	std::string out;
+	out.reserve(token.size() + 2);
+	out.push_back('"');
+	for (char c : token) {
+		if (c == '"' || c == '\\') {
+			out.push_back('\\');
+		}
+		out.push_back(c);
+	}
+	out.push_back('"');
+	return out;
+}
+
 std::string CommandLineParser::toLower(const std::string &s) {
 	std::string r = s;
 	std::transform(r.begin(), r.end(), r.begin(), [](unsigned char c){ return (char)tolower(c); });
@@ -63,6 +88,63 @@ std::string CommandLineParser::toLower(const std::string &s) {
 }
 
 CommandLineParser::CommandLineParser() {}
+
+std::string CommandLineParser::joinTokens(const std::vector<std::string>& tokens) {
+	std::string out;
+	for (size_t i = 0; i < tokens.size(); ++i) {
+		if (i) out += " ";
+		out += quoteIfNeeded(tokens[i]);
+	}
+	return out;
+}
+
+std::vector<std::string> CommandLineParser::buildNormalizedTokens() const {
+	std::vector<std::string> tokens;
+	tokens.reserve(positional.size() + values.size() + flags.size() + unrecognized.size());
+	tokens.insert(tokens.end(), positional.begin(), positional.end());
+	std::unordered_set<std::string> emitted;
+	emitted.reserve(optionSpecs.size());
+
+	for (const auto &spec : optionSpecs) {
+		const std::string &canon = spec.canonicalName;
+		if (spec.takesValue) {
+			auto it = values.find(canon);
+			if (it == values.end()) continue;
+			std::string token = "/" + canon;
+			if (!it->second.empty()) token += "=" + it->second;
+			tokens.push_back(token);
+			emitted.insert(canon);
+		} else {
+			if (flags.find(canon) == flags.end()) continue;
+			tokens.push_back("/" + canon);
+			emitted.insert(canon);
+		}
+	}
+
+	// Include any remaining values/flags (typically unrecognized aliases)
+	for (const auto &kv : values) {
+		if (emitted.find(kv.first) != emitted.end()) continue;
+		std::string token = "/" + kv.first;
+		if (!kv.second.empty()) token += "=" + kv.second;
+		tokens.push_back(token);
+		emitted.insert(kv.first);
+	}
+	for (const auto &flag : flags) {
+		if (emitted.find(flag) != emitted.end()) continue;
+		tokens.push_back("/" + flag);
+		emitted.insert(flag);
+	}
+
+	// Preserve original unrecognized tokens verbatim
+	for (const auto &tok : unrecognized) tokens.push_back(tok);
+
+	return tokens;
+}
+
+std::vector<std::string> CommandLineParser::getNormalizedTokens() const
+{
+	return buildNormalizedTokens();
+}
 
 void CommandLineParser::addFlag(const std::string &canonicalName,
 			  const std::vector<std::string> &aliases,
@@ -145,6 +227,14 @@ std::string CommandLineParser::canonicalOf(const std::string &lowerKey) const {
 
 void CommandLineParser::parse(int argc, char *argv[])
 {
+	std::vector<std::string> tokens;
+	tokens.reserve(argc > 1 ? static_cast<size_t>(argc - 1) : 0);
+	for (int i = 1; i < argc; ++i) tokens.emplace_back(argv[i]);
+	parseTokens(tokens);
+}
+
+void CommandLineParser::parseTokens(const std::vector<std::string>& tokens)
+{
 	mn_NonInterpreted = 0;
 	mn_Switches = 0;
 	mn_PairCount = 0;
@@ -155,19 +245,15 @@ void CommandLineParser::parse(int argc, char *argv[])
 	unrecognized.clear();
 	missingValueOptions.clear();
 
-	for (int i = 1; i < argc; ++i) {
-		std::string token = argv[i];
-		if (i != 1) mn_command_line += " ";
-		mn_command_line += token;
+	for (size_t idx = 0; idx < tokens.size(); ++idx) {
+		const std::string &token = tokens[idx];
 
 		if (!isPrefixed(token)) {
-			// positional
 			++mn_NonInterpreted;
 			positional.push_back(token);
-					continue;
-				}
+			continue;
+		}
 
-		// strip prefix '/', '-' or '--'
 		std::string keyval = token;
 		if (istarts_with(keyval, "--")) keyval.erase(0, 2);
 		else keyval.erase(0, 1);
@@ -185,8 +271,6 @@ void CommandLineParser::parse(int argc, char *argv[])
 		key = toLower(key);
 		const OptionSpec *spec = findSpec(key);
 		if (!spec) {
-			// Preserve legacy behavior for unregistered options:
-			// '/name=value' -> store as pair; '/name' -> flag
 			if (!val.empty()) {
 				++mn_PairCount;
 				values[key] = stripQuotes(val);
@@ -194,7 +278,8 @@ void CommandLineParser::parse(int argc, char *argv[])
 				++mn_Switches;
 				flags.insert(key);
 			}
-			unrecognized.push_back(token);
+			if (std::find(unrecognized.begin(), unrecognized.end(), token) == unrecognized.end())
+				unrecognized.push_back(token);
 			continue;
 		}
 
@@ -204,20 +289,17 @@ void CommandLineParser::parse(int argc, char *argv[])
 			continue;
 		}
 
-		// value option
-		if (val.empty() && i + 1 < argc) {
-			// next token can be value if it's not another option; allow signed numbers like -10 or -0.5
-			std::string next = argv[i + 1];
+		if (val.empty() && idx + 1 < tokens.size()) {
+			std::string next = tokens[idx + 1];
 			if (!isPrefixed(next) || isSignedNumberToken(next)) {
 				val = next;
-				++i;
+				++idx;
 			}
 		}
 		if (val.empty() && spec->optionalValue) {
 			val = spec->implicitValue;
 		}
 		if (val.empty()) {
-			// keep empty -> caller may use default, but record if value is required
 			if (spec->takesValue && !spec->optionalValue) {
 				missingValueOptions.push_back(spec->canonicalName);
 			}
@@ -225,6 +307,8 @@ void CommandLineParser::parse(int argc, char *argv[])
 		if (!val.empty()) ++mn_PairCount; else ++mn_Switches;
 		values[spec->canonicalName] = stripQuotes(val);
 	}
+
+	mn_command_line = joinTokens(tokens);
 }
 
 bool CommandLineParser::switchExists(const std::string &name) const {
@@ -233,7 +317,7 @@ bool CommandLineParser::switchExists(const std::string &name) const {
 	if (canon.empty()) canon = k;
 	if (flags.find(canon) != flags.end()) return true;
 	if (values.find(canon) != values.end()) return true;
-			return false; 
+	return false; 
 }
 
 std::string CommandLineParser::getValue(const std::string &name, const std::string &defaultValue) const {
@@ -243,6 +327,50 @@ std::string CommandLineParser::getValue(const std::string &name, const std::stri
 	auto it = values.find(canon);
 	if (it == values.end() || it->second.empty()) return defaultValue;
 	return it->second;
+}
+
+bool CommandLineParser::valueProvided(const std::string &name) const {
+	std::string canon = canonicalOf(toLower(name));
+	if (canon.empty()) canon = toLower(name);
+	return values.find(canon) != values.end();
+}
+
+bool CommandLineParser::flagProvided(const std::string &name) const {
+	std::string canon = canonicalOf(toLower(name));
+	if (canon.empty()) canon = toLower(name);
+	if (flags.find(canon) != flags.end()) return true;
+	// treat value presence for optional flags (e.g., implicit on) as provided
+	return values.find(canon) != values.end();
+}
+
+void CommandLineParser::mergeFrom(const CommandLineParser& overrides, bool replacePositionals)
+{
+	if (replacePositionals) {
+		positional = overrides.positional;
+		mn_NonInterpreted = static_cast<int>(positional.size());
+	} else if (!overrides.positional.empty()) {
+		positional = overrides.positional;
+		mn_NonInterpreted = static_cast<int>(positional.size());
+	}
+
+	for (const auto &kv : overrides.values) {
+		values[kv.first] = kv.second;
+	}
+	for (const auto &flag : overrides.flags) {
+		flags.insert(flag);
+	}
+	for (const auto &tok : overrides.unrecognized) {
+		if (std::find(unrecognized.begin(), unrecognized.end(), tok) == unrecognized.end())
+			unrecognized.push_back(tok);
+	}
+
+	// Re-parse normalized tokens to refresh counters/state
+	parseTokens(buildNormalizedTokens());
+}
+
+std::string CommandLineParser::rebuildCommandLine() const
+{
+	return joinTokens(buildNormalizedTokens());
 }
 
 bool CommandLineParser::nonInterpretedExists(const std::string &value) const {

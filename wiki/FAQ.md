@@ -44,15 +44,22 @@ The problem is probably as hard as some [NP-complete]( http://en.wikipedia.org/w
 
 The converter uses advanced optimization algorithms that are nondeterministic and do not guarantee to find the optimal solution. Therefore it is better to run it a few times and to choose the output you like best.
 
-**Primary Algorithm: DLAS (Diversified Late Acceptance Search)**
-- Based on the [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29) algorithm
-- Provides fast convergence and good exploration of the search space
-- Uses history length controlled by the `/s` parameter
-
-**Alternative Algorithm: LAHC (Late Acceptance Hill Climbing)**
+**Default Optimizer: LAHC (Late Acceptance Hill Climbing)**
 - Based on the [Late Acceptance Hill Climbing](https://www.sciencedirect.com/science/article/abs/pii/S0377221716305495) algorithm
-- Better for long runs and plateaus
-- Can find improvements when DLAS gets stuck
+- Accepts a candidate if it beats the cost stored `/s` evaluations ago
+- More stable on plateaus and during marathon runs
+- Selected by default (`/optimizer=lahc`)
+
+**Alternative Optimizer: DLAS (Diversified Late Acceptance Search)**
+- Based on the [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29) algorithm
+- Diversifies moves by also tracking the best value seen in the history window
+- Often gets strong results quickly with small history lengths (e.g. `/s=3..5`)
+- Enable with `/optimizer=dlas`
+
+**Compatibility Mode: legacy**
+- Restores the original single-thread LAHC acceptance rule
+- Useful for reproducing historical runs or comparing with older releases
+- Enable with `/optimizer=legacy`
 
 **Why nondeterministic?**
 The [search space](http://en.wikipedia.org/wiki/Candidate_solution) is huge and in most cases it is not possible to tell in reasonable time what is the best solution. The algorithms search only through some part of the search space and each time you run them, they try different areas. This nondeterministic nature actually helps avoid getting stuck in local optima.
@@ -80,13 +87,13 @@ I've tested some other optimization techniques (Tabu Search, Genetic Algorithm, 
 <a name="multithreading"></a>
 ## Can I use multiple threads for faster conversion?
 
-Yes! RastaConverter supports multithreading with the `/threads` parameter. The converter automatically manages worker threads for optimal performance.
+Yes! RastaConverter supports multithreading with the `/threads` parameter. Each evaluator runs on its own worker thread, and the core loops scale well across CPU cores.
 
 **Performance tips:**
-- Use `/threads=N` where N is the number of CPU cores
-- Set threads to the number of physical cores (or 1-2 less) to keep system responsive
-- Increase cache size per thread (e.g., `/cache=16` for 16MB per thread)
-- Regional mutation strategy may be better with 8+ threads to reduce mutex contention
+- Use `/threads=N` where *N* matches your physical cores (or leave one core free to keep the desktop responsive)
+- Remember that `/cache` is per thread, so total line-cache memory ≈ `threads × cache` MB
+- Knoll dithering and the main optimizer both honor `/threads`, so you get parallel speed-ups in preprocessing and in the search loop
+- When running several instances in parallel, reduce `/threads` and `/cache` so they fit in RAM without swapping
 
 <a name="gpu-acceleration"></a>
 ## Can GPU acceleration (CUDA, OpenCL) be used for faster conversion?
@@ -133,43 +140,49 @@ Dual-frame mode (`/dual`) creates two alternating frames (A and B) that, when di
 - Can achieve color combinations impossible in single-frame mode
 
 **Flicker control:**
-- `/flicker_luma=0..1` - How much luminance flicker you accept (0=no, 1=full)
-- `/flicker_chroma=0..1` - How much chroma flicker you accept (0=no, 1=full)
-- Perceived flicker from luma is stronger than from chroma, so they are controlled separately
+- `/dual_luma=<float>` - Temporal luminance penalty weight (higher values reduce flicker, default 0.2)
+- `/dual_chroma=<float>` - Temporal chroma penalty weight (higher values reduce color flicker, default 0.1)
+- Luma flicker is more noticeable, so start by adjusting `/dual_luma`
 
-**Strategies:**
-- `/dual_strategy=staged` (default) - Focus on one frame for many iterations, then switch
-- `/dual_strategy=alternate` - Choose A or B each step using `/dual_mutate_ratio`
-- `/dual_init=dup|random|anti` - How frame B relates to frame A initially
+**Bootstrap & alternation:**
+- `/first_dual_steps=<N>` - Number of evaluations spent bootstrapping frame A (and B if generated fresh)
+- `/after_dual_steps=copy|generate` - Decide whether frame B starts as a copy of A or from a new random seed
+- `/altering_dual_steps=<N>` - Evaluations per alternation block once both frames are active
+
+**Blending & preview:**
+- `/dual_blending=yuv|rgb` - Choose how the mixed preview is generated (default YUV preserves perceived brightness)
+- GUI hotkeys: `[A]`, `[B]`, `[M]` toggle the preview between frame A, frame B, and the blended result
 
 **Outputs:**
-- Separate files for both frames (OUT-A.rp, OUT-B.rp, etc.)
-- Blended preview showing the perceived result
-- Flicker heatmap for diagnostics
+- Saved artifacts are prefixed `out_dual_A.*`, `out_dual_B.*`, and `out_dual_blended.png`
+- Each frame gets its own `.rp`, `.opt`, `.pmg`, and `.mic` files for assembly
+- A CSV with shared statistics and an `.optstate` snapshot are still written next to your main `/o` target
 
 <a name="algorithms"></a>
 ## What optimization algorithms are available?
 
 RastaConverter supports multiple optimization algorithms:
 
-**DLAS (Diversified Late Acceptance Search) - Default**
-- Based on the [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29) algorithm
-- Fast convergence and good exploration
-- Excellent for most use cases and quicker conversions
-- Uses history length controlled by `/s` parameter
-- Generally moves fast early in the optimization process
-
-**LAHC (Late Acceptance Hill Climbing)**
+**LAHC (Late Acceptance Hill Climbing) — Default**
 - Based on the [Late Acceptance Hill Climbing](https://www.sciencedirect.com/science/article/abs/pii/S0377221716305495) algorithm
-- Better for long runs and plateaus
-- Can find improvements when DLAS gets stuck
-- Good for marathon runs where you want maximum quality
-- Can outperform DLAS in very long runs with long history parameters
+- Uses the `/s` history length window to accept slightly worse moves and escape local minima
+- A solid choice for marathon runs and plateau-heavy images
+
+**DLAS (Diversified Late Acceptance Search)**
+- Based on the [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29) algorithm
+- Also depends on `/s`, but tracks the maximum cost in the window to diversify exploration
+- Tends to deliver strong results quickly with moderate history lengths (`/s=3..5`)
+
+**Legacy LAHC**
+- Preserves the original single-thread acceptance behavior for reproducibility
+- Only updates the history window when an improvement is accepted
+- Handy when comparing with vintage releases or old tutorials
 
 **Algorithm selection:**
-- Use `/optimizer=dlas` (default) for most runs and quicker conversions
-- Try `/optimizer=lahc` on marathon runs, when DLAS plateaus, or when you want maximum quality
-- The `/s` parameter controls history length (3-10 are reasonable for DLAS, higher values may be needed for LAHC)
+- Use `/optimizer=lahc` (default) for general use or long sessions
+- Try `/optimizer=dlas` when you want faster early progress or have limited time
+- Switch to `/optimizer=legacy` if you need bit-identical behavior with older RastaConverter builds
+- The `/s` parameter controls history length: `/s=1` is pure hill climbing; higher values improve exploration but slow convergence
 
 <a name="charmode"></a>
 ## Why the converter does not use character mode to get one extra color? Or interlace? Or hires?
@@ -213,8 +226,8 @@ Example
     </tr>
 </table>
 
-This is because of the default [color distance](http://en.wikipedia.org/wiki/Color_difference) metric CIEDE2000. It is chosen to be default, because Atari palette does not have linear spread over color space and with other distance metrics (YUV or Euclidian) too many pictures get converted to gray.
-If your picture gets violet instead of blue then use a different color distance for the preprocess f.e. `/predistance=yuv`:
+This is because the current default preprocess [color distance](http://en.wikipedia.org/wiki/Color_difference) is **CIEDE2000** (`/predistance=ciede`). It boosts chroma for dark colors so that Atari palette entries do not collapse to gray, but on some pictures that emphasis can skew saturated blues toward violet.
+If your picture gets violet instead of blue then try a different preprocess distance, for example `/predistance=yuv` or `/predistance=oklab`. Both keep blues tighter to their original hue. You can also switch to `/predistance=ciede` for the most perceptual match, but expect a large slowdown (especially with Knoll dithering).
 
 ![zx-yuv](https://raw.github.com/ilmenit/RastaConverter/master/wiki/zx-yuv.png)
 
@@ -225,8 +238,14 @@ Look how the colors get converted to Atari palette with different color distance
 Original file
 ![Original](https://raw.github.com/ilmenit/RastaConverter/master/wiki/col.png)
 
+RASTA (default):
+![RASTA](https://raw.github.com/ilmenit/RastaConverter/master/wiki/col-rasta.png)
+
 CIEDE2000:
 ![CIEDE2000](https://raw.github.com/ilmenit/RastaConverter/master/wiki/col-ciede.png)
+
+OKLab:
+![OKLab](https://raw.github.com/ilmenit/RastaConverter/master/wiki/col-oklab.png)
 
 Euclidian RGB:
 ![Euclid](https://raw.github.com/ilmenit/RastaConverter/master/wiki/col-euclid.png)
@@ -250,14 +269,13 @@ It is slow, because the algorithm is slow :-) It gets much slower with CIEDE2000
 <a name="solutions"></a>
 ## Why to use more solutions with /s parameter? How many should I use?
 
-With `/s=1` (default) the algorithm used is [Hill Climbing](http://en.wikipedia.org/wiki/Hill_climbing), which provides result fast, but the result is usually far from optimal. With `/s` greater than 1, the Diversified Late Acceptance Search is used which is less prone to stuck in [local maximum](http://en.wikipedia.org/wiki/Maxima_and_minima).
+With `/s=1` (default) both optimizers degenerate to classic [hill climbing](http://en.wikipedia.org/wiki/Hill_climbing): they only accept improvements, so the run converges quickly but can freeze in local optima.
 
-The DLAS algorithm is much more efficient than previous methods, so you typically need much smaller values - `/s=3` to `/s=5` often produces excellent results. You can use larger values (`/s=10`), but the improvement diminishes quickly with DLAS.
+Increasing `/s` gives the optimizer a history window to compare against:
+- **LAHC** accepts the new cost if it is no worse than the cost seen `/s` evaluations ago. Larger `/s` values give it more opportunities to explore. Try `/s=8` or `/s=16` when you need extra diversity.
+- **DLAS** keeps track of the worst value inside the window and allows controlled diversification. It often works best with smaller windows such as `/s=3..5`.
 
-**Recommendations:**
-- Start with `/s=3` for most images
-- Use `/s=5` to `/s=10` for maximum quality
-- Higher values may help with complex images but with diminishing returns
+There is no single best value—complex, high-detail images may benefit from larger `/s`, while quick exploratory runs can stay small. Remember that increasing `/s` raises the amount of history stored per thread, so plan for a little extra RAM if you push it very high.
 
 <a name="banding"></a>
 ## Why the converter produces outputs with banding and visible horizontal lines?
@@ -268,10 +286,11 @@ There are a few reasons for that:
 * The algorithm stucked in [local optimum](http://en.wikipedia.org/wiki/Local_optimum) and is not able to find a better solution. [Rerun](#different-output) it again or try larger number of solutions with `/s` parameter.
 
 **Additional solutions:**
-* Use dual-frame mode (`/dual`) to reduce banding through temporal dithering
-* Try different mutation strategies (`/mutation_strategy=regional` vs `global`)
-* Increase the number of solutions with `/s` parameter
-* Use different initialization strategies (`/init=smart` or `/init=less`)
+* Use dual-frame mode (`/dual`) to hide stripes with temporal dithering
+* Raise `/s` or switch optimizers (`/optimizer=lahc` vs `/optimizer=dlas`) to explore different areas of the search space
+* Provide a `/details` mask so the solver prioritizes important regions over uniform backgrounds
+* Tune `/unstuck_after` and `/unstuck_drift` to encourage occasional exploratory jumps when progress stalls
+* Experiment with initialization (`/init=smart`, `/init=less`) to give the solver a better starting point
 
 <a name="col_no"></a>
 ## How many different colors in line can we have?
