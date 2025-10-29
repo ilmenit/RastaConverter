@@ -1,7 +1,7 @@
 ChangeLog
 =========
 
-RastaConverterBeta20      2025-10-?? [AI RELEASE]
+RastaConverterBeta20      2025-10-29 [AI RELEASE]
 * When using /continue you can override in the command line parameters e.g., add /opt=legacy in parallel to /continue to switch optimizer to 'legacy'
 * Image file name in command line doesn't need to be the first parameter anymore.
 * Command line accepts now paths with spaces when defined within " "
