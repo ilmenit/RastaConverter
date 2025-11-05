@@ -33,7 +33,36 @@ void RastaConverter::MainLoopDual()
 
 	// Dedicated evaluator for preview/initial calculations during bootstrap
 	m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_BOOTSTRAP_A, std::memory_order_relaxed);
-	Evaluator bootstrapEval; bootstrapEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed+101, cfg.cache_size);
+	
+	// Force solutions=1 during bootstrap phase for effective optimization even with short bootstrap
+	// If bootstrap is shorter than /s, the history never fills up and optimization doesn't work properly
+	// NOTE: With /continue, if user changed /s, ProcessCmdLine already updated global solutions before MainLoopDual()
+	// So original_solutions captures the NEW value (user's desired value), not the saved value
+	const int original_solutions = solutions;
+	const int bootstrap_solutions = 1;
+	solutions = bootstrap_solutions;
+	
+	// CRITICAL: Initialize optimizer history to size 1 before any evaluations
+	// If history is empty, the first evaluation would use evaluators' m_solutions (original value)
+	// which could be wrong. Initialize it explicitly to bootstrap_solutions=1.
+	// Note: We'll reseed with actual cost after first evaluation, but this ensures correct size.
+	{
+		std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+		if (m_eval_gstate.m_previous_results.empty() || m_eval_gstate.m_previous_results.size() != (size_t)bootstrap_solutions) {
+			// History is empty or wrong size - resize to bootstrap size
+			// Use current best_result if available, otherwise will be reseeded after first evaluation
+			double seed_cost = (m_eval_gstate.m_best_result != DBL_MAX) ? m_eval_gstate.m_best_result : 0.0;
+			m_eval_gstate.m_previous_results.resize(bootstrap_solutions, seed_cost);
+			m_eval_gstate.m_previous_results_index = 0;
+			if (m_eval_gstate.m_current_cost == DBL_MAX) {
+				m_eval_gstate.m_current_cost = seed_cost;
+				m_eval_gstate.m_cost_max = seed_cost;
+			}
+			m_eval_gstate.m_N = bootstrap_solutions;
+		}
+	}
+	
+	Evaluator bootstrapEval; bootstrapEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed+101, cfg.cache_size);
 
 	// Prepare common UI rate tracking variables (used in both paths)
 	auto last_rate_check_tp = std::chrono::steady_clock::now();
@@ -78,9 +107,10 @@ void RastaConverter::MainLoopDual()
 		}
 
 		// Two-pass baseline reseed: first B with A fixed, then A with B fixed
+		// Note: solutions is still 1 here (bootstrap mode), will be restored before alternating phase
 		{
 			Evaluator baseEvB;
-			baseEvB.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 2222, cfg.cache_size);
+			baseEvB.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed + 2222, cfg.cache_size);
 			baseEvB.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
 				 m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
@@ -103,7 +133,7 @@ void RastaConverter::MainLoopDual()
 		// Second pass: A with B fixed, seed baseline
 		{
 			Evaluator baseEv;
-			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 1337, cfg.cache_size);
+			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed + 1337, cfg.cache_size);
 			baseEv.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
 				m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
@@ -122,7 +152,8 @@ void RastaConverter::MainLoopDual()
 			{
 				std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 				double C = (double)baseCost;
-				size_t hist_size = (solutions > 0) ? (size_t)solutions : 1ULL;
+				// Use bootstrap_solutions for history size during reseed (will be restored to original_solutions before alternating)
+				size_t hist_size = (bootstrap_solutions > 0) ? (size_t)bootstrap_solutions : 1ULL;
 				a.uncache_insns();
 				m_eval_gstate.m_best_pic = a;  // Store re-evaluated picture that produced baseline cost
 				// CRITICAL: Reset m_best_result to dual baseline cost C measured against input-based target.
@@ -183,14 +214,20 @@ void RastaConverter::MainLoopDual()
 	DBG_PRINT("[RASTA] Bootstrap A: calling ExecuteRasterProgram ...");
 	bootstrapEval.RecachePicture(&bestA);
 	distance_accum_t bestCostA = bootstrapEval.ExecuteRasterProgram(&bestA, resultsA.data());
-	DBG_PRINT("[RASTA] Bootstrap A initial cost=%g", (double)bestCostA);
-	{
-		std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
-		bestA.uncache_insns();
-		m_eval_gstate.m_best_pic = bestA;
-		m_eval_gstate.m_best_result = (double)bestCostA;
-		if (m_eval_gstate.m_last_best_evaluation == 0ULL)
-			m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+		DBG_PRINT("[RASTA] Bootstrap A initial cost=%g", (double)bestCostA);
+		{
+			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+			bestA.uncache_insns();
+			m_eval_gstate.m_best_pic = bestA;
+			m_eval_gstate.m_best_result = (double)bestCostA;
+			// Reseed history with actual bootstrap cost (history was initialized to size 1 above)
+			m_eval_gstate.m_previous_results.assign(bootstrap_solutions, (double)bestCostA);
+			m_eval_gstate.m_previous_results_index = 0;
+			m_eval_gstate.m_current_cost = (double)bestCostA;
+			m_eval_gstate.m_cost_max = (double)bestCostA;
+			m_eval_gstate.m_N = bootstrap_solutions;
+			if (m_eval_gstate.m_last_best_evaluation == 0ULL)
+				m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 		UpdateCreatedFromResults(resultsA, m_eval_gstate.m_created_picture);
 		UpdateTargetsFromResults(resultsA, m_eval_gstate.m_created_picture_targets);
 		memcpy(&m_eval_gstate.m_sprites_memory, &bootstrapEval.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
@@ -343,14 +380,15 @@ void RastaConverter::MainLoopDual()
 		memcpy(&m_sprites_memory_B, &bootstrapEval.GetSpritesMemory(), sizeof m_sprites_memory_B);
 
 		// Reset optimizer state (LAHC/DLAS) for B bootstrap baseline so acceptance is consistent
+		// Use bootstrap_solutions=1 during bootstrap for effective optimization even with short bootstrap
 		{
 			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 			m_eval_gstate.m_previous_results.clear();
-			m_eval_gstate.m_previous_results.resize(solutions, (double)bestCostB);
+			m_eval_gstate.m_previous_results.resize(bootstrap_solutions, (double)bestCostB);
 			m_eval_gstate.m_previous_results_index = 0;
 			m_eval_gstate.m_current_cost = (double)bestCostB;
 			m_eval_gstate.m_cost_max = (double)bestCostB;
-			m_eval_gstate.m_N = solutions;
+			m_eval_gstate.m_N = bootstrap_solutions;
 		}
 
 		// Multi-threaded bootstrap for B using the same evaluators
@@ -493,7 +531,7 @@ void RastaConverter::MainLoopDual()
 		// Two-pass baseline reseed after bootstrap
 		{
 			Evaluator baseEvB;
-			baseEvB.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 2222, cfg.cache_size);
+			baseEvB.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed + 2222, cfg.cache_size);
 			baseEvB.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
 				 m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
@@ -516,7 +554,7 @@ void RastaConverter::MainLoopDual()
 		// Second pass: A with B fixed, seed baseline
 		{
 			Evaluator baseEv;
-			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 1337, cfg.cache_size);
+			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed + 1337, cfg.cache_size);
 			baseEv.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
 				m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
@@ -535,7 +573,8 @@ void RastaConverter::MainLoopDual()
 			{
 				std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 				double C = (double)baseCost;
-				size_t hist_size = (solutions > 0) ? (size_t)solutions : 1ULL;
+				// Use bootstrap_solutions for history size during reseed (will be restored to original_solutions before alternating)
+				size_t hist_size = (bootstrap_solutions > 0) ? (size_t)bootstrap_solutions : 1ULL;
 				a.uncache_insns();
 				m_eval_gstate.m_best_pic = a;
 				// CRITICAL: Reset m_best_result to dual baseline cost C measured against input-based target.
@@ -587,10 +626,41 @@ void RastaConverter::MainLoopDual()
 		} 
 		}
 
+		// CRITICAL: Restore original solutions value before alternating phase
+		// Bootstrap used solutions=1 for effective optimization even with short bootstrap
+		// Now restore the user's configured /s value for alternating phase
+		// Must restore BEFORE reconfigureAcceptanceHistory() since it uses the global solutions variable
+		solutions = original_solutions;
+
+		// If resuming with changed optimizer/solutions/distance, reconfigure history now
+		// (after restoring solutions so it uses the correct value)
+		bool history_was_reconfigured = false;
 		if (cfg.continue_processing && m_needs_history_reconfigure) {
 			reconfigureAcceptanceHistory();
+			// Check if reconfigureAcceptanceHistory() actually reseeded (it can return early without reseeding)
+			// It sets m_needs_history_reconfigure = false when done, and reseeds to target_len based on solutions
+			size_t expected_size = (solutions > 0) ? (size_t)solutions : 1ULL;
+			{
+				std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+				history_was_reconfigured = (m_eval_gstate.m_previous_results.size() == expected_size && !m_needs_history_reconfigure);
+			}
 		}
-
+		DBG_PRINT("[RASTA] Restored solutions=%d for alternating phase (was %d during bootstrap)", solutions, bootstrap_solutions);
+		
+		// Reseed optimizer history with restored solutions size
+		// History was size 1 during bootstrap, now expand to user's configured /s value
+		// Skip if reconfigureAcceptanceHistory() already did this (it resizes to target_len based on solutions)
+		if (!history_was_reconfigured) {
+			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+			double current_baseline = m_eval_gstate.m_best_result;
+			size_t new_hist_size = (solutions > 0) ? (size_t)solutions : 1ULL;
+			m_eval_gstate.m_previous_results.assign(new_hist_size, current_baseline);
+			m_eval_gstate.m_previous_results_index = 0;
+			m_eval_gstate.m_N = (int)new_hist_size;
+			// Update cost_max to match baseline (history is all filled with baseline)
+			m_eval_gstate.m_cost_max = current_baseline;
+		}
+		
 		// CRITICAL: Clear all caches before alternating phase
 		// Bootstrap phase used single-frame evaluation against palette-quantized target (m_picture)
 		// Alternating phase uses dual evaluation against original high-color input (m_input_target_*)
@@ -599,9 +669,14 @@ void RastaConverter::MainLoopDual()
 		int num_workers = std::max(1, cfg.threads);
 		{
 			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+			// Clear all evaluator caches
 			for (int tid = 0; tid < num_workers; ++tid) {
 				m_evaluators[tid].ClearAllCaches();
 			}
+			// Invalidate cache_key pointers in global raster_picture objects
+			// (cache_key points into evaluator's m_insn_seq_cache which we just cleared)
+			m_eval_gstate.m_best_pic.uncache_insns();
+			m_best_pic_B.uncache_insns();
 		}
 
 		// Loop until finished/max_evals using worker threads and snapshots
