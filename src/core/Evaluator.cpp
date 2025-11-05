@@ -238,38 +238,38 @@ Evaluator::AcceptanceOutcome Evaluator::ApplyAcceptanceCore(double result, bool 
 
 		if (m_gstate->m_optimizer == EvalGlobalState::OPT_LAHC) {
 			// Pure LAHC: Accept ONLY if better than historical cost (allows diversity)
-			bool would_accept_without_drift = (result <= m_gstate->m_previous_results[l]);
-			bool accept = (result <= m_gstate->m_previous_results[l] + drift);
-			
-			if (accept) {
-				m_gstate->m_current_cost = result;
-				
-				// Reset drift when it facilitates acceptance (move to new search region)
-				if (drift_active && !would_accept_without_drift) {
-					// Drift helped us accept a solution - reset to continue optimizing from this new position
-					m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
-					m_gstate->m_current_norm_drift = 0.0;
-				}
-			}
-			
-			// Store current cost AFTER acceptance decision (matches reference LAHC algorithm)
-			m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
-			out.accepted = accept;
+        			bool would_accept_without_drift = (result <= m_gstate->m_previous_results[l]);
+        			bool accept = (result <= m_gstate->m_previous_results[l] + drift);
+        			
+        			if (accept) {
+        				m_gstate->m_current_cost = result;
+        				
+        				// Reset drift when it facilitates acceptance (move to new search region)
+        				if (drift_active && !would_accept_without_drift) {
+        					// Drift helped us accept a solution - reset to continue optimizing from this new position
+
+        					m_gstate->m_current_norm_drift = 0.0;
+        				}
+        			}
+        			
+        			// Store current cost AFTER acceptance decision (matches reference LAHC algorithm)
+        			m_gstate->m_previous_results[l] = m_gstate->m_current_cost;
+        			out.accepted = accept;
 		} else {
 			// DLAS algorithm
-			bool would_accept_without_drift = (result <= m_gstate->m_current_cost) || (result < m_gstate->m_cost_max);
-			bool accept_dlas = (result <= m_gstate->m_current_cost + drift) || (result < m_gstate->m_cost_max + drift);
-			
-			if (accept_dlas) {
-				m_gstate->m_current_cost = result;
-				
-				// Reset drift when it facilitates acceptance (move to new search region) 
-				if (drift_active && !would_accept_without_drift) {
-					// Drift helped us accept a solution - reset to continue optimizing from this new position
-					m_gstate->m_last_best_evaluation = m_gstate->m_evaluations;
-					m_gstate->m_current_norm_drift = 0.0;
-				}
-			}
+        			bool would_accept_without_drift = (result <= m_gstate->m_current_cost) || (result < m_gstate->m_cost_max);
+        			bool accept_dlas = (result <= m_gstate->m_current_cost + drift) || (result < m_gstate->m_cost_max + drift);
+        			
+        			if (accept_dlas) {
+        				m_gstate->m_current_cost = result;
+        				
+        				// Reset drift when it facilitates acceptance (move to new search region) 
+        				if (drift_active && !would_accept_without_drift) {
+        					// Drift helped us accept a solution - reset to continue optimizing from this new position
+
+        					m_gstate->m_current_norm_drift = 0.0;
+        				}
+        			}
 			double old_value = m_gstate->m_previous_results[l];
 			double currentF = m_gstate->m_current_cost;
 			if (currentF > old_value) {
@@ -725,6 +725,33 @@ void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* e
 	// Precompute drift scale once (NormalizeScore(raw) = raw / (w*h*(MAX_COLOR_DISTANCE/10000)))
 	// So raw = norm * w*h*(MAX_COLOR_DISTANCE/10000).
 	m_drift_scale = (double)m_width * (double)m_height * (MAX_COLOR_DISTANCE/10000.0);
+}
+
+void Evaluator::SyncLocalBestToGlobal()
+{
+	if (!m_gstate) return;
+	m_best_result = m_gstate->m_best_result;
+	m_best_pic = m_gstate->m_best_pic;
+	m_best_pic.recache_insns(m_insn_seq_cache, m_linear_allocator);
+}
+
+void Evaluator::ClearAllCaches()
+{
+	// Clear all caches - used when switching between incompatible optimization phases
+	// (e.g., bootstrap uses single-frame/quantized target, alternating uses dual/original input target)
+	m_line_caches.clear();
+	m_line_caches_dual.clear();
+	m_insn_seq_cache.clear();
+	m_linear_allocator.clear();
+	m_lru_lines.clear();
+	m_lru_set.clear();
+	// Reset dual cache generation tracking
+	m_dual_last_other_generation = 0ULL;
+	m_dual_gen_other_snapshot = 0ULL;
+	// Resize caches to proper size (will be populated on first use)
+	// Note: m_height is guaranteed to be initialized (set in Init() before bootstrap)
+	m_line_caches.resize(m_height);
+	m_line_caches_dual.resize(m_height);
 }
 
 void Evaluator::Start()

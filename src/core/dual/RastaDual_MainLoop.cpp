@@ -28,6 +28,9 @@ void RastaConverter::MainLoopDual()
 	PrecomputeDualTables();
 	DBG_PRINT("[RASTA] MainLoopDual: tables ready");
 
+	// Prepare input-based targets for post-bootstrap optimization
+	PrecomputeInputTargets();
+
 	// Dedicated evaluator for preview/initial calculations during bootstrap
 	m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_BOOTSTRAP_A, std::memory_order_relaxed);
 	Evaluator bootstrapEval; bootstrapEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed+101, cfg.cache_size);
@@ -59,6 +62,10 @@ void RastaConverter::MainLoopDual()
 			m_eval_gstate.m_update_initialized = true;
 			m_eval_gstate.m_condvar_update.notify_one();
 		}
+
+		// Defer fixed-frame pointer wiring until after reseed passes
+
+		// (pointer wiring moved below, after reseed passes to avoid stale pointers)
 		// Re-evaluate B similarly
 		{
 			raster_picture b = m_best_pic_B;
@@ -70,34 +77,41 @@ void RastaConverter::MainLoopDual()
 			memcpy(&m_sprites_memory_B, &bootstrapEval.GetSpritesMemory(), sizeof m_sprites_memory_B);
 		}
 
-		// Initialize fixed frame pointer buffers for alternating phase (use B as initial fixed)
-		m_eval_gstate.m_dual_fixed_frame_A.resize(m_height);
-		m_eval_gstate.m_dual_fixed_frame_B.resize(m_height);
-		for (int i = 0; i < 2; ++i) m_eval_gstate.m_dual_fixed_rows_buf[i].resize(m_height);
-		int init_idx = 0;
-		for (int y = 0; y < m_height; ++y) {
-			if (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) {
-				m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_created_picture_B[y].data();
-			} else {
-				m_eval_gstate.m_dual_fixed_frame_B[y].assign(m_width, 0);
-				m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_eval_gstate.m_dual_fixed_frame_B[y].data();
-			}
+		// Two-pass baseline reseed: first B with A fixed, then A with B fixed
+		{
+			Evaluator baseEvB;
+			baseEvB.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 2222, cfg.cache_size);
+			baseEvB.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
+				 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
+				 m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
+				 m_input_target_y.data(), m_input_target_u.data(), m_input_target_v.data());
+			baseEvB.SetDualTables8(
+				m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
+				m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
+				m_input_target_y8.data(), m_input_target_u8.data(), m_input_target_v8.data());
+			baseEvB.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
+			std::vector<const line_cache_result*> resB(m_height, nullptr);
+			std::vector<const unsigned char*> fixedARows((size_t)m_height, (const unsigned char*)nullptr);
+			for (int y = 0; y < m_height; ++y) fixedARows[y] = (y < (int)m_eval_gstate.m_created_picture.size() && !m_eval_gstate.m_created_picture[y].empty()) ? m_eval_gstate.m_created_picture[y].data() : nullptr;
+			raster_picture bprog = m_best_pic_B.raster_lines.empty() ? m_eval_gstate.m_best_pic : m_best_pic_B;
+			baseEvB.RecachePicture(&bprog);
+			(void)baseEvB.ExecuteRasterProgramDual(&bprog, resB.data(), fixedARows, /*mutateB*/true);
+			UpdateCreatedFromResults(resB, m_created_picture_B);
+			UpdateTargetsFromResults(resB, m_created_picture_targets_B);
 		}
-		m_eval_gstate.m_dual_fixed_rows_active_index.store(init_idx, std::memory_order_release);
-		m_eval_gstate.m_dual_fixed_frame_is_A.store(false, std::memory_order_relaxed);
 
-		// Establish a baseline dual cost from current A with fixed B (for UI/acceptance info)
+		// Second pass: A with B fixed, seed baseline
 		{
 			Evaluator baseEv;
-			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 777, cfg.cache_size);
+			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 1337, cfg.cache_size);
 			baseEv.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
 				m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
-				m_target_y.data(), m_target_u.data(), m_target_v.data());
+				m_input_target_y.data(), m_input_target_u.data(), m_input_target_v.data());
 			baseEv.SetDualTables8(
 				m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
 				m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
-				m_target_y8.data(), m_target_u8.data(), m_target_v8.data());
+				m_input_target_y8.data(), m_input_target_u8.data(), m_input_target_v8.data());
 			baseEv.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
 			std::vector<const line_cache_result*> tmpRes(m_height, nullptr);
 			std::vector<const unsigned char*> otherRows((size_t)m_height, (const unsigned char*)nullptr);
@@ -105,11 +119,52 @@ void RastaConverter::MainLoopDual()
 			raster_picture a = m_eval_gstate.m_best_pic;
 			baseEv.RecachePicture(&a);
 			distance_accum_t baseCost = baseEv.ExecuteRasterProgramDual(&a, tmpRes.data(), otherRows, /*mutateB*/false);
-			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
-			m_eval_gstate.m_best_result = (double)baseCost;
-			// Do not clobber a loaded last-best if present
-			if (m_eval_gstate.m_last_best_evaluation == 0ULL)
+			{
+				std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+				double C = (double)baseCost;
+				size_t hist_size = (solutions > 0) ? (size_t)solutions : 1ULL;
+				a.uncache_insns();
+				m_eval_gstate.m_best_pic = a;  // Store re-evaluated picture that produced baseline cost
+				// CRITICAL: Reset m_best_result to dual baseline cost C measured against input-based target.
+				// If resuming from saved state, previous m_best_result may be from quantized target phase.
+				// Alternating phase uses dual evaluation against original high-color input (m_input_target_*),
+				// which is INCOMPATIBLE with quantized target metrics - different scales, cannot compare.
+				m_eval_gstate.m_best_result = C;
+				m_eval_gstate.m_previous_results.assign(hist_size, C);
+				m_eval_gstate.m_previous_results_index = 0;
+				m_eval_gstate.m_current_cost = C;
+				m_eval_gstate.m_cost_max = C;
+				m_eval_gstate.m_N = (int)hist_size;
 				m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+				m_eval_gstate.m_current_norm_drift = 0.0;
+				m_eval_gstate.m_initialized = true;
+				m_needs_history_reconfigure = false;
+				m_eval_gstate.m_update_improvement = true;
+				UpdateCreatedFromResults(tmpRes, m_eval_gstate.m_created_picture);
+				UpdateTargetsFromResults(tmpRes, m_eval_gstate.m_created_picture_targets);
+			}
+			m_eval_gstate.m_condvar_update.notify_one();
+			Message("[Dual] Baseline seeded to input-target cost");
+		}
+
+		// Initialize fixed frame pointer buffers for alternating phase (use B as initial fixed)
+		m_eval_gstate.m_dual_fixed_frame_A.resize(m_height);
+		m_eval_gstate.m_dual_fixed_frame_B.resize(m_height);
+		for (int i = 0; i < 2; ++i) {
+			m_eval_gstate.m_dual_fixed_rows_buf[i].resize(m_height);
+		}
+		{
+			int init_idx = 0;
+			for (int y = 0; y < m_height; ++y) {
+				if (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) {
+					m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_created_picture_B[y].data();
+				} else {
+					m_eval_gstate.m_dual_fixed_frame_B[y].assign(m_width, 0);
+					m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_eval_gstate.m_dual_fixed_frame_B[y].data();
+				}
+			}
+			m_eval_gstate.m_dual_fixed_rows_active_index.store(init_idx, std::memory_order_release);
+			m_eval_gstate.m_dual_fixed_frame_is_A.store(false, std::memory_order_relaxed);
 		}
 
 		// Immediately show frame in dual mode
@@ -178,6 +233,10 @@ void RastaConverter::MainLoopDual()
 					if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_A) break;
 					++m_eval_gstate.m_evaluations;
 					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost, false);
+					// Progress local baseline even if not a global improvement
+					if (out.accepted && !out.improved) {
+						localBest = cand;
+					}
 					if (out.improved) {
 						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						m_eval_gstate.m_best_result = (double)cost;
@@ -335,10 +394,12 @@ void RastaConverter::MainLoopDual()
 						if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_B) break;
 						++m_eval_gstate.m_evaluations;
 						Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost, false);
+						if (out.accepted && !out.improved) {
+							localB = cand;
+						}
 						if (out.improved) {
 							m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
-							m_eval_gstate.m_best_result = (double)cost;
 							UpdateCreatedFromResults(line_results, m_created_picture_B);
 							UpdateTargetsFromResults(line_results, m_created_picture_targets_B);
 							memcpy(&m_sprites_memory_B, &ev.GetSpritesMemory(), sizeof m_sprites_memory_B);
@@ -426,41 +487,137 @@ void RastaConverter::MainLoopDual()
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
 		for (auto &t : bootWorkersB) { if (t.joinable()) t.join(); }
-		// OPTIMAL: Initialize fixed frame pointer buffers for alternating phase (no data copies)
+		}
+		// (pointer wiring moved below, after reseed passes to avoid stale pointers)
+
+		// Two-pass baseline reseed after bootstrap
+		{
+			Evaluator baseEvB;
+			baseEvB.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 2222, cfg.cache_size);
+			baseEvB.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
+				 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
+				 m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
+				 m_input_target_y.data(), m_input_target_u.data(), m_input_target_v.data());
+			baseEvB.SetDualTables8(
+				m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
+				m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
+				m_input_target_y8.data(), m_input_target_u8.data(), m_input_target_v8.data());
+			baseEvB.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
+			std::vector<const line_cache_result*> resB(m_height, nullptr);
+			std::vector<const unsigned char*> fixedARows((size_t)m_height, (const unsigned char*)nullptr);
+			for (int y = 0; y < m_height; ++y) fixedARows[y] = (y < (int)m_eval_gstate.m_created_picture.size() && !m_eval_gstate.m_created_picture[y].empty()) ? m_eval_gstate.m_created_picture[y].data() : nullptr;
+			raster_picture bprog = m_best_pic_B.raster_lines.empty() ? m_eval_gstate.m_best_pic : m_best_pic_B;
+			baseEvB.RecachePicture(&bprog);
+			(void)baseEvB.ExecuteRasterProgramDual(&bprog, resB.data(), fixedARows, /*mutateB*/true);
+			UpdateCreatedFromResults(resB, m_created_picture_B);
+			UpdateTargetsFromResults(resB, m_created_picture_targets_B);
+		}
+
+		// Second pass: A with B fixed, seed baseline
+		{
+			Evaluator baseEv;
+			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 1337, cfg.cache_size);
+			baseEv.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
+				m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
+				m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
+				m_input_target_y.data(), m_input_target_u.data(), m_input_target_v.data());
+			baseEv.SetDualTables8(
+				m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
+				m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
+				m_input_target_y8.data(), m_input_target_u8.data(), m_input_target_v8.data());
+			baseEv.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
+			std::vector<const line_cache_result*> tmpRes(m_height, nullptr);
+			std::vector<const unsigned char*> otherRows((size_t)m_height, (const unsigned char*)nullptr);
+			for (int y = 0; y < m_height; ++y) otherRows[y] = (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) ? m_created_picture_B[y].data() : nullptr;
+			raster_picture a = m_eval_gstate.m_best_pic;
+			baseEv.RecachePicture(&a);
+			distance_accum_t baseCost = baseEv.ExecuteRasterProgramDual(&a, tmpRes.data(), otherRows, /*mutateB*/false);
+			{
+				std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+				double C = (double)baseCost;
+				size_t hist_size = (solutions > 0) ? (size_t)solutions : 1ULL;
+				a.uncache_insns();
+				m_eval_gstate.m_best_pic = a;
+				// CRITICAL: Reset m_best_result to dual baseline cost C measured against input-based target.
+				// Bootstrap phase accumulated m_best_result using single-frame evaluation against 
+				// palette-quantized target (m_picture), which is INCOMPATIBLE with alternating phase
+				// that uses dual evaluation against original high-color input (m_input_target_*).
+				// These metrics have different scales and cannot be compared, so we must reset.
+				m_eval_gstate.m_best_result = C;
+				m_eval_gstate.m_previous_results.assign(hist_size, C);
+				m_eval_gstate.m_previous_results_index = 0;
+				m_eval_gstate.m_current_cost = C;
+				m_eval_gstate.m_cost_max = C;
+				m_eval_gstate.m_N = (int)hist_size;
+				m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+				m_eval_gstate.m_current_norm_drift = 0.0;
+				m_eval_gstate.m_initialized = true;
+				m_needs_history_reconfigure = false;
+				m_eval_gstate.m_update_improvement = true;
+				UpdateCreatedFromResults(tmpRes, m_eval_gstate.m_created_picture);
+				UpdateTargetsFromResults(tmpRes, m_eval_gstate.m_created_picture_targets);
+			}
+			m_eval_gstate.m_condvar_update.notify_one();
+		}
+
+		// Initialize fixed frame pointer buffers for alternating phase (use B as initial fixed)
 		m_eval_gstate.m_dual_fixed_frame_A.resize(m_height);
 		m_eval_gstate.m_dual_fixed_frame_B.resize(m_height);
 		for (int i = 0; i < 2; ++i) {
 			m_eval_gstate.m_dual_fixed_rows_buf[i].resize(m_height);
 		}
-		// Initialize B as the initial fixed frame (since we start with mutateB=false)
-		int init_idx = 0;
-		for (int y = 0; y < m_height; ++y) {
-			if (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) {
-				// Wire pointer directly to existing B created picture row
-				m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_created_picture_B[y].data();
-			} else {
-				// Fallback storage to ensure a valid pointer
-				m_eval_gstate.m_dual_fixed_frame_B[y].assign(m_width, 0);
-				m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_eval_gstate.m_dual_fixed_frame_B[y].data();
+		{
+			int init_idx = 0;
+			for (int y = 0; y < m_height; ++y) {
+				if (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) {
+					m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_created_picture_B[y].data();
+				} else {
+					m_eval_gstate.m_dual_fixed_frame_B[y].assign(m_width, 0);
+					m_eval_gstate.m_dual_fixed_rows_buf[init_idx][y] = m_eval_gstate.m_dual_fixed_frame_B[y].data();
+				}
+			}
+			m_eval_gstate.m_dual_fixed_rows_active_index.store(init_idx, std::memory_order_release);
+			m_eval_gstate.m_dual_fixed_frame_is_A.store(false, std::memory_order_relaxed);
+		}
+
+		// Immediately show initial frame to ensure output is visible in dual mode (only if we didn't already)
+		if (!skip_bootstrap && !quiet) { 
+			m_dual_display = DualDisplayMode::MIX; 
+			ShowLastCreatedPictureDual(); 
+		} 
+		}
+
+		if (cfg.continue_processing && m_needs_history_reconfigure) {
+			reconfigureAcceptanceHistory();
+		}
+
+		// CRITICAL: Clear all caches before alternating phase
+		// Bootstrap phase used single-frame evaluation against palette-quantized target (m_picture)
+		// Alternating phase uses dual evaluation against original high-color input (m_input_target_*)
+		// These are incompatible metrics, so all caches must be cleared to avoid stale results
+		DBG_PRINT("[RASTA] Clearing all caches before alternating phase (target metric changed)");
+		int num_workers = std::max(1, cfg.threads);
+		{
+			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+			for (int tid = 0; tid < num_workers; ++tid) {
+				m_evaluators[tid].ClearAllCaches();
 			}
 		}
-		m_eval_gstate.m_dual_fixed_rows_active_index.store(init_idx, std::memory_order_release);
-		m_eval_gstate.m_dual_fixed_frame_is_A.store(false, std::memory_order_relaxed); // B is initially fixed
+
+		// Loop until finished/max_evals using worker threads and snapshots
+		const unsigned long long E0 = m_eval_gstate.m_evaluations;
+		std::vector<std::thread> workers;
+		workers.reserve(num_workers);
+
+	// Sync each worker evaluator's local best to global best after reseed to prevent legacy mode acceptance guard mismatch
+	// NOTE: m_best_result was already reset to dual baseline cost C (line 537) measured against input-based target
+	// This is correct because bootstrap used incompatible metric (quantized palette vs original input)
+	{
+		std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+		for (int tid = 0; tid < num_workers; ++tid) {
+			m_evaluators[tid].SyncLocalBestToGlobal();
+		}
 	}
-}
-
-	// Immediately show initial frame to ensure output is visible in dual mode (only if we didn't already)
-	if (!skip_bootstrap && !quiet) { m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); }
-
-	if (cfg.continue_processing && m_needs_history_reconfigure) {
-		reconfigureAcceptanceHistory();
-	}
-
-	// Loop until finished/max_evals using worker threads and snapshots
-	const unsigned long long E0 = m_eval_gstate.m_evaluations;
-	std::vector<std::thread> workers;
-	int num_workers = std::max(1, cfg.threads);
-	workers.reserve(num_workers);
 
 	// Initialize atomic stage coordination for alternation
 	m_eval_gstate.m_dual_stage_focus_B.store(false, std::memory_order_relaxed);
@@ -469,17 +626,17 @@ void RastaConverter::MainLoopDual()
 
 	for (int tid = 0; tid < num_workers; ++tid) {
 		workers.emplace_back([this, E0, tid]() {
-			// HIGH-PERFORMANCE WORKER THREAD - Minimal critical sections like fork
-			Evaluator ev;
-			ev.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, cfg.initial_seed + 4242ULL + (unsigned long long)tid * 133ULL, cfg.cache_size, tid);
+			// Use long-lived evaluator to preserve legacy acceptance state
+			Evaluator& ev = m_evaluators[tid];
+			// Configure dual input-based targets for alternating phase
 			ev.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
 				 m_pair_Ydiff.data(), m_pair_Udiff.data(), m_pair_Vdiff.data(),
-				 m_target_y.data(), m_target_u.data(), m_target_v.data());
+				 m_input_target_y.data(), m_input_target_u.data(), m_input_target_v.data());
 			ev.SetDualTables8(
 				m_pair_Ysum8.data(), m_pair_Usum8.data(), m_pair_Vsum8.data(),
 				m_pair_Ydiff8.data(), m_pair_Udiff8.data(), m_pair_Vdiff8.data(),
-				m_target_y8.data(), m_target_u8.data(), m_target_v8.data());
+				m_input_target_y8.data(), m_input_target_u8.data(), m_input_target_v8.data());
 			ev.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
 
 			// Local working state for this thread (NO sharing between threads)
@@ -503,10 +660,19 @@ void RastaConverter::MainLoopDual()
 				// Detect phase switch and update fixed frame snapshots
 				if (stage_counter >= (unsigned long long)cfg.altering_dual_steps) {
 					// Phase switch triggered - coordinate globally using exchange so only one flips
-					if (m_eval_gstate.m_dual_stage_counter.exchange(0, std::memory_order_relaxed) 
-						>= (unsigned long long)cfg.altering_dual_steps) {
-						m_eval_gstate.m_dual_stage_focus_B.store(!mutateB, std::memory_order_relaxed);
+				if (m_eval_gstate.m_dual_stage_counter.exchange(0, std::memory_order_relaxed) 
+					>= (unsigned long long)cfg.altering_dual_steps) {
+					bool newFocusB = !mutateB;
+					m_eval_gstate.m_dual_stage_focus_B.store(newFocusB, std::memory_order_relaxed);
+					// Bump the 'other' frame generation to force dual cache invalidation on identity flip
+					if (newFocusB) {
+						// Now focusing on B (mutateB=true), so A becomes the fixed 'other' frame
+						m_eval_gstate.m_dual_generation_A.fetch_add(1, std::memory_order_acq_rel);
+					} else {
+						// Now focusing on A (mutateB=false), so B becomes the fixed 'other' frame
+						m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
 					}
+				}
 				}
 
 				// Quick re-read after potential update
@@ -602,10 +768,19 @@ void RastaConverter::MainLoopDual()
 					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
 					if (m_eval_gstate.m_finished || (cfg.max_evals > 0 && m_eval_gstate.m_evaluations >= m_eval_gstate.m_max_evals)) {
 						break;
-				}
-				++m_eval_gstate.m_evaluations;
-				out = ev.ApplyAcceptanceCore((double)cost, false);
-				if (out.improved) {
+					}
+					++m_eval_gstate.m_evaluations;
+					out = ev.ApplyAcceptanceCore((double)cost, false);
+					// Adopt accepted candidate as new local baseline even if not a global improvement
+					if (out.accepted && !out.improved) {
+						if (mutateB) {
+							currentB = cand;
+						} else {
+							currentA = cand;
+						}
+						localAcceptedCost = (double)cost;
+					}
+					if (out.improved) {
 						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
 						m_eval_gstate.m_best_result = (double)cost;
 						if (mutateB) {
@@ -625,6 +800,7 @@ void RastaConverter::MainLoopDual()
 						}
 						m_eval_gstate.m_update_improvement = true;
 						m_eval_gstate.m_condvar_update.notify_one();
+						localAcceptedCost = (double)cost;
 					}
 					if (m_eval_gstate.m_save_period > 0 && (m_eval_gstate.m_evaluations % (unsigned long long)m_eval_gstate.m_save_period) == 0ULL) {
 						m_eval_gstate.m_update_autosave = true;
@@ -677,5 +853,3 @@ void RastaConverter::MainLoopDual()
 
 	for (auto &t : workers) { if (t.joinable()) t.join(); }
 }
-
-

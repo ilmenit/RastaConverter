@@ -912,6 +912,7 @@ bool RastaConverter::ProcessInit()
 
 	DBG_PRINT("[RASTA] InitLocalStructure");
 	InitLocalStructure();
+    m_picture_original = m_picture; // keep full-color source for dual optimization
 	if (!cfg.preprocess_only)
 		SavePicture(cfg.output_file+"-src.png",input_bitmap);
 

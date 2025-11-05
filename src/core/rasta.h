@@ -63,6 +63,7 @@ private:
 	vector < vector <unsigned char> > details_data;		
 
 	vector < screen_line > m_picture; 
+	vector < screen_line > m_picture_original; // original input before palette quantization
 	vector<distance_t> m_picture_all_errors[128]; 
 	const distance_t *m_picture_all_errors_array[128];
 	int m_width,m_height; // picture size
@@ -79,11 +80,15 @@ private:
 	bool m_dual_tables_ready = false; // pair tables ready
 	float m_palette_y[128] = {0}, m_palette_u[128] = {0}, m_palette_v[128] = {0};
 	std::vector<float> m_target_y, m_target_u, m_target_v; // per-pixel target YUV (float)
+	// Input-based targets for post-bootstrap dual optimization
+	std::vector<float> m_input_target_y, m_input_target_u, m_input_target_v; // per-pixel input YUV (float)
 	std::vector<float> m_pair_Ysum, m_pair_Usum, m_pair_Vsum; // 128x128 tables (float)
 	// Temporal diffs between pairs (absolute component deltas)
 	std::vector<float> m_pair_Ydiff, m_pair_Udiff, m_pair_Vdiff; // 128x128 tables (float)
 	// Quantized 8-bit variants for LUT-based dual distance
 	std::vector<unsigned char> m_target_y8, m_target_u8, m_target_v8; // per-pixel target YUV (uint8)
+	// Input-based 8-bit targets
+	std::vector<unsigned char> m_input_target_y8, m_input_target_u8, m_input_target_v8; // per-pixel input YUV (uint8)
 	std::vector<unsigned char> m_pair_Ysum8, m_pair_Usum8, m_pair_Vsum8; // 128x128 tables (uint8)
 	std::vector<unsigned char> m_pair_Ydiff8, m_pair_Udiff8, m_pair_Vdiff8; // 128x128 tables (uint8)
 	std::vector<unsigned char> m_pair_srgb; // 128x128x3 blended sRGB pairs (active blending mode)
@@ -185,6 +190,8 @@ public:
 
 	// Dual-mode helpers
 	void PrecomputeDualTables();
+	// Build input-based per-pixel YUV targets from original input
+	void PrecomputeInputTargets();
 	void MainLoopDual();
 	void UpdateCreatedFromResults(const std::vector<const line_cache_result*>& results,
 		std::vector< std::vector<unsigned char> >& out_created);

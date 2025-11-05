@@ -21,13 +21,13 @@ void RastaConverter::PrecomputeDualTables()
 		float y,u,v; rgb_to_yuv(atari_palette[i], y,u,v);
 		m_palette_y[i]=y; m_palette_u[i]=u; m_palette_v[i]=v;
 	}
-	// Target YUV per pixel
+	// Target YUV per pixel (use palette-quantized destination for bootstrap)
 	const unsigned total = (unsigned)(m_width*m_height);
 	m_target_y.resize(total); m_target_u.resize(total); m_target_v.resize(total);
 	m_target_y8.resize(total); m_target_u8.resize(total); m_target_v8.resize(total);
 	unsigned idx=0;
 	for (int y=0;y<m_height;++y) {
-		const screen_line& row = m_picture[y];
+		const screen_line& row = m_picture[y];  // palette-quantized destination
 		for (int x=0;x<m_width;++x) {
 			float Y,U,V; rgb_to_yuv(row[x], Y,U,V);
 			m_target_y[idx]=Y; m_target_u[idx]=U; m_target_v[idx]=V; ++idx;

@@ -219,6 +219,12 @@ public:
 	// Provide other-frame rows for dual-aware mutations (non-owning, valid during mutation call only)
 	inline void SetDualMutationOtherRows(const std::vector<const unsigned char*>& rows) { m_dual_mutation_other_rows = &rows; }
 
+	// Sync thread-local best with global best (for post-reseed alignment in dual mode)
+	void SyncLocalBestToGlobal();
+
+	// Clear all caches (for phase transitions, e.g., bootstrap -> alternating in dual mode)
+	void ClearAllCaches();
+
 private:
 	int m_thread_id;
 	// LRU tracking
