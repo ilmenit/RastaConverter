@@ -718,14 +718,14 @@ void RastaConverter::ShowInputBitmap()
 		if (destination_bitmap)
 		{
 			ShowDestinationBitmap();
-			// Destination shows quantized or dithered version
+			// Destination shows high-color version (original or dithered)
 			if (cfg.dual_dither != E_DUAL_DITHER_NONE)
 			{
 				gui.DisplayText(width * 4, height + 10, "Destination (dithered)");
 			}
 			else
 			{
-				gui.DisplayText(width * 4, height + 10, "Destination (quantized)");
+				gui.DisplayText(width * 4, height + 10, "Destination (high-color)");
 			}
 		}
 	}
@@ -776,8 +776,25 @@ bool RastaConverter::PrepareDestinationPicture()
 
 
 	// Draw new picture on the screen
-	if (cfg.dither!=E_DITHER_NONE)
+	if (cfg.dual_mode)
 	{
+		// In dual mode, destination is always high-color (original source or dithered source)
+		// Quantization only happens during bootstrap phase, not in destination image
+		for (int y=0;y<m_height;++y)
+		{
+			for (int x=0;x<m_width;++x)
+			{
+				// Copy high-color source to destination (no quantization)
+				rgb out_pixel = m_picture_original[y][x];
+				RGBQUAD color = RGB2PIXEL(out_pixel);
+				FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
+			}
+			ShowDestinationLine(y);
+		}
+	}
+	else if (cfg.dither!=E_DITHER_NONE)
+	{
+		// Single-frame mode with dithering
 		bool cancelled = false;
 		if (cfg.dither==E_DITHER_KNOLL)
 			cancelled = KnollDithering();
@@ -791,6 +808,7 @@ bool RastaConverter::PrepareDestinationPicture()
 	}
 	else
 	{
+		// Single-frame mode without dithering: quantize to Atari colors
 		for (int y=0;y<m_height;++y)
 		{
 			for (int x=0;x<m_width;++x)

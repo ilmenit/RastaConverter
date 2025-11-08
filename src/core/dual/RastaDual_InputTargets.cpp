@@ -1,5 +1,5 @@
 // Build input-based per-pixel YUV targets from destination image for post-bootstrap dual optimization
-// Uses m_picture (destination) which is either quantized source or dithered source, matching Single Frame behavior
+// Uses m_picture (destination) which is always high-color in dual mode (original source or dithered source)
 #include "rasta.h"
 #include <cassert>
 
@@ -24,7 +24,7 @@ void RastaConverter::PrecomputeInputTargets()
 
     unsigned idx = 0;
     for (int y = 0; y < m_height; ++y) {
-        const screen_line& row = m_picture[y];  // Use destination image (quantized or dithered)
+        const screen_line& row = m_picture[y];  // Use destination image (high-color in dual mode)
         for (int x = 0; x < m_width; ++x) {
             float Y,U,V; rgb_to_yuv(row[x], Y,U,V);
             m_input_target_y[idx] = Y; m_input_target_u[idx] = U; m_input_target_v[idx] = V;

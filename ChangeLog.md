@@ -5,7 +5,7 @@ RastaConverterBeta21      2025-11-?? [AI RELEASE]
 * Improved Dual Mode to use Input image as Target image - should improve output quality in dual mode
 * During dithering phase user can now quit the app (useful for slow knoll dithering)
 * Dithering preview is shown on the right side of screen.
-* Added input dithering for Dual Mode (/dual_dither=knoll|random|chess|line|line2) - adds structured noise to input image before optimization to guide color distribution
+* Added input dithering for Dual Mode (/dual_dither=knoll|random|chess|line|line2) - adds noise to guide color distribution and remove banding
 
 
 RastaConverterBeta20      2025-10-29 [AI RELEASE]

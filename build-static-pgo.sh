@@ -73,14 +73,40 @@ if ! command -v icx >/dev/null 2>&1; then
 fi
 
 # Try Intel's llvm-profdata first, then fall back to system one
-if [[ -f "/opt/intel/oneapi/compiler/2025.2/bin/compiler/llvm-profdata" ]]; then
-    LLVM_PROFDATA="/opt/intel/oneapi/compiler/2025.2/bin/compiler/llvm-profdata"
-elif command -v llvm-profdata >/dev/null 2>&1; then
-    LLVM_PROFDATA="llvm-profdata"
-else
-    echo "[error] llvm-profdata not found in PATH." >&2
-    echo "[hint] Install LLVM tools: sudo apt install llvm (Ubuntu) or brew install llvm (macOS)" >&2
-    exit 1
+LLVM_PROFDATA=""
+# Auto-detect Intel oneAPI compiler version
+if command -v icx >/dev/null 2>&1; then
+    # Try to get version from icx path or scan compiler directory
+    ICX_PATH=$(command -v icx)
+    if [[ "$ICX_PATH" =~ /opt/intel/oneapi/compiler/([0-9]+\.[0-9]+)/ ]]; then
+        DETECTED_VERSION="${BASH_REMATCH[1]}"
+    elif [[ -d "/opt/intel/oneapi/compiler" ]]; then
+        # Find the latest version in the compiler directory
+        DETECTED_VERSION=$(ls -1v /opt/intel/oneapi/compiler/ 2>/dev/null | grep -E '^[0-9]+\.[0-9]+$' | tail -1)
+    fi
+    
+    # Try detected version or common versions
+    for version in "$DETECTED_VERSION" "2025.2" "2025.1" "2024.2" "2024.1"; do
+        if [[ -n "$version" ]] && [[ -f "/opt/intel/oneapi/compiler/$version/bin/compiler/llvm-profdata" ]]; then
+            LLVM_PROFDATA="/opt/intel/oneapi/compiler/$version/bin/compiler/llvm-profdata"
+            break
+        fi
+    done
+fi
+
+# Fall back to system llvm-profdata if Intel's version not found
+if [[ -z "$LLVM_PROFDATA" ]]; then
+    if command -v llvm-profdata >/dev/null 2>&1; then
+        LLVM_PROFDATA="llvm-profdata"
+    else
+        echo "[error] llvm-profdata not found in PATH." >&2
+        echo "[hint] Install LLVM tools: sudo apt install llvm (Ubuntu) or brew install llvm (macOS)" >&2
+        if command -v icx >/dev/null 2>&1; then
+            echo "[hint] Intel oneAPI compiler detected, but llvm-profdata not found at expected location." >&2
+            echo "[hint] Check: /opt/intel/oneapi/compiler/*/bin/compiler/llvm-profdata" >&2
+        fi
+        exit 1
+    fi
 fi
 LLVM_PROFDATA_VERSION=$($LLVM_PROFDATA --version 2>&1 || echo "unknown")
 echo "[info] llvm-profdata: $LLVM_PROFDATA_VERSION"
