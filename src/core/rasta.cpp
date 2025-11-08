@@ -713,14 +713,20 @@ void RastaConverter::ShowInputBitmap()
 	gui.DisplayBitmap(0, 0, input_bitmap);
 	if (cfg.dual_mode)
 	{
-		// In dual mode, source and destination are the same (dithered input is shown as source)
-		if (cfg.dual_dither != E_DUAL_DITHER_NONE)
+		// In dual mode, input_bitmap shows original source (unchanged)
+		gui.DisplayText(0, height + 10, "Source (original)");
+		if (destination_bitmap)
 		{
-			gui.DisplayText(0, height + 10, "Source (dithered)");
-		}
-		else
-		{
-			gui.DisplayText(0, height + 10, "Source = Destination");
+			ShowDestinationBitmap();
+			// Destination shows quantized or dithered version
+			if (cfg.dual_dither != E_DUAL_DITHER_NONE)
+			{
+				gui.DisplayText(width * 4, height + 10, "Destination (dithered)");
+			}
+			else
+			{
+				gui.DisplayText(width * 4, height + 10, "Destination (quantized)");
+			}
 		}
 	}
 	else
@@ -729,7 +735,7 @@ void RastaConverter::ShowInputBitmap()
 		if (destination_bitmap)
 		{
 			ShowDestinationBitmap();
-			gui.DisplayText(width * 2, height + 10, "Destination");
+			gui.DisplayText(width * 4, height + 10, "Destination");
 		}
 	}
 }
@@ -940,11 +946,12 @@ bool RastaConverter::ProcessInit()
 	if (PrepareDestinationPicture())
 		return false; // User cancelled during dithering
 	
-	// Apply input dithering for dual mode (if enabled) - after destination_bitmap is created
+	// Apply dual dithering for dual mode (if enabled) - overwrites destination with dithered version
+	// Source (m_picture_original and input_bitmap) remains unchanged
 	if (cfg.dual_mode && cfg.dual_dither != E_DUAL_DITHER_NONE)
 	{
 		ApplyDualInputDithering();
-		// Refresh display to show dithered input
+		// Refresh display to show original source and dithered destination
 		if (!cfg.preprocess_only)
 		{
 			ShowInputBitmap();
@@ -1488,15 +1495,16 @@ void RastaConverter::ApplyDualInputDithering()
 		return (unsigned char)(v + 0.5);
 	};
 	
-	// Process each pixel
+	// Process each pixel: read from original source, apply dithering, write to destination only
 	for (int y = 0; y < m_height; ++y)
 	{
 		for (int x = 0; x < m_width; ++x)
 		{
-			rgb& pixel = m_picture_original[y][x];
-			double r = (double)pixel.r;
-			double g = (double)pixel.g;
-			double b = (double)pixel.b;
+			// Read from original source (do not modify)
+			const rgb& src_pixel = m_picture_original[y][x];
+			double r = (double)src_pixel.r;
+			double g = (double)src_pixel.g;
+			double b = (double)src_pixel.b;
 			
 			double biasR = 0.0, biasG = 0.0, biasB = 0.0;
 			
@@ -1572,26 +1580,19 @@ void RastaConverter::ApplyDualInputDithering()
 				biasB = (1.0 - randomness) * biasB + randomness * randomB;
 			}
 			
-			// Apply bias and clamp
-			pixel.r = clamp(r + biasR);
-			pixel.g = clamp(g + biasG);
-			pixel.b = clamp(b + biasB);
-		}
-	}
-	
-	// Update input_bitmap and destination_bitmap to reflect the dithered input for display
-	for (int y = 0; y < m_height; ++y)
-	{
-		for (int x = 0; x < m_width; ++x)
-		{
-			rgb& pixel = m_picture_original[y][x];
-			RGBQUAD color = RGB2PIXEL(pixel);
-			FreeImage_SetPixelColor(input_bitmap, x, y, &color);
-			// Also update destination_bitmap if it exists (for dual mode display)
+			// Apply bias and clamp to create dithered pixel
+			rgb dithered_pixel;
+			dithered_pixel.r = clamp(r + biasR);
+			dithered_pixel.g = clamp(g + biasG);
+			dithered_pixel.b = clamp(b + biasB);
+			
+			// Write to destination_bitmap and m_picture (destination only, source unchanged)
+			RGBQUAD color = RGB2PIXEL(dithered_pixel);
 			if (destination_bitmap)
 			{
 				FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
 			}
+			m_picture[y][x] = dithered_pixel;
 		}
 	}
 }

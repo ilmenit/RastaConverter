@@ -1,11 +1,12 @@
-// Build input-based per-pixel YUV targets from original input for post-bootstrap dual optimization
+// Build input-based per-pixel YUV targets from destination image for post-bootstrap dual optimization
+// Uses m_picture (destination) which is either quantized source or dithered source, matching Single Frame behavior
 #include "rasta.h"
 #include <cassert>
 
 void RastaConverter::PrecomputeInputTargets()
 {
 #ifdef _DEBUG
-    assert(!m_picture_original.empty());
+    assert(!m_picture.empty());
 #endif
     const unsigned total = (unsigned)(m_width * m_height);
     m_input_target_y.resize(total); m_input_target_u.resize(total); m_input_target_v.resize(total);
@@ -23,7 +24,7 @@ void RastaConverter::PrecomputeInputTargets()
 
     unsigned idx = 0;
     for (int y = 0; y < m_height; ++y) {
-        const screen_line& row = m_picture_original[y];
+        const screen_line& row = m_picture[y];  // Use destination image (quantized or dithered)
         for (int x = 0; x < m_width; ++x) {
             float Y,U,V; rgb_to_yuv(row[x], Y,U,V);
             m_input_target_y[idx] = Y; m_input_target_u[idx] = U; m_input_target_v[idx] = V;
