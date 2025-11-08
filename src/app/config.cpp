@@ -257,6 +257,15 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 	parser.addOption("dual_chroma", {"dc"}, "FLOAT", "0.1",
 		"Temporal chroma penalty weight (higher reduces flicker).",
 		"Dual-frame mode");
+	parser.addOption("dual_dither", {"dd"}, "knoll|random|chess|line|line2", "none",
+		"Input dithering type for dual mode (adds noise to input image before optimization).",
+		"Dual-frame mode");
+	parser.addOption("dual_dither_val", {"ddv"}, "FLOAT", "0.125",
+		"Input dithering strength (0.0-2.0, default 0.125).",
+		"Dual-frame mode");
+	parser.addOption("dual_dither_rand", {"ddr"}, "FLOAT", "0.0",
+		"Input dithering randomness (0.0-1.0, blends pattern with random noise).",
+		"Dual-frame mode");
 
 	// Parse now
 	parser.parse(argc, argv);
@@ -587,6 +596,37 @@ else if (dst_name=="yuv")
 		std::string v = parser.getValue("dual_chroma", "0.1");
 		dual_chroma = String2Value<double>(v);
 		if (dual_chroma < 0.0) dual_chroma = 0.0; // clamp
+	}
+	{
+		std::string v = parser.getValue("dual_dither", "none");
+		for (auto &c : v) c = (char)tolower(c);
+		if (v == "knoll")
+			dual_dither = E_DUAL_DITHER_KNOLL;
+		else if (v == "random")
+			dual_dither = E_DUAL_DITHER_RANDOM;
+		else if (v == "chess")
+			dual_dither = E_DUAL_DITHER_CHESS;
+		else if (v == "line")
+			dual_dither = E_DUAL_DITHER_LINE;
+		else if (v == "line2")
+			dual_dither = E_DUAL_DITHER_LINE2;
+		else
+		{
+			if (v != "none") warning_messages.push_back("Unknown dual_dither='" + v + "', using 'none'.");
+			dual_dither = E_DUAL_DITHER_NONE;
+		}
+	}
+	{
+		std::string v = parser.getValue("dual_dither_val", "0.125");
+		dual_dither_val = String2Value<double>(v);
+		if (dual_dither_val < 0.0) dual_dither_val = 0.0;
+		if (dual_dither_val > 2.0) dual_dither_val = 2.0;
+	}
+	{
+		std::string v = parser.getValue("dual_dither_rand", "0.0");
+		dual_dither_rand = String2Value<double>(v);
+		if (dual_dither_rand < 0.0) dual_dither_rand = 0.0;
+		if (dual_dither_rand > 1.0) dual_dither_rand = 1.0;
 	}
 
 	if (!captureOverrides) {

@@ -99,6 +99,7 @@ private:
 	// Knoll dithering progress (for live UI updates)
 	std::unique_ptr<std::atomic<unsigned char>[]> m_knoll_line_ready; // size=m_height, 0=not ready, 1=ready
 	std::vector<unsigned char> m_knoll_line_drawn; // 0 = not drawn, 1 = drawn
+	std::atomic<bool> m_knoll_should_stop{false}; // signal worker threads to stop early
 
 	vector<Evaluator> m_evaluators;
 
@@ -117,9 +118,11 @@ private:
 	void CreateSmartRasterPicture(raster_picture *);
 	void CreateRandomRasterPicture(raster_picture *);
 	void DiffuseError( int x, int y, double quant_error, double e_r,double e_g,double e_b);
-	void KnollDithering();
-	void OtherDithering();
+	bool KnollDithering(); // returns true if cancelled by user
+	bool OtherDithering(); // returns true if cancelled by user
 	MixingPlan DeviseBestMixingPlan(rgb color);
+	// Apply input dithering to m_picture_original (for dual mode)
+	void ApplyDualInputDithering();
 
 	distance_accum_t ExecuteRasterProgram(raster_picture *);
 	void OptimizeRasterProgram(raster_picture *);
@@ -174,7 +177,7 @@ public:
 	void SaveBestSolution();
 	void ShowLastCreatedPicture();
 
-	void PrepareDestinationPicture();
+	bool PrepareDestinationPicture(); // returns true if cancelled by user
 	void SetConfig(Configuration &c);
 	bool ProcessInit();
 	void LoadAtariPalette();

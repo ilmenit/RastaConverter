@@ -275,6 +275,27 @@ Dual-frame mode:
   Temporal chroma penalty weight in dual mode. Higher values reduce color flicker; lower values preserve more color variety. Default: 0.1
   Aliases: /dc, --dual_chroma
 
+/dual_dither=knoll|random|chess|line|line2
+  Input dithering type for dual mode. Adds structured noise to the input image before optimization starts, which can help guide the optimizer toward better color distribution. Default: none (disabled)
+  - knoll: Bayer matrix-based dithering (similar to Adobe pattern dithering)
+  - random: Random noise pattern
+  - chess: Chessboard pattern transformed into noise
+  - line: Alternating line pattern
+  - line2: Similar to line pattern
+  Aliases: /dd, --dual_dither
+
+/dual_dither_val=<FLOAT>
+  Input dithering strength. Controls the magnitude of noise added to the input image. Range: 0.0-2.0. Default: 0.125
+  Higher values add more noise, which can help break up color bands but may reduce accuracy.
+  Aliases: /ddv, --dual_dither_val
+
+/dual_dither_rand=<FLOAT>
+  Input dithering randomness. Blends deterministic pattern with random noise. Range: 0.0-1.0. Default: 0.0
+  - 0.0: Pure deterministic pattern
+  - 1.0: Pure random noise
+  - Values in between: Blend of pattern and random noise
+  Aliases: /ddr, --dual_dither_rand
+
 Example:
 RastaConverter.exe c64.png /threads=8 /s=5 /opt=lahc
 

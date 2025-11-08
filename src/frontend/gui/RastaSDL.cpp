@@ -327,6 +327,38 @@ GUI_command RastaSDL::NextFrame()
 				SDL_RenderSetViewport(renderer, NULL);
 				SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 				SDL_RenderClear(renderer);
+				
+				// Get new logical size after resize
+				int lw, lh;
+				SDL_RenderGetLogicalSize(renderer, &lw, &lh);
+				if (lw <= 0 || lh <= 0) { lw = window_width; lh = window_height; }
+				
+				// Check if framebuffer texture needs to be recreated (size changed)
+				int tex_w = 0, tex_h = 0;
+				if (framebufferTexture) {
+					SDL_QueryTexture(framebufferTexture, NULL, NULL, &tex_w, &tex_h);
+				}
+				
+				// Recreate framebuffer texture if size changed or doesn't exist
+				if (!framebufferTexture || tex_w != lw || tex_h != lh) {
+					if (framebufferTexture) {
+						SDL_DestroyTexture(framebufferTexture);
+						framebufferTexture = nullptr;
+					}
+					framebufferTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, lw, lh);
+					if (framebufferTexture) {
+						SDL_SetTextureBlendMode(framebufferTexture, SDL_BLENDMODE_NONE);
+					}
+				}
+				
+				// Clear the framebuffer texture (the actual rendering target)
+				if (framebufferTexture) {
+					SDL_SetRenderTarget(renderer, framebufferTexture);
+					SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+					SDL_RenderClear(renderer);
+					SDL_SetRenderTarget(renderer, NULL);
+				}
+				
 				return GUI_command::REDRAW;
 			}
 		}

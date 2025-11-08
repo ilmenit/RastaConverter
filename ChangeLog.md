@@ -1,6 +1,13 @@
 ChangeLog
 =========
 
+RastaConverterBeta21      2025-11-?? [AI RELEASE]
+* Improved Dual Mode to use Input image as Target image - should improve output quality in dual mode
+* During dithering phase user can now quit the app (useful for slow knoll dithering)
+* Dithering preview is shown on the right side of screen.
+* Added input dithering for Dual Mode (/dual_dither=knoll|random|chess|line|line2) - adds structured noise to input image before optimization to guide color distribution
+
+
 RastaConverterBeta20      2025-10-29 [AI RELEASE]
 * When using /continue you can override in the command line parameters e.g., add /opt=legacy in parallel to /continue to switch optimizer to 'legacy'
 * Image file name in command line doesn't need to be the first parameter anymore.

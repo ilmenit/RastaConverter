@@ -39,6 +39,15 @@ enum e_dither_type {
 	E_DITHER_KNOLL,
 };
 
+enum e_dual_dither_type {
+	E_DUAL_DITHER_NONE,
+	E_DUAL_DITHER_KNOLL,
+	E_DUAL_DITHER_RANDOM,
+	E_DUAL_DITHER_CHESS,
+	E_DUAL_DITHER_LINE,
+	E_DUAL_DITHER_LINE2,
+};
+
 enum e_distance_function {
 	E_DISTANCE_EUCLID,
 	E_DISTANCE_YUV,
@@ -96,6 +105,10 @@ struct Configuration {
 	// Temporal penalty weights to control flicker perception in dual mode
 	double dual_luma = 0.2;   // weight for (Ya - Yb)^2
 	double dual_chroma = 0.1; // weight for (Ua - Ub)^2 + (Va - Vb)^2
+	// Input dithering for dual mode (applies noise to input image before optimization)
+	e_dual_dither_type dual_dither = E_DUAL_DITHER_NONE; // /dual_dither=knoll|random|chess|line|line2
+	double dual_dither_val = 0.125; // /dual_dither_val (0.0-2.0, default 0.125)
+	double dual_dither_rand = 0.0; // /dual_dither_rand (0.0-1.0, default 0.0)
 
 	// --- Optimizer selection ---
 	enum e_optimizer { E_OPT_DLAS, E_OPT_LAHC, E_OPT_LEGACY };

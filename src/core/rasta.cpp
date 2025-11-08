@@ -47,6 +47,7 @@ const char* program_version = RASTA_CONVERTER_VERSION;
 #include <iterator>
 #include <optional>
 #include <limits>
+#include <random>
 
 #include "rasta.h"
 #include "prng_xoroshiro.h"
@@ -566,7 +567,7 @@ void RastaConverter::GeneratePictureErrorMap()
 	}
 }
 
-void RastaConverter::OtherDithering()
+bool RastaConverter::OtherDithering()
 {
 	int y;
 
@@ -692,15 +693,17 @@ void RastaConverter::OtherDithering()
 			gui.Present();
 			break;
 		case GUI_command::SAVE:
-		case GUI_command::STOP:
 		case GUI_command::CONTINUE:
 		case GUI_command::SHOW_A:
 		case GUI_command::SHOW_B:
 		case GUI_command::SHOW_MIX:
 			break;
+		case GUI_command::STOP:
+			return true; // Exit dithering when user requests to quit
 		}
 		gui.Present();
 	}
+	return false; // Completed successfully
 }
 
 void RastaConverter::ShowInputBitmap()
@@ -710,14 +713,25 @@ void RastaConverter::ShowInputBitmap()
 	gui.DisplayBitmap(0, 0, input_bitmap);
 	if (cfg.dual_mode)
 	{
-		gui.DisplayText(0, height + 10, "Source = Destination");
+		// In dual mode, source and destination are the same (dithered input is shown as source)
+		if (cfg.dual_dither != E_DUAL_DITHER_NONE)
+		{
+			gui.DisplayText(0, height + 10, "Source (dithered)");
+		}
+		else
+		{
+			gui.DisplayText(0, height + 10, "Source = Destination");
+		}
 	}
 	else
 	{
 		gui.DisplayText(0, height + 10, "Source");
-		gui.DisplayText(width * 4, height + 10, "Destination");
+		if (destination_bitmap)
+		{
+			ShowDestinationBitmap();
+			gui.DisplayText(width * 2, height + 10, "Destination");
+		}
 	}
-	gui.DisplayText(width * 2, height + 10, "Current output");
 }
 
 void RastaConverter::ShowDestinationLine(int y)
@@ -725,7 +739,7 @@ void RastaConverter::ShowDestinationLine(int y)
 	if (!cfg.preprocess_only)
 	{
 		unsigned int width = FreeImage_GetWidth(destination_bitmap);
-		unsigned int where_x = FreeImage_GetWidth(input_bitmap);
+		unsigned int where_x = FreeImage_GetWidth(input_bitmap) * 2;
 
 		gui.DisplayBitmapLine(where_x, y, y, destination_bitmap);
 	}
@@ -738,7 +752,7 @@ void RastaConverter::ShowDestinationBitmap()
 
 
 
-void RastaConverter::PrepareDestinationPicture()
+bool RastaConverter::PrepareDestinationPicture()
 {
 	Message("Preparing Destination Picture");
 
@@ -758,13 +772,16 @@ void RastaConverter::PrepareDestinationPicture()
 	// Draw new picture on the screen
 	if (cfg.dither!=E_DITHER_NONE)
 	{
+		bool cancelled = false;
 		if (cfg.dither==E_DITHER_KNOLL)
-			KnollDithering();
+			cancelled = KnollDithering();
 		else
 		{
 			ClearErrorMap();
-			OtherDithering();
+			cancelled = OtherDithering();
 		}
+		if (cancelled)
+			return true; // User cancelled, exit early
 	}
 	else
 	{
@@ -802,6 +819,7 @@ void RastaConverter::PrepareDestinationPicture()
 			m_picture[y][x]=out_pixel; // copy it always - it is used by the color distance cache m_picture_all_errors
 		}
 	}
+	return false; // Completed successfully
 }
 
 void RastaConverter::LoadOnOffFile(const char *filename)
@@ -913,15 +931,29 @@ bool RastaConverter::ProcessInit()
 	DBG_PRINT("[RASTA] InitLocalStructure");
 	InitLocalStructure();
     m_picture_original = m_picture; // keep full-color source for dual optimization
-	if (!cfg.preprocess_only)
-		SavePicture(cfg.output_file+"-src.png",input_bitmap);
-
+	
 	// set preprocess distance function
 	DBG_PRINT("[RASTA] SetDistanceFunction(pre)");
 	SetDistanceFunction(cfg.pre_dstf);
 
 	// Prepare destination picture for BOTH modes to keep bootstrap behavior identical to single-frame
-	PrepareDestinationPicture();
+	if (PrepareDestinationPicture())
+		return false; // User cancelled during dithering
+	
+	// Apply input dithering for dual mode (if enabled) - after destination_bitmap is created
+	if (cfg.dual_mode && cfg.dual_dither != E_DUAL_DITHER_NONE)
+	{
+		ApplyDualInputDithering();
+		// Refresh display to show dithered input
+		if (!cfg.preprocess_only)
+		{
+			ShowInputBitmap();
+			gui.Present();
+		}
+	}
+	
+	if (!cfg.preprocess_only)
+		SavePicture(cfg.output_file+"-src.png",input_bitmap);
 	// Preserve original behavior of saving -dst only in single-frame mode
 	if (!cfg.dual_mode)
 		SavePicture(cfg.output_file+"-dst.png",destination_bitmap);
@@ -1200,6 +1232,10 @@ void RastaConverter::KnollDitheringParallel(int from, int to)
 	std::set<unsigned char> local_indices;
 	for(int y=from; y<to; ++y)
 	{
+		// Check if we should stop early
+		if (m_knoll_should_stop.load(std::memory_order_acquire))
+			break;
+		
 		local_indices.clear();
 		for(unsigned x=0; x<(unsigned)m_width; ++x)
 		{
@@ -1225,7 +1261,7 @@ void RastaConverter::KnollDitheringParallel(int from, int to)
 	}
 }
 
-void RastaConverter::KnollDithering()
+bool RastaConverter::KnollDithering()
 {
 	Message("Knoll Dithering             ");
 	for(unsigned c=0; c<128; ++c)
@@ -1233,6 +1269,7 @@ void RastaConverter::KnollDithering()
 		luma[c] = atari_palette[c].r*299 + atari_palette[c].g*587 + atari_palette[c].b*114;
 	}
 	// Initialize progress flags for multi-threaded readiness
+	m_knoll_should_stop.store(false, std::memory_order_relaxed);
 	m_knoll_line_ready.reset(new std::atomic<unsigned char>[(size_t)m_height]);
 	m_knoll_line_drawn.assign((size_t)m_height, 0);
 	for (int i=0;i<m_height;++i) m_knoll_line_ready[(size_t)i].store(0, std::memory_order_relaxed);
@@ -1261,7 +1298,8 @@ void RastaConverter::KnollDithering()
 	// Progressive commit loop: draw lines as they become ready
 	int next_to_draw = 0;
 	int presented_until = -1;
-	while (next_to_draw < m_height)
+	bool should_stop = false;
+	while (next_to_draw < m_height && !should_stop)
 	{
 		// Draw any contiguous ready lines starting from next_to_draw
 		while (next_to_draw < m_height && m_knoll_line_ready[(size_t)next_to_draw].load(std::memory_order_acquire))
@@ -1305,11 +1343,14 @@ void RastaConverter::KnollDithering()
 			gui.Present();
 			break;
 		case GUI_command::SAVE:
-		case GUI_command::STOP:
 		case GUI_command::CONTINUE:
 		case GUI_command::SHOW_A:
 		case GUI_command::SHOW_B:
 		case GUI_command::SHOW_MIX:
+			break;
+		case GUI_command::STOP:
+			should_stop = true; // Exit dithering when user requests to quit
+			m_knoll_should_stop.store(true, std::memory_order_release); // Signal worker threads to stop
 			break;
 		}
 		if (presented_until != next_to_draw)
@@ -1324,6 +1365,7 @@ void RastaConverter::KnollDithering()
 	{
 		threads[t].join();
 	}
+	return should_stop; // Return true if cancelled, false if completed
 }
 
 void RastaConverter::ClearErrorMap()
@@ -1343,6 +1385,213 @@ void RastaConverter::ClearErrorMap()
 		for (int x=0;x<m_width;++x)
 		{
 			error_map[y][x].zero();	
+		}
+	}
+}
+
+// Generate Bayer matrix recursively (supports 2x2, 4x4, 8x8)
+// n must be a power of 2
+static std::vector<std::vector<double>> GenerateBayerMatrix(int n)
+{
+	// Validate n is power of 2
+	if (n <= 0 || (n & (n - 1)) != 0)
+	{
+		// Fallback to 4x4 if invalid
+		n = 4;
+	}
+	
+	std::vector<std::vector<double>> m(n, std::vector<double>(n, 0.0));
+	
+	// Start with 1x1 matrix [0]
+	std::vector<std::vector<int>> temp(1, std::vector<int>(1, 0));
+	
+	// Recursively build up to size n
+	for (int size = 1; size < n; size *= 2)
+	{
+		int newSize = size * 2;
+		std::vector<std::vector<int>> newM(newSize, std::vector<int>(newSize, 0));
+		
+		for (int y = 0; y < size; ++y)
+		{
+			for (int x = 0; x < size; ++x)
+			{
+				int v = temp[y][x] * 4;
+				newM[y][x] = v;
+				newM[y][x + size] = v + 2;
+				newM[y + size][x] = v + 3;
+				newM[y + size][x + size] = v + 1;
+			}
+		}
+		temp = newM;
+	}
+	
+	// Normalize to [0.0, 1.0] range
+	double denom = n * n;
+	for (int y = 0; y < n; ++y)
+	{
+		for (int x = 0; x < n; ++x)
+		{
+			m[y][x] = (temp[y][x] + 0.5) / denom;
+		}
+	}
+	
+	return m;
+}
+
+void RastaConverter::ApplyDualInputDithering()
+{
+	if (!cfg.dual_mode || cfg.dual_dither == E_DUAL_DITHER_NONE)
+		return;
+	
+	if (m_picture_original.empty() || m_height <= 0 || m_width <= 0)
+		return;
+	
+	const double strength = cfg.dual_dither_val;
+	const double randomness = cfg.dual_dither_rand;
+	
+	// Per-channel offsets to decorrelate patterns (R:[0,0], G:[1,2], B:[2,1])
+	const int offR[2] = {0, 0};
+	const int offG[2] = {1, 2};
+	const int offB[2] = {2, 1};
+	
+	// Precompute Bayer matrix for KNOLL dithering (4x4)
+	std::vector<std::vector<double>> bayer_matrix;
+	if (cfg.dual_dither == E_DUAL_DITHER_KNOLL)
+	{
+		bayer_matrix = GenerateBayerMatrix(4);
+	}
+	
+	// Deterministic RNG for random component (seeded by pixel position)
+	// Use hash function to scramble position and avoid visible patterns
+	auto get_random = [&](int x, int y, int channel_offset) -> double {
+		// Hash the position to break correlation between adjacent pixels
+		unsigned long hash = (unsigned long)(y * m_width + x) + cfg.initial_seed + channel_offset;
+		// Mix bits using a simple hash function (similar to MurmurHash)
+		hash ^= hash >> 16;
+		hash *= 0x85ebca6bUL;
+		hash ^= hash >> 13;
+		hash *= 0xc2b2ae35UL;
+		hash ^= hash >> 16;
+		// Ensure non-zero seed for LCG
+		if (hash == 0) hash = 1;
+		// Use LCG with hashed seed for better distribution
+		hash = (hash * 1103515245UL + 12345UL) & 0x7fffffffUL;
+		// Additional LCG iteration for better quality
+		hash = (hash * 1103515245UL + 12345UL) & 0x7fffffffUL;
+		return (double)hash / 2147483648.0; // normalize to [0.0, 1.0)
+	};
+	
+	// Helper to clamp RGB value
+	auto clamp = [](double v) -> unsigned char {
+		if (v < 0.0) return 0;
+		if (v > 255.0) return 255;
+		return (unsigned char)(v + 0.5);
+	};
+	
+	// Process each pixel
+	for (int y = 0; y < m_height; ++y)
+	{
+		for (int x = 0; x < m_width; ++x)
+		{
+			rgb& pixel = m_picture_original[y][x];
+			double r = (double)pixel.r;
+			double g = (double)pixel.g;
+			double b = (double)pixel.b;
+			
+			double biasR = 0.0, biasG = 0.0, biasB = 0.0;
+			
+			// Compute pattern-based bias for each channel
+			if (cfg.dual_dither == E_DUAL_DITHER_KNOLL)
+			{
+				// Bayer matrix dithering
+				int bxR = (x + offR[0]) % 4;
+				int byR = (y + offR[1]) % 4;
+				int bxG = (x + offG[0]) % 4;
+				int byG = (y + offG[1]) % 4;
+				int bxB = (x + offB[0]) % 4;
+				int byB = (y + offB[1]) % 4;
+				
+				double tR = bayer_matrix[byR][bxR];
+				double tG = bayer_matrix[byG][bxG];
+				double tB = bayer_matrix[byB][bxB];
+				
+				biasR = ((tR * 2.0) - 1.0) * strength * 127.5;
+				biasG = ((tG * 2.0) - 1.0) * strength * 127.5;
+				biasB = ((tB * 2.0) - 1.0) * strength * 127.5;
+			}
+			else if (cfg.dual_dither == E_DUAL_DITHER_RANDOM)
+			{
+				// Pure random noise (will be blended with randomness control)
+				biasR = (get_random(x, y, 0) * 2.0 - 1.0) * strength * 127.5;
+				biasG = (get_random(x, y, 1) * 2.0 - 1.0) * strength * 127.5;
+				biasB = (get_random(x, y, 2) * 2.0 - 1.0) * strength * 127.5;
+			}
+			else if (cfg.dual_dither == E_DUAL_DITHER_CHESS)
+			{
+				// Chessboard pattern
+				int patternR = ((x + offR[0] + y + offR[1]) % 2 == 0) ? 1 : -1;
+				int patternG = ((x + offG[0] + y + offG[1]) % 2 == 0) ? 1 : -1;
+				int patternB = ((x + offB[0] + y + offB[1]) % 2 == 0) ? 1 : -1;
+				
+				biasR = patternR * strength * 127.5;
+				biasG = patternG * strength * 127.5;
+				biasB = patternB * strength * 127.5;
+			}
+			else if (cfg.dual_dither == E_DUAL_DITHER_LINE)
+			{
+				// Line pattern (alternating lines)
+				int patternR = ((y + offR[1]) % 2 == 0) ? 1 : -1;
+				int patternG = ((y + offG[1]) % 2 == 0) ? 1 : -1;
+				int patternB = ((y + offB[1]) % 2 == 0) ? 1 : -1;
+				
+				biasR = patternR * strength * 127.5;
+				biasG = patternG * strength * 127.5;
+				biasB = patternB * strength * 127.5;
+			}
+			else if (cfg.dual_dither == E_DUAL_DITHER_LINE2)
+			{
+				// Line2 pattern (similar to Line)
+				int patternR = ((y + offR[1]) % 2 == 0) ? 1 : -1;
+				int patternG = ((y + offG[1]) % 2 == 0) ? 1 : -1;
+				int patternB = ((y + offB[1]) % 2 == 0) ? 1 : -1;
+				
+				biasR = patternR * strength * 127.5;
+				biasG = patternG * strength * 127.5;
+				biasB = patternB * strength * 127.5;
+			}
+			
+			// Apply randomness blending if enabled
+			if (randomness > 0.0)
+			{
+				double randomR = (get_random(x, y, 0) * 2.0 - 1.0) * strength * 127.5;
+				double randomG = (get_random(x, y, 1) * 2.0 - 1.0) * strength * 127.5;
+				double randomB = (get_random(x, y, 2) * 2.0 - 1.0) * strength * 127.5;
+				
+				biasR = (1.0 - randomness) * biasR + randomness * randomR;
+				biasG = (1.0 - randomness) * biasG + randomness * randomG;
+				biasB = (1.0 - randomness) * biasB + randomness * randomB;
+			}
+			
+			// Apply bias and clamp
+			pixel.r = clamp(r + biasR);
+			pixel.g = clamp(g + biasG);
+			pixel.b = clamp(b + biasB);
+		}
+	}
+	
+	// Update input_bitmap and destination_bitmap to reflect the dithered input for display
+	for (int y = 0; y < m_height; ++y)
+	{
+		for (int x = 0; x < m_width; ++x)
+		{
+			rgb& pixel = m_picture_original[y][x];
+			RGBQUAD color = RGB2PIXEL(pixel);
+			FreeImage_SetPixelColor(input_bitmap, x, y, &color);
+			// Also update destination_bitmap if it exists (for dual mode display)
+			if (destination_bitmap)
+			{
+				FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
+			}
 		}
 	}
 }
