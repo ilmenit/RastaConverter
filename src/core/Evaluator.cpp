@@ -1,4 +1,7 @@
 #include <assert.h>
+#include <algorithm>
+#include <iterator>
+#include <numeric>
 #include <functional>
 #include <thread>
 #include "Evaluator.h"
