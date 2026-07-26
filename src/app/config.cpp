@@ -251,6 +251,9 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 	parser.addOption("details", {}, "FILE", "",
 		"Details-priority mask image (legacy arithmetic-sRGB mode).",
 		"Image processing");
+	parser.addOption("target", {}, "FILE", "",
+		"Use a prebuilt destination image instead of target preprocessing.",
+		"Image processing");
 	parser.addOption("details_val", {}, "FLOAT", "0.5",
 		"Details influence strength.",
 		"Image processing");
@@ -268,6 +271,9 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 		"Image processing");
 	parser.addOption("details_score", {}, "on|off", "on",
 		"Apply the loaded details map to direct pixel scoring.",
+		"Image processing");
+	parser.addOption("details_layer", {}, "on|off", "off",
+		"Treat /details as a persisted target-space editable layer.",
 		"Image processing");
 	parser.addOption("details_global_period", {}, "N", "5",
 		"With /details_allocate, force uniform global selection every N mutations.",
@@ -520,6 +526,7 @@ else if (dst_name=="yuv")
 	init_genrand( initial_seed );
 
 	details_file = parser.getValue("details","");
+	target_file = parser.getValue("target","");
 	on_off_file = parser.getValue("onoff","");
 
 	threads = String2Value<int>(parser.getValue("threads", "1"));
@@ -568,6 +575,12 @@ else if (dst_name=="yuv")
 	if (detailsScore != "on" && detailsScore != "off")
 		error_messages.push_back("/details_score must be on or off.");
 	details_score = detailsScore != "off";
+	std::string detailsLayer = parser.getValue("details_layer", "off");
+	std::transform(detailsLayer.begin(), detailsLayer.end(), detailsLayer.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	if (detailsLayer != "on" && detailsLayer != "off")
+		error_messages.push_back("/details_layer must be on or off.");
+	details_layer = detailsLayer == "on";
 	details_allocate = parser.switchExists("details_allocate");
 	int globalPeriod = String2Value<int>(parser.getValue("details_global_period", "5"));
 	if (globalPeriod < 2) globalPeriod = 2;

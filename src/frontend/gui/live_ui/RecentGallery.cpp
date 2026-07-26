@@ -212,6 +212,16 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 		ImGui::PopStyleColor();
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", run.folder.c_str());
+		if (run.mask_edited) {
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kWarning));
+			if (run.snapshots > 0)
+				ImGui::Text("edited · %u snap%s", run.snapshots,
+					run.snapshots == 1 ? "" : "s");
+			else
+				ImGui::TextUnformatted("edited");
+			ImGui::PopStyleColor();
+		}
 
 		ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kTextFaint));
 		ImGui::TextUnformatted(run.input_file.empty()

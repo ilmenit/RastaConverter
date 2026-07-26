@@ -64,6 +64,11 @@ public:
     void PublishStats(const LiveStats& stats);
     void PublishImage(GuiImageSlot slot, FIBITMAP* bitmap);
     void PublishDetailsMask(const GuiDetailsMask& mask);
+    void PublishDestinationLayer(const GuiDestinationLayer& layer);
+    bool TakeMaskStroke(GuiMaskStroke& stroke);
+    bool TakeDestinationChanges(GuiMaskStroke& stroke);
+    bool CreateBranchOutput(const std::string& input_file,
+        std::string& output_file, std::string& error);
     // True when the dashboard owns the window, so the legacy three-image
     // display should not be drawn.
     bool LiveUiActive() const;

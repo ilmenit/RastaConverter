@@ -69,7 +69,16 @@ private:
 
 	DetailsMask details_mask;
 	std::vector<double> details_line_priorities;
+	std::vector<unsigned char> m_destination_indices;
 	std::string m_saved_details_effective_hash;
+	std::string m_saved_target_hash;
+	std::string m_target_hash;
+	bool m_mask_edited = false;
+	bool m_destination_edited = false;
+	bool m_destination_edit_active = false;
+	bool m_mask_edited_since_save = false;
+	unsigned m_snapshot_count = 0;
+	int m_last_retarget_ms = 0;
 
 	vector < screen_line > m_picture; 
 	vector < screen_line > m_picture_original; // original input before palette quantization
@@ -125,6 +134,15 @@ private:
 	// private functions
 	void InitLocalStructure();
 	void GeneratePictureErrorMap();
+	void ApplyMaskStroke(const GuiMaskStroke& stroke);
+	void SaveEditedMaskArtifact();
+	bool SnapshotBeforeMaskEdit();
+	void BranchCurrentRun();
+	void BeginDestinationEdit();
+	void ApplyDestinationEdit(const GuiMaskStroke& changes);
+	void DiscardDestinationEdit();
+	void SaveEditedTargetArtifact();
+	void RenderCreatedPicture(raster_picture& picture);
 
 	bool init_finished;
 	void Init();

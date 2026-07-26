@@ -2,6 +2,9 @@
 #include "RastaSDL.h"
 #include "debug_log.h"
 #include "WindowIconHelper.h"
+#if defined(RASTA_ENABLE_LIVE_UI)
+#include "live_ui/RecentRuns.h"
+#endif
 #include <iostream>
 #include <time.h>
 #if defined(RASTA_ENABLE_LIVE_UI)
@@ -106,8 +109,14 @@ bool RastaSDL::Init(std::string command_line, bool enable_live_ui)
 #if defined(RASTA_ENABLE_LIVE_UI)
 	if (enable_live_ui) {
 		liveOverlay = std::make_unique<rc_live_ui::Overlay>();
-		if (!liveOverlay->Initialize(window, renderer))
+		if (!liveOverlay->Initialize(window, renderer)) {
+			// Silently falling back left the user staring at the legacy
+			// three-blit display with no idea why the dashboard vanished.
+			std::cerr << "Warning: the live dashboard could not start ("
+				<< SDL_GetError() << "); falling back to the legacy display."
+				<< std::endl;
 			liveOverlay.reset();
+		}
 	}
 #else
 	(void)enable_live_ui;
@@ -286,15 +295,66 @@ bool RastaSDL::AbortRequested() const
 	return abortRequested;
 }
 
+bool RastaSDL::TakeMaskStroke(GuiMaskStroke& stroke)
+{
+#if defined(RASTA_ENABLE_LIVE_UI)
+	return liveOverlay && liveOverlay->TakeMaskStroke(stroke);
+#else
+	(void)stroke;
+	return false;
+#endif
+}
+
+bool RastaSDL::TakeDestinationChanges(GuiMaskStroke& stroke)
+{
+#if defined(RASTA_ENABLE_LIVE_UI)
+	return liveOverlay && liveOverlay->TakeDestinationChanges(stroke);
+#else
+	(void)stroke;
+	return false;
+#endif
+}
+
+bool RastaSDL::CreateBranchOutput(const std::string& input_file,
+	std::string& output_file, std::string& error)
+{
+#if defined(RASTA_ENABLE_LIVE_UI)
+	output_file = rc_live_ui::AllocateRunOutputPath(input_file);
+	if (!rc_live_ui::CreateRunFolder(output_file, &error))
+		return false;
+	const size_t slash = output_file.find_last_of("/\\");
+	rc_live_ui::RegisterRecentRun(slash == std::string::npos
+		? std::string(".") : output_file.substr(0, slash));
+	return true;
+#else
+	(void)input_file;
+	(void)output_file;
+	error = "Branching requires the live UI build.";
+	return false;
+#endif
+}
+
 void RastaSDL::PublishDetailsMask(const GuiDetailsMask& mask)
 {
 #if defined(RASTA_ENABLE_LIVE_UI)
 	if (liveOverlay) {
-		liveOverlay->PublishDetailsMask(mask.values, mask.width, mask.height);
+		liveOverlay->PublishDetailsMask(mask.values, mask.editable_values,
+			mask.width, mask.height);
 		frameDirty = true;
 	}
 #else
 	(void)mask;
+#endif
+}
+
+void RastaSDL::PublishDestinationLayer(const GuiDestinationLayer& layer)
+{
+#if defined(RASTA_ENABLE_LIVE_UI)
+	if (liveOverlay)
+		liveOverlay->PublishDestinationLayer(layer.palette_indices,
+			layer.width, layer.height);
+#else
+	(void)layer;
 #endif
 }
 
@@ -544,6 +604,11 @@ GUI_command RastaSDL::NextFrame()
 		case LiveCommand::Abort:
 			abortRequested = true;
 			return GUI_command::STOP;
+		case LiveCommand::MaskEdited:  return GUI_command::MASK_EDIT;
+		case LiveCommand::Branch:      return GUI_command::BRANCH;
+		case LiveCommand::DestinationBegin: return GUI_command::DESTINATION_BEGIN;
+		case LiveCommand::DestinationApply: return GUI_command::DESTINATION_APPLY;
+		case LiveCommand::DestinationDiscard: return GUI_command::DESTINATION_DISCARD;
 		case LiveCommand::ShowA:       return GUI_command::SHOW_A;
 		case LiveCommand::ShowB:       return GUI_command::SHOW_B;
 		case LiveCommand::ShowMix:     return GUI_command::SHOW_MIX;

@@ -44,6 +44,7 @@ double LinearComponent(unsigned char value)
 	return encoded <= 0.04045 ? encoded / 12.92
 		: std::pow((encoded + 0.055) / 1.055, 2.4);
 }
+
 }
 
 bool DetailsMask::LoadLegacy(const std::string& path, unsigned width,
@@ -52,6 +53,7 @@ bool DetailsMask::LoadLegacy(const std::string& path, unsigned width,
 	m_width = 0;
 	m_height = 0;
 	m_values.clear();
+	m_layer_values.clear();
 	m_weights.clear();
 	m_coverage.clear();
 	m_source_hash.clear();
@@ -103,7 +105,99 @@ bool DetailsMask::LoadLegacy(const std::string& path, unsigned width,
 	FreeImage_Unload(rgb);
 	m_width = width;
 	m_height = height;
+	m_layer_values = m_values;
 	m_source_hash = StableHash(m_values.data(), m_values.size());
+	m_effective_hash = m_source_hash;
+	return true;
+}
+
+bool DetailsMask::LoadEditableLayer(const std::string& path, unsigned width,
+	unsigned height, std::string* error)
+{
+	m_width = 0;
+	m_height = 0;
+	m_values.clear();
+	m_layer_values.clear();
+	m_weights.clear();
+	m_coverage.clear();
+	m_source_hash.clear();
+	m_effective_hash.clear();
+	FREE_IMAGE_FORMAT format = FreeImage_GetFileType(path.c_str(), 0);
+	if (format == FIF_UNKNOWN)
+		format = FreeImage_GetFIFFromFilename(path.c_str());
+	FIBITMAP* source = format == FIF_UNKNOWN ? nullptr
+		: FreeImage_Load(format, path.c_str(), 0);
+	if (!source || width == 0 || height == 0) {
+		if (source) FreeImage_Unload(source);
+		if (error) *error = "unable to load editable details layer: " + path;
+		return false;
+	}
+	FIBITMAP* resized =
+		FreeImage_GetWidth(source) == width && FreeImage_GetHeight(source) == height
+		? FreeImage_Clone(source)
+		: FreeImage_Rescale(source, static_cast<int>(width),
+			static_cast<int>(height), FILTER_BOX);
+	FreeImage_Unload(source);
+	FIBITMAP* rgb = resized ? FreeImage_ConvertTo24Bits(resized) : nullptr;
+	if (resized) FreeImage_Unload(resized);
+	if (!rgb) {
+		if (error) *error = "unable to convert editable details layer: " + path;
+		return false;
+	}
+	m_layer_values.resize(static_cast<size_t>(width) * height);
+	RGBQUAD pixel{};
+	for (unsigned y = 0; y < height; ++y)
+		for (unsigned x = 0; x < width; ++x) {
+			FreeImage_GetPixelColor(rgb, x, height - 1 - y, &pixel);
+			m_layer_values[static_cast<size_t>(y) * width + x] =
+				static_cast<unsigned char>((static_cast<unsigned>(pixel.rgbRed)
+					+ pixel.rgbGreen + pixel.rgbBlue) / 3);
+		}
+	FreeImage_Unload(rgb);
+	m_width = width;
+	m_height = height;
+	return RebuildLegacy();
+}
+
+void DetailsMask::InitializeNeutral(unsigned width, unsigned height)
+{
+	m_width = width;
+	m_height = height;
+	m_values.assign(static_cast<size_t>(width) * height, 0);
+	m_layer_values = m_values;
+	m_weights.clear();
+	m_coverage.clear();
+	m_effective_hash = StableHash(m_values.data(), m_values.size());
+	m_source_hash = m_effective_hash;
+}
+
+bool DetailsMask::SetEditableValue(unsigned x, unsigned y, unsigned char value)
+{
+	if (x >= m_width || y >= m_height || m_layer_values.empty())
+		return false;
+	unsigned char& target =
+		m_layer_values[static_cast<size_t>(y) * m_width + x];
+	if (target == value)
+		return false;
+	target = value;
+	if (!IsNormalized())
+		m_values[static_cast<size_t>(y) * m_width + x] = value;
+	return true;
+}
+
+unsigned char DetailsMask::EditableAt(unsigned x, unsigned y) const
+{
+	return m_layer_values.at(static_cast<size_t>(y) * m_width + x);
+}
+
+bool DetailsMask::RebuildLegacy()
+{
+	if (m_layer_values.empty())
+		return false;
+	m_values = m_layer_values;
+	m_weights.clear();
+	m_coverage.clear();
+	m_source_hash = StableHash(m_layer_values.data(), m_layer_values.size());
 	m_effective_hash = m_source_hash;
 	return true;
 }
@@ -114,6 +208,7 @@ bool DetailsMask::LoadNormalized(const std::string& path, unsigned width,
 {
 	m_width = m_height = 0;
 	m_values.clear();
+	m_layer_values.clear();
 	m_weights.clear();
 	m_coverage.clear();
 	FREE_IMAGE_FORMAT format = FreeImage_GetFileType(path.c_str(), 0);
@@ -146,7 +241,7 @@ bool DetailsMask::LoadNormalized(const std::string& path, unsigned width,
 				+ 0.0722 * LinearComponent(pixel.rgbBlue);
 		}
 	FreeImage_Unload(rgb);
-	m_source_hash = StableHashDoubles(source);
+	const std::string sourceHash = StableHashDoubles(source);
 
 	std::vector<double> coverage(static_cast<size_t>(width) * height, 0.0);
 	for (unsigned ty = 0; ty < height; ++ty)
@@ -166,6 +261,33 @@ bool DetailsMask::LoadNormalized(const std::string& path, unsigned width,
 				}
 			coverage[static_cast<size_t>(ty) * width + tx] = total / ((x1 - x0) * (y1 - y0));
 		}
+	m_layer_values.resize(coverage.size());
+	for (size_t i = 0; i < coverage.size(); ++i)
+		m_layer_values[i] = static_cast<unsigned char>(std::llround(
+			255.0 * std::max(0.0, std::min(1.0, coverage[i]))));
+	m_width = width;
+	m_height = height;
+	m_source_hash = sourceHash;
+	return BuildNormalizedWeights(std::move(coverage), strength, floor, feather);
+}
+
+bool DetailsMask::RebuildNormalized(double strength, double floor,
+	unsigned feather)
+{
+	if (m_width == 0 || m_height == 0 || m_layer_values.empty())
+		return false;
+	std::vector<double> coverage(m_layer_values.size());
+	for (size_t i = 0; i < coverage.size(); ++i)
+		coverage[i] = m_layer_values[i] / 255.0;
+	m_source_hash = StableHash(m_layer_values.data(), m_layer_values.size());
+	return BuildNormalizedWeights(std::move(coverage), strength, floor, feather);
+}
+
+bool DetailsMask::BuildNormalizedWeights(std::vector<double> coverage,
+	double strength, double floor, unsigned feather)
+{
+	const unsigned width = m_width;
+	const unsigned height = m_height;
 	m_coverage = coverage;
 	if (feather > 0)
 	{
@@ -202,8 +324,6 @@ bool DetailsMask::LoadNormalized(const std::string& path, unsigned width,
 	if (maximum < 1e-12) maximum = 1.0;
 	for (size_t i = 0; i < m_weights.size(); ++i)
 		m_values[i] = static_cast<unsigned char>(std::llround(255.0 * m_weights[i] / maximum));
-	m_width = width;
-	m_height = height;
 	m_effective_hash = StableHashDoubles(m_weights);
 	return true;
 }
@@ -214,6 +334,32 @@ bool DetailsMask::LoadRefined(const std::string& path, unsigned width,
 {
 	if (source == nullptr || !LoadNormalized(path, width, height, 1.0, floor, 0, error))
 		return false;
+	return BuildRefinedWeights(source, strength, floor, feather, refineMix);
+}
+
+bool DetailsMask::RebuildRefined(const screen_line* source, double strength,
+	double floor, unsigned feather, double refineMix)
+{
+	if (source == nullptr || m_width == 0 || m_height == 0
+		|| m_layer_values.empty())
+		return false;
+	// Start from the edited literal layer without normalizing it; refinement
+	// redistributes priority only inside that layer's coverage.
+	m_coverage.resize(m_layer_values.size());
+	for (size_t i = 0; i < m_layer_values.size(); ++i)
+		m_coverage[i] = m_layer_values[i] / 255.0;
+	m_source_hash = StableHash(m_layer_values.data(), m_layer_values.size());
+	return BuildRefinedWeights(source, strength, floor, feather, refineMix);
+}
+
+bool DetailsMask::BuildRefinedWeights(const screen_line* source,
+	double strength, double floor, unsigned feather, double refineMix)
+{
+	if (source == nullptr || m_width == 0 || m_height == 0
+		|| m_coverage.size() != m_layer_values.size())
+		return false;
+	const unsigned width = m_width;
+	const unsigned height = m_height;
 	std::vector<double> luminance(static_cast<size_t>(width) * height);
 	std::vector<double> red(luminance.size()), green(luminance.size()), blue(luminance.size());
 	for (unsigned y = 0; y < height; ++y)
@@ -351,6 +497,25 @@ bool DetailsMask::SaveEffectivePreview(const std::string& path, std::string* err
 	const bool saved = FreeImage_Save(FIF_PNG, bitmap, path.c_str(), 0) != 0;
 	FreeImage_Unload(bitmap);
 	if (!saved && error) *error = "unable to save effective details preview: " + path;
+	return saved;
+}
+
+bool DetailsMask::SaveEditableLayer(const std::string& path,
+	std::string* error) const
+{
+	if (m_layer_values.empty()) return false;
+	FIBITMAP* bitmap = FreeImage_Allocate(m_width, m_height, 24);
+	if (!bitmap) return false;
+	RGBQUAD pixel{};
+	for (unsigned y = 0; y < m_height; ++y)
+		for (unsigned x = 0; x < m_width; ++x)
+		{
+			pixel.rgbRed = pixel.rgbGreen = pixel.rgbBlue = EditableAt(x, y);
+			FreeImage_SetPixelColor(bitmap, x, m_height - 1 - y, &pixel);
+		}
+	const bool saved = FreeImage_Save(FIF_PNG, bitmap, path.c_str(), 0) != 0;
+	FreeImage_Unload(bitmap);
+	if (!saved && error) *error = "unable to save editable details layer: " + path;
 	return saved;
 }
 

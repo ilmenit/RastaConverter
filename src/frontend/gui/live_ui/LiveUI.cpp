@@ -21,6 +21,7 @@
 #include <imgui.h>
 
 #include <vector>
+#include <deque>
 
 namespace rc_live_ui {
 namespace {
@@ -68,7 +69,7 @@ struct Overlay::Impl {
 	SDL_Renderer* renderer = nullptr;
 	bool initialized = false;
 	std::unique_ptr<Dashboard> dashboard;
-	LiveCommand pending_command = LiveCommand::None;
+	std::deque<LiveCommand> pending_commands;
 	// Scratch buffer reused for bitmap conversion, so a periodic refresh does
 	// not churn the allocator.
 	std::vector<std::uint32_t> scratch;
@@ -148,7 +149,8 @@ void Overlay::PublishBitmap(ImageSlot slot, FIBITMAP* bitmap)
 		FreeImage_Unload(converted);
 }
 
-void Overlay::PublishDetailsMask(const unsigned char* values, int width, int height)
+void Overlay::PublishDetailsMask(const unsigned char* values,
+	const unsigned char* editable_values, int width, int height)
 {
 	if (!impl_->dashboard)
 		return;
@@ -164,13 +166,39 @@ void Overlay::PublishDetailsMask(const unsigned char* values, int width, int hei
 			mask.pixels[i] = level | (level << 8) | (level << 16) | (level << 24);
 		}
 	}
-	impl_->dashboard->SetMask(mask);
+	std::vector<unsigned char> editable;
+	if (editable_values != nullptr && width > 0 && height > 0)
+		editable.assign(editable_values,
+			editable_values + static_cast<size_t>(width) * height);
+	impl_->dashboard->SetMask(mask, editable);
+}
+
+bool Overlay::TakeMaskStroke(GuiMaskStroke& stroke)
+{
+	return impl_->dashboard && impl_->dashboard->TakeMaskStroke(stroke);
+}
+
+bool Overlay::TakeDestinationChanges(GuiMaskStroke& stroke)
+{
+	return impl_->dashboard && impl_->dashboard->TakeDestinationChanges(stroke);
+}
+
+void Overlay::PublishDestinationLayer(const unsigned char* palette_indices,
+	int width, int height)
+{
+	if (!impl_->dashboard || palette_indices == nullptr || width <= 0 || height <= 0)
+		return;
+	impl_->dashboard->SetDestinationLayer(std::vector<unsigned char>(
+		palette_indices, palette_indices + static_cast<size_t>(width) * height),
+		width, height);
 }
 
 LiveCommand Overlay::TakeCommand()
 {
-	const LiveCommand command = impl_->pending_command;
-	impl_->pending_command = LiveCommand::None;
+	if (impl_->pending_commands.empty())
+		return LiveCommand::None;
+	const LiveCommand command = impl_->pending_commands.front();
+	impl_->pending_commands.pop_front();
 	return command;
 }
 
@@ -183,7 +211,7 @@ void Overlay::Render()
 	ImGui::NewFrame();
 	const LiveCommand command = impl_->dashboard->Draw();
 	if (command != LiveCommand::None)
-		impl_->pending_command = command;
+		impl_->pending_commands.push_back(command);
 	ImGui::Render();
 	ApplyRenderScale(impl_->renderer, DetectPixelDensity(impl_->window));
 	ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), impl_->renderer);

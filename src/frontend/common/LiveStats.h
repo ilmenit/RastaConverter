@@ -54,6 +54,15 @@ struct LiveStats {
 	// --- lifecycle ---
 	bool preprocessing = false;   // still building the target picture
 	bool finished = false;
+	bool mask_paint_available = false;
+	bool destination_edit_available = false;
+	bool destination_edit_active = false;
+	bool mask_edited = false;
+	std::string details_mode;
+	double details_strength = 0.0;
+	bool details_score = false;
+	unsigned long long objective_revision = 0;
+	int last_retarget_ms = 0;
 	std::string message;          // latest status line from the converter
 	double last_save_seconds_ago = -1.0;
 };
@@ -66,6 +75,11 @@ enum class LiveCommand {
 	Save,
 	StopAndSave,
 	Abort,
+	MaskEdited,
+	Branch,
+	DestinationBegin,
+	DestinationApply,
+	DestinationDiscard,
 	ShowA,
 	ShowB,
 	ShowMix,

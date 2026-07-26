@@ -88,6 +88,12 @@ struct EvalGlobalState
 	bool m_update_initialized;
 	std::atomic<bool> m_initialized;
 	std::atomic<bool> m_finished;
+	// Cooperative stop-the-world barrier for live objective edits. Workers
+	// acknowledge only between complete evaluations, never while an error row
+	// or cache entry is borrowed.
+	std::atomic<bool> m_pause_requested{false};
+	int m_threads_paused = 0;
+	std::atomic<unsigned long long> m_objective_generation{0};
 
 	int m_threads_active;
 

@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
@@ -99,6 +100,7 @@ void AbsolutizeJobPaths(Configuration& cfg)
 	cfg.input_file = AbsolutePath(cfg.input_file);
 	cfg.output_file = AbsolutePath(cfg.output_file);
 	cfg.details_file = AbsolutePath(cfg.details_file);
+	cfg.target_file = AbsolutePath(cfg.target_file);
 	cfg.on_off_file = AbsolutePath(cfg.on_off_file);
 	// The bundled palette is addressed relative to the install directory, not
 	// the working directory, so it has to be found before it can be absolute.
@@ -189,6 +191,22 @@ double NowMs()
 // standing in for a sentinel value, or a value in different units. This brings
 // all of them back in line with the configuration, and runs both at startup and
 // whenever a whole configuration is loaded at once.
+// Adopting an image is the moment the preview becomes the interesting thing in
+// the viewer column, so the history stops occupying it. Shared by the picker,
+// the drop zone and the file dialog so all three behave identically.
+void AdoptInputFile(SetupState& state, const std::string& path)
+{
+	Configuration& cfg = *state.cfg;
+	state.input.Set(path);
+	cfg.input_file = state.input.Get();
+	if (!state.output_touched) {
+		cfg.output_file = DeriveOutputName(cfg.input_file);
+		state.output.Set(cfg.output_file);
+	}
+	state.show_recent = false;
+	state.recent_dismissed = true;
+}
+
 void SyncStateFromConfig(SetupState& state)
 {
 	Configuration& cfg = *state.cfg;
@@ -1187,11 +1205,7 @@ void DrawTitleBar(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
 	if (PathField("input", state.input, dialogs, window,
 			FileDialogs::Kind::InputImage, false,
 			"Choose an image to convert, or drag one onto this panel", picker_width)) {
-		cfg.input_file = state.input.Get();
-		if (!state.output_touched) {
-			cfg.output_file = DeriveOutputName(cfg.input_file);
-			state.output.Set(cfg.output_file);
-		}
+		AdoptInputFile(state, state.input.Get());
 	}
 	ImGui::EndGroup();
 
@@ -1375,6 +1389,10 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		}
 		RegisterRecentRun(cfg.output_file.substr(0, cfg.output_file.find_last_of('/')));
 		cfg.command_line = BuildCommandLineArgs(cfg);
+		if (cfg.details_layer)
+			cfg.command_line += " /details_layer=on";
+		if (!cfg.target_file.empty())
+			cfg.command_line += " /target=\"" + cfg.target_file + "\"";
 		return true;
 	}
 
@@ -1460,6 +1478,8 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 
 	bool accepted = false;
 	bool running = true;
+	int autoconvert_wait = SDL_getenv("RASTA_TEST_AUTOCONVERT")
+		? SDL_atoi(SDL_getenv("RASTA_TEST_AUTOCONVERT")) : 0;
 	while (running) {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
@@ -1485,14 +1505,8 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 			case SDL_EVENT_DROP_FILE:
 				state.drag_active = false;
 				state.drag_inside_zone = false;
-				if (event.drop.data != nullptr) {
-					state.input.Set(event.drop.data);
-					cfg.input_file = state.input.Get();
-					if (!state.output_touched) {
-						cfg.output_file = DeriveOutputName(cfg.input_file);
-						state.output.Set(cfg.output_file);
-					}
-				}
+				if (event.drop.data != nullptr)
+					AdoptInputFile(state, event.drop.data);
 				break;
 			default:
 				break;
@@ -1504,12 +1518,7 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		std::string chosen;
 		while (dialogs.Poll(&target, &chosen)) {
 			if (target == "input") {
-				state.input.Set(chosen);
-				cfg.input_file = chosen;
-				if (!state.output_touched) {
-					cfg.output_file = DeriveOutputName(chosen);
-					state.output.Set(cfg.output_file);
-				}
+				AdoptInputFile(state, chosen);
 			} else if (target == "output") {
 				state.output.Set(chosen);
 				cfg.output_file = chosen;
@@ -1611,6 +1620,20 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		SDL_RenderClear(renderer);
 		ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
 
+		// Development hook: accept the form after N frames, exercising the real
+		// Convert path (folder creation, recipe, window teardown) headlessly.
+		if (autoconvert_wait > 0 && --autoconvert_wait == 0
+			&& !cfg.input_file.empty()) {
+			AbsolutizeJobPaths(cfg);
+			std::string error;
+			if (CreateRunFolder(cfg.output_file, &error)) {
+				RegisterRecentRun(DirectoryOf(cfg.output_file));
+				accepted = true;
+				running = false;
+			} else {
+				std::fprintf(stderr, "%s\n", error.c_str());
+			}
+		}
 		if (frames_left > 0 && --frames_left == 0) {
 			if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {
 				SDL_SaveBMP(shot, screenshot_path);
@@ -1632,12 +1655,47 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 	// being edited.
 	if (accepted) {
 		AbsolutizeJobPaths(cfg);
+		// An edited mask is a run artifact. Reuse must own a copy in its new
+		// folder; otherwise deleting the old run would break this recipe.
+		if (!cfg.continue_processing && !cfg.details_file.empty()) {
+			namespace fs = std::filesystem;
+			const fs::path source(cfg.details_file);
+			const std::string source_name = source.filename().string();
+			if (source_name.size() >= 12
+				&& source_name.compare(source_name.size() - 12, 12,
+					"-details.png") == 0) {
+				const fs::path destination(cfg.output_file + "-details.png");
+				if (source != destination) {
+					std::error_code ec;
+					fs::copy_file(source, destination,
+						fs::copy_options::overwrite_existing, ec);
+					if (!ec)
+						cfg.details_file = destination.string();
+				}
+			}
+		}
+		if (!cfg.continue_processing && !cfg.target_file.empty()) {
+			namespace fs = std::filesystem;
+			const fs::path source(cfg.target_file);
+			const fs::path destination(cfg.output_file + "-target.png");
+			if (source != destination) {
+				std::error_code ec;
+				fs::copy_file(source, destination,
+					fs::copy_options::overwrite_existing, ec);
+				if (!ec)
+					cfg.target_file = destination.string();
+			}
+		}
 		// Settings changed in the form never reached the parser, so
 		// cfg.command_line still described the launch arguments - nothing at all
 		// for a double-clicked binary. That string is what the .opt header
 		// records, and what both resume and the Recent browser's Reuse read
 		// back, so a GUI-configured run has to write its own recipe here.
 		cfg.command_line = BuildCommandLineArgs(cfg);
+		if (cfg.details_layer)
+			cfg.command_line += " /details_layer=on";
+		if (!cfg.target_file.empty())
+			cfg.command_line += " /target=\"" + cfg.target_file + "\"";
 	}
 
 	ImGui_ImplSDLRenderer3_Shutdown();

@@ -8,6 +8,8 @@
 #include <cstdio>
 
 #include "LiveTheme.h"
+#include "TargetPicture.h"
+#include "rgb.h"
 
 namespace rc_live_ui {
 
@@ -16,6 +18,14 @@ namespace {
 // Enough history for a long run without unbounded growth; older samples are
 // dropped from the front.
 constexpr size_t kMaxSamples = 600;
+constexpr size_t kMaxUndoStrokes = 128;
+
+void PushUndoStroke(std::vector<GuiMaskStroke>& history, GuiMaskStroke stroke)
+{
+	history.push_back(std::move(stroke));
+	if (history.size() > kMaxUndoStrokes)
+		history.erase(history.begin());
+}
 
 // Minimum spacing between samples, so a fast run does not fill the buffer in
 // seconds and a slow one still records something.
@@ -125,6 +135,8 @@ void ProgressTrace::Sample(unsigned long long evaluations, double normalized_dis
 	samples_.push_back({evaluations, normalized_distance});
 	while (samples_.size() > kMaxSamples)
 		samples_.pop_front();
+	while (!events_.empty() && events_.front() < samples_.front().evaluations)
+		events_.erase(events_.begin());
 
 	values_.clear();
 	values_.reserve(samples_.size());
@@ -144,6 +156,13 @@ void ProgressTrace::Clear()
 	best_ = 0.0;
 	worst_ = 0.0;
 	last_sample_evaluations_ = 0;
+	events_.clear();
+}
+
+void ProgressTrace::MarkEvent(unsigned long long evaluations)
+{
+	if (events_.empty() || events_.back() != evaluations)
+		events_.push_back(evaluations);
 }
 
 Dashboard::Dashboard(SDL_Renderer* renderer) : viewer_(renderer)
@@ -173,6 +192,11 @@ void Dashboard::SetStats(const LiveStats& stats)
 		viewer_.set_stage(PreviewStage::Dithered);
 	}
 	was_preprocessing_ = stats.preprocessing;
+	if (stats.objective_revision != last_objective_revision_) {
+		if (last_objective_revision_ != 0 || stats.objective_revision != 0)
+			trace_.MarkEvent(stats.evaluations);
+		last_objective_revision_ = stats.objective_revision;
+	}
 
 	stats_ = stats;
 	const double now = NowMs();
@@ -202,13 +226,302 @@ void Dashboard::SetImage(PreviewStage stage, int width, int height,
 	content_dirty_ = true;
 }
 
-void Dashboard::SetMask(const PreviewImage& mask)
+void Dashboard::SetMask(const PreviewImage& mask,
+	const std::vector<unsigned char>& editable_values)
 {
 	// Kept in the same content block as the pictures. Setting it straight on
 	// the viewer instead would be undone by the next image publish, because
 	// SetContent re-applies content_.mask - which would still be empty.
 	content_.mask = mask;
+	editable_mask_ = editable_values;
 	content_dirty_ = true;
+}
+
+void Dashboard::SetDestinationLayer(
+	const std::vector<unsigned char>& palette_indices, int width, int height)
+{
+	destination_layer_ = palette_indices;
+	destination_layer_width_ = width;
+	destination_layer_height_ = height;
+	if (viewer_.has_content())
+		viewer_.SetDestinationLayer(destination_layer_,
+			destination_layer_width_, destination_layer_height_);
+}
+
+bool Dashboard::TakeMaskStroke(GuiMaskStroke& stroke)
+{
+	if (pending_mask_stroke_.pixels.empty())
+		return false;
+	stroke = std::move(pending_mask_stroke_);
+	pending_mask_stroke_ = GuiMaskStroke{};
+	return true;
+}
+
+bool Dashboard::TakeDestinationChanges(GuiMaskStroke& stroke)
+{
+	if (pending_destination_changes_.pixels.empty())
+		return false;
+	stroke = std::move(pending_destination_changes_);
+	pending_destination_changes_ = GuiMaskStroke{};
+	return true;
+}
+
+void Dashboard::DrawMaskTools()
+{
+	if (!stats_.mask_paint_available) {
+		if (!stats_.preprocessing && !stats_.finished && stats_.dual_mode) {
+			ImGui::BeginDisabled();
+			bool disabled = false;
+			ImGui::Checkbox("Paint details", &disabled);
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+				ImGui::SetTooltip(
+					"Details masks are not part of the dual-frame objective yet.");
+		}
+		return;
+	}
+	bool edit_destination_clicked = false;
+	if (destination_editing_) {
+		ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kWarning));
+		ImGui::TextUnformatted(stats_.destination_edit_active
+			? "DESTINATION EDIT · optimizer paused"
+			: "DESTINATION EDIT · pausing optimizer...");
+		ImGui::PopStyleColor();
+	} else {
+		if (ImGui::Checkbox("Paint details", &mask_painting_)) {
+			if (mask_painting_)
+				viewer_.set_stage(PreviewStage::Dithered);
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip(
+				"Paint priority into the details mask. Right-drag erases.");
+		ImGui::SameLine();
+		const bool can_edit_destination = stats_.destination_edit_available
+			&& pending_mask_stroke_.pixels.empty();
+		if (!can_edit_destination)
+			ImGui::BeginDisabled();
+		edit_destination_clicked = ImGui::Button("Edit destination");
+		if (!can_edit_destination)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)
+			&& !can_edit_destination)
+			ImGui::SetTooltip(stats_.destination_edit_available
+				? "Wait for the released mask stroke to finish applying."
+				: "Destination editing requires the single-frame target objective.");
+	}
+	if (edit_destination_clicked) {
+		destination_editing_ = true;
+		mask_painting_ = true;
+		mask_undo_.clear();
+		mask_redo_.clear();
+		viewer_.SetDestinationPainting(true);
+		destination_begin_requested_ = true;
+	}
+	if (mask_painting_) {
+		ImGui::SameLine();
+		static const char* const destination_tool_labels[] = {
+			"Brush", "Line", "Rectangle", "Filled rectangle", "Ellipse",
+			"Filled ellipse", "Fill", "Eyedropper", "Revert brush"};
+		static const char* const mask_tool_labels[] = {
+			"Brush", "Line", "Rectangle", "Filled rectangle", "Ellipse",
+			"Filled ellipse", "Fill", "Revert brush"};
+		static const ImageViewer::PaintTool mask_tool_values[] = {
+			ImageViewer::PaintTool::Brush, ImageViewer::PaintTool::Line,
+			ImageViewer::PaintTool::Rectangle,
+			ImageViewer::PaintTool::FilledRectangle,
+			ImageViewer::PaintTool::Ellipse,
+			ImageViewer::PaintTool::FilledEllipse,
+			ImageViewer::PaintTool::Fill,
+			ImageViewer::PaintTool::RevertBrush};
+		int tool = 0;
+		if (destination_editing_) {
+			tool = static_cast<int>(mask_tool_);
+		} else {
+			for (int i = 0; i < static_cast<int>(
+					sizeof(mask_tool_values) / sizeof(mask_tool_values[0])); ++i)
+				if (mask_tool_values[i] == mask_tool_)
+					tool = i;
+		}
+		ImGui::SetNextItemWidth(145.0f);
+		if (destination_editing_) {
+			if (ImGui::Combo("##mask_tool", &tool, destination_tool_labels,
+				static_cast<int>(sizeof(destination_tool_labels)
+					/ sizeof(destination_tool_labels[0]))))
+				mask_tool_ = static_cast<ImageViewer::PaintTool>(tool);
+		} else if (ImGui::Combo("##mask_tool", &tool, mask_tool_labels,
+				static_cast<int>(sizeof(mask_tool_labels)
+					/ sizeof(mask_tool_labels[0])))) {
+			mask_tool_ = mask_tool_values[tool];
+		}
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(110.0f);
+		ImGui::SliderInt("Radius", &mask_brush_radius_, 1, 16);
+		ImGui::SameLine();
+		if (destination_editing_) {
+			bool palette_clicked = false;
+			auto colorButton = [this, &palette_clicked](
+				const char* id, int index, bool secondary) {
+				const rgb& selected = atari_palette[index];
+				ImGui::PushID(id);
+				ImGui::TextUnformatted(secondary ? "R" : "L");
+				ImGui::SameLine(0.0f, 3.0f);
+				ImGui::ColorButton("##color",
+					ImVec4(selected.r / 255.0f, selected.g / 255.0f,
+						selected.b / 255.0f, 1.0f),
+					ImGuiColorEditFlags_NoTooltip, ImVec2(28.0f, 22.0f));
+				if (ImGui::IsItemClicked()) {
+					destination_palette_popup_secondary_ = secondary;
+					palette_clicked = true;
+				}
+				ImGui::PopID();
+			};
+			colorButton("primary", destination_palette_index_, false);
+			ImGui::SameLine(0.0f, 7.0f);
+			colorButton("secondary", destination_palette_secondary_index_, true);
+			if (palette_clicked)
+				ImGui::OpenPopup("destination_palette");
+			if (ImGui::BeginPopup("destination_palette")) {
+				ImGui::TextUnformatted(destination_palette_popup_secondary_
+					? "Right mouse colour" : "Left mouse colour");
+				for (int index = 0; index < 128; ++index) {
+					if (index % 16 != 0) ImGui::SameLine();
+					const rgb& color = atari_palette[index];
+					ImGui::PushID(index);
+					if (ImGui::ColorButton("##color",
+						ImVec4(color.r / 255.0f, color.g / 255.0f,
+							color.b / 255.0f, 1.0f),
+						ImGuiColorEditFlags_NoTooltip, ImVec2(18.0f, 18.0f))) {
+						if (destination_palette_popup_secondary_)
+							destination_palette_secondary_index_ = index;
+						else
+							destination_palette_index_ = index;
+						ImGui::CloseCurrentPopup();
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Palette %d", index);
+					ImGui::PopID();
+				}
+				ImGui::EndPopup();
+			}
+		} else {
+			ImGui::SetNextItemWidth(130.0f);
+			float priority = mask_brush_value_ / 255.0f;
+			if (ImGui::SliderFloat("Priority", &priority, 0.0f, 1.0f, "%.2f"))
+				mask_brush_value_ = static_cast<int>(
+					std::lround(priority * 255.0f));
+			if (ImGui::IsItemHovered()) {
+				// Distinct from /details_val, and easily mistaken for it.
+				ImGui::SetTooltip(
+					"Priority painted by this stroke (0-1).\n"
+					"What that brightness is worth is the mask strength\n"
+					"(/details_val = %.2f), fixed for this run.",
+					stats_.details_strength);
+			}
+		}
+		ImGui::NewLine();
+		const bool can_undo = !mask_undo_.empty()
+			&& pending_mask_stroke_.pixels.empty();
+		if (!can_undo)
+			ImGui::BeginDisabled();
+		const bool undo_shortcut = ImGui::GetIO().KeyCtrl
+			&& ImGui::IsKeyPressed(ImGuiKey_Z, false);
+		const bool undo_clicked = ImGui::Button("Undo");
+		if ((undo_clicked || undo_shortcut) && can_undo) {
+			GuiMaskStroke forward = std::move(mask_undo_.back());
+			mask_undo_.pop_back();
+			GuiMaskStroke inverse = forward;
+			for (GuiMaskPixelChange& pixel : inverse.pixels)
+				std::swap(pixel.before, pixel.after);
+			viewer_.ApplyMaskStroke(inverse);
+			if (!destination_editing_)
+				pending_mask_stroke_ = std::move(inverse);
+			PushUndoStroke(mask_redo_, std::move(forward));
+		}
+		if (!can_undo)
+			ImGui::EndDisabled();
+		ImGui::SameLine();
+		const bool can_redo = !mask_redo_.empty()
+			&& pending_mask_stroke_.pixels.empty();
+		if (!can_redo)
+			ImGui::BeginDisabled();
+		const bool redo_shortcut = ImGui::GetIO().KeyCtrl
+			&& (ImGui::IsKeyPressed(ImGuiKey_Y, false)
+				|| (ImGui::GetIO().KeyShift
+					&& ImGui::IsKeyPressed(ImGuiKey_Z, false)));
+		const bool redo_clicked = ImGui::Button("Redo");
+		if ((redo_clicked || redo_shortcut) && can_redo) {
+			GuiMaskStroke forward = std::move(mask_redo_.back());
+			mask_redo_.pop_back();
+			viewer_.ApplyMaskStroke(forward);
+			if (!destination_editing_)
+				pending_mask_stroke_ = forward;
+			PushUndoStroke(mask_undo_, std::move(forward));
+		}
+		if (!can_redo)
+			ImGui::EndDisabled();
+		ImGui::SameLine();
+		const bool can_branch = pending_mask_stroke_.pixels.empty()
+			&& !destination_editing_;
+		if (!can_branch)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Branch..."))
+			branch_requested_ = true;
+		if (!can_branch)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Save this state and continue in a new run folder.");
+		if (destination_editing_) {
+			ImGui::SameLine();
+			if (!stats_.destination_edit_active)
+				ImGui::BeginDisabled();
+			if (ImGui::Button("Apply & Retarget")) {
+				pending_destination_changes_ = viewer_.DestinationChanges();
+				destination_apply_requested_ = true;
+				destination_editing_ = false;
+				mask_painting_ = false;
+				mask_tool_ = ImageViewer::PaintTool::Brush;
+				viewer_.SetDestinationPainting(false);
+				mask_undo_.clear();
+				mask_redo_.clear();
+			}
+			if (!stats_.destination_edit_active)
+				ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Discard")) {
+				viewer_.ResetDestinationEdits();
+				destination_discard_requested_ = true;
+				destination_editing_ = false;
+				mask_painting_ = false;
+				mask_tool_ = ImageViewer::PaintTool::Brush;
+				viewer_.SetDestinationPainting(false);
+				mask_undo_.clear();
+				mask_redo_.clear();
+			}
+		}
+		ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kTextMuted));
+		if (destination_editing_)
+			ImGui::TextUnformatted(stats_.destination_edit_active
+				? "Optimizer paused. Changes stay local until Apply & Retarget."
+				: "Waiting for the current evaluation to finish before editing.");
+		else if (stats_.details_mode == "legacy")
+			ImGui::TextWrapped(
+				"Left-drag paints priority; right-drag erases. White = %.2fx error.%s",
+				1.0 + stats_.details_strength,
+				stats_.details_score ? " Applied when released."
+					: " Scoring turns on with the first stroke.");
+		else
+			ImGui::TextUnformatted(
+				"Applied on release; this mode renormalizes the whole background.");
+		ImGui::PopStyleColor();
+	}
+	const bool painting_enabled = mask_painting_
+		&& (destination_editing_ ? stats_.destination_edit_active
+			: pending_mask_stroke_.pixels.empty());
+	viewer_.SetMaskPainting(painting_enabled, mask_tool_, mask_brush_radius_,
+		static_cast<unsigned char>(destination_editing_
+			? destination_palette_index_ : mask_brush_value_),
+		static_cast<unsigned char>(destination_editing_
+			? destination_palette_secondary_index_ : 0));
 }
 
 void Dashboard::DrawProgressPanel()
@@ -262,6 +575,24 @@ void Dashboard::DrawProgressPanel()
 			static_cast<float>(trace_.best()) * 0.98f,
 			static_cast<float>(trace_.worst()) * 1.02f,
 			ImVec2(span, 88.0f));
+		const ImVec2 plot_min = ImGui::GetItemRectMin();
+		const ImVec2 plot_max = ImGui::GetItemRectMax();
+		const unsigned long long first = trace_.first_evaluation();
+		const unsigned long long last = trace_.last_evaluation();
+		if (last > first) {
+			for (unsigned long long event : trace_.events()) {
+				if (event < first || event > last)
+					continue;
+				const float fraction = static_cast<float>(
+					static_cast<double>(event - first) / (last - first));
+				const float x = plot_min.x + fraction * (plot_max.x - plot_min.x);
+				ImGui::GetWindowDrawList()->AddLine(
+					ImVec2(x, plot_min.y), ImVec2(x, plot_max.y),
+					theme::kWarning, 1.5f);
+			}
+		}
+		if (ImGui::IsItemHovered() && !trace_.events().empty())
+			ImGui::SetTooltip("Amber markers are live objective edits.");
 		ImGui::PopStyleColor();
 	} else {
 		ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kTextFaint));
@@ -457,10 +788,14 @@ LiveCommand Dashboard::DrawBottomBar()
 	ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(),
 		ImGui::GetWindowHeight() - button_height - ImGui::GetStyle().WindowPadding.y));
 
+	if (destination_editing_)
+		ImGui::BeginDisabled();
 	if (ImGui::Button("Save now", ImVec2(save_width, button_height)))
 		command = LiveCommand::Save;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Write the current best result without stopping (S).");
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip(destination_editing_
+			? "Apply or discard the staged destination edit before saving."
+			: "Write the current best result without stopping (S).");
 
 	ImGui::SameLine();
 	ImGui::PushStyleColor(ImGuiCol_Button, theme::ToVec4(theme::kAccent));
@@ -469,8 +804,12 @@ LiveCommand Dashboard::DrawBottomBar()
 	if (ImGui::Button("Stop and save", ImVec2(stop_width, button_height)))
 		command = LiveCommand::StopAndSave;
 	ImGui::PopStyleColor(3);
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Finish the run and write every output file.");
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip(destination_editing_
+			? "Apply or discard the staged destination edit before stopping."
+			: "Finish the run and write every output file.");
+	if (destination_editing_)
+		ImGui::EndDisabled();
 
 	ImGui::SameLine();
 	ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kDanger));
@@ -526,7 +865,75 @@ LiveCommand Dashboard::Draw()
 {
 	if (content_dirty_) {
 		viewer_.SetContent(content_);
+		viewer_.SetEditableMask(editable_mask_);
+		if (!destination_layer_.empty())
+			viewer_.SetDestinationLayer(destination_layer_,
+				destination_layer_width_, destination_layer_height_);
 		content_dirty_ = false;
+	}
+
+	// End-to-end development hook for the staged retarget path. It is inert in
+	// normal runs and lets CI/offscreen builds prove that pause -> apply ->
+	// resume completes without relying on synthetic core-only tests.
+	if (SDL_getenv("RASTA_TEST_DESTINATION_EDIT") != nullptr
+		&& stats_.evaluations > 0 && stats_.destination_edit_available) {
+		static int test_phase = 0;
+		if (test_phase == 0) {
+			destination_editing_ = true;
+			mask_painting_ = true;
+			viewer_.SetDestinationPainting(true);
+			destination_begin_requested_ = true;
+			++test_phase;
+		} else if (test_phase == 1 && stats_.destination_edit_active
+			&& !viewer_.DestinationValues().empty()) {
+			GuiMaskPixelChange change;
+			change.x = 0;
+			change.y = 0;
+			change.before = viewer_.DestinationValues().front();
+			change.after = change.before == 127 ? 0 : 127;
+			GuiMaskStroke stroke;
+			stroke.pixels = {change};
+			viewer_.ApplyMaskStroke(stroke);
+			pending_destination_changes_ = viewer_.DestinationChanges();
+			destination_apply_requested_ = true;
+			destination_editing_ = false;
+			mask_painting_ = false;
+			viewer_.SetDestinationPainting(false);
+			++test_phase;
+		} else if (test_phase == 2) {
+			test_stop_requested_ = true;
+			++test_phase;
+		}
+	}
+	if (SDL_getenv("RASTA_TEST_MASK_EDIT") != nullptr
+		&& stats_.evaluations > 0 && stats_.mask_paint_available) {
+		static int mask_test_phase = 0;
+		if (mask_test_phase == 0 && !editable_mask_.empty()) {
+			GuiMaskPixelChange change;
+			change.x = 0;
+			change.y = 0;
+			change.before = editable_mask_.front();
+			change.after = change.before == 255 ? 0 : 255;
+			pending_mask_stroke_.pixels = {change};
+			++mask_test_phase;
+		} else if (mask_test_phase == 1) {
+			test_stop_requested_ = true;
+			++mask_test_phase;
+		}
+	}
+	if (SDL_getenv("RASTA_TEST_BRANCH") != nullptr
+		&& stats_.evaluations > 0 && stats_.mask_paint_available) {
+		static int branch_test_phase = 0;
+		static std::string original_output;
+		if (branch_test_phase == 0) {
+			original_output = stats_.output_file;
+			branch_requested_ = true;
+			++branch_test_phase;
+		} else if (branch_test_phase == 1
+			&& stats_.output_file != original_output) {
+			test_stop_requested_ = true;
+			++branch_test_phase;
+		}
 	}
 
 	LiveCommand command = LiveCommand::None;
@@ -621,9 +1028,24 @@ LiveCommand Dashboard::Draw()
 	ImGui::BeginChild("viewer",
 		ImVec2(std::max(80.0f, size.x - rail_width - panel_width - 32.0f),
 			std::max(80.0f, body_height)), ImGuiChildFlags_AlwaysUseWindowPadding);
+	DrawMaskTools();
 	viewer_.Draw(false, stats_.preprocessing
 		? "Building the target picture..."
 		: "Waiting for the first result...");
+	GuiMaskStroke stroke;
+	unsigned char sampled = 0;
+	if (viewer_.TakeSampledValue(sampled)) {
+		if (destination_editing_)
+			destination_palette_index_ = sampled % 128;
+		else
+			mask_brush_value_ = sampled;
+	}
+	if (pending_mask_stroke_.pixels.empty() && viewer_.TakeMaskStroke(stroke)) {
+		PushUndoStroke(mask_undo_, stroke);
+		mask_redo_.clear();
+		if (!destination_editing_)
+			pending_mask_stroke_ = std::move(stroke);
+	}
 	ImGui::EndChild();
 
 	ImGui::SetCursorPosX(8.0f);
@@ -633,6 +1055,41 @@ LiveCommand Dashboard::Draw()
 	const LiveCommand bottom_command = DrawBottomBar();
 	if (bottom_command != LiveCommand::None)
 		command = bottom_command;
+	// Objective edits take precedence over save/stop for this frame: the
+	// optimizer and persisted recipe must see the released stroke first. The
+	// user's click is held rather than dropped - one frame's delay is
+	// invisible, silently ignoring a press of Stop is not.
+	if (command != LiveCommand::None && deferred_command_ == LiveCommand::None
+		&& (!pending_mask_stroke_.pixels.empty() || branch_requested_
+			|| destination_begin_requested_ || destination_apply_requested_
+			|| destination_discard_requested_))
+		deferred_command_ = command;
+	if (!pending_mask_stroke_.pixels.empty())
+		command = LiveCommand::MaskEdited;
+	else if (branch_requested_) {
+		command = LiveCommand::Branch;
+		branch_requested_ = false;
+	}
+	else if (destination_begin_requested_) {
+		command = LiveCommand::DestinationBegin;
+		destination_begin_requested_ = false;
+	}
+	else if (destination_apply_requested_) {
+		command = LiveCommand::DestinationApply;
+		destination_apply_requested_ = false;
+	}
+	else if (destination_discard_requested_) {
+		command = LiveCommand::DestinationDiscard;
+		destination_discard_requested_ = false;
+	}
+	else if (test_stop_requested_) {
+		command = LiveCommand::StopAndSave;
+		test_stop_requested_ = false;
+	}
+	else if (deferred_command_ != LiveCommand::None) {
+		command = deferred_command_;
+		deferred_command_ = LiveCommand::None;
+	}
 	ImGui::EndChild();
 
 	ImGui::End();

@@ -41,11 +41,12 @@ const char* program_version = RASTA_CONVERTER_VERSION;
 #include <float.h>
 #include <iostream>
 #include <fstream>
-#include <sstream>
+#include <filesystem>
 #include <sstream>
 #include <ctype.h>
 #include <iomanip>
 #include <iterator>
+#include <initializer_list>
 #include <optional>
 #include <limits>
 #include <random>
@@ -121,6 +122,103 @@ static rgb PIXEL2RGB(RGBQUAD &q)
 	x.r = q.rgbRed;
 	x.a = q.rgbReserved;
 	return x;
+}
+
+static std::string HashPicture(const std::vector<screen_line>& picture,
+	int width, int height)
+{
+	unsigned long long hash = 1469598103934665603ULL;
+	for (int y = 0; y < height; ++y)
+		for (int x = 0; x < width; ++x) {
+			const rgb& color = picture[y][x];
+			for (unsigned char value : {color.r, color.g, color.b}) {
+				hash ^= value;
+				hash *= 1099511628211ULL;
+			}
+		}
+	std::ostringstream stream;
+	stream << std::hex << std::setfill('0') << std::setw(16) << hash;
+	return stream.str();
+}
+
+static std::string SetRecipeOption(const std::string& recipe,
+	const std::string& name, const std::string& value,
+	std::initializer_list<std::string> aliases = {})
+{
+	std::vector<std::string> tokens;
+	bool skipOptionValue = false;
+	for (size_t i = 0; i < recipe.size();) {
+		while (i < recipe.size() && std::isspace(
+			static_cast<unsigned char>(recipe[i]))) ++i;
+		if (i == recipe.size()) break;
+		const size_t begin = i;
+		bool quoted = false;
+		for (; i < recipe.size(); ++i) {
+			if (recipe[i] == '"') quoted = !quoted;
+			else if (!quoted && std::isspace(
+				static_cast<unsigned char>(recipe[i]))) break;
+		}
+		const std::string token = recipe.substr(begin, i - begin);
+		if (skipOptionValue) {
+			skipOptionValue = false;
+			continue;
+		}
+		auto isOption = [&token](const std::string& option) {
+			const std::string longPrefix = "--" + option + "=";
+			const std::string dashPrefix = "-" + option + "=";
+			const std::string shortPrefix = "/" + option + "=";
+			return token.compare(0, longPrefix.size(), longPrefix) == 0
+				|| token.compare(0, dashPrefix.size(), dashPrefix) == 0
+				|| token.compare(0, shortPrefix.size(), shortPrefix) == 0;
+		};
+		auto isBareOption = [&token](const std::string& option) {
+			return token == "--" + option || token == "-" + option
+				|| token == "/" + option;
+		};
+		bool replace = isOption(name);
+		bool replaceBare = isBareOption(name);
+		for (const std::string& alias : aliases) {
+			replace = replace || isOption(alias);
+			replaceBare = replaceBare || isBareOption(alias);
+		}
+		if (replaceBare)
+			skipOptionValue = true;
+		if (!replace && !replaceBare)
+			tokens.push_back(token);
+	}
+	std::ostringstream result;
+	bool first = true;
+	for (const std::string& token : tokens) {
+		if (!first) result << ' ';
+		result << token;
+		first = false;
+	}
+	if (!first) result << ' ';
+	result << "/" << name << "=" << value;
+	return result.str();
+}
+
+static bool ReplaceTextInFile(const std::filesystem::path& path,
+	const std::string& from, const std::string& to)
+{
+	if (from.empty() || from == to)
+		return true;
+	std::ifstream input(path, std::ios::binary);
+	if (!input)
+		return false;
+	std::string content((std::istreambuf_iterator<char>(input)),
+		std::istreambuf_iterator<char>());
+	input.close();
+	size_t offset = 0;
+	while ((offset = content.find(from, offset)) != std::string::npos) {
+		content.replace(offset, from.size(), to);
+		offset += to.size();
+	}
+	std::ofstream output(path, std::ios::binary | std::ios::trunc);
+	if (!output)
+		return false;
+	output.write(content.data(), static_cast<std::streamsize>(content.size()));
+	return static_cast<bool>(output);
 }
 
 static RGBQUAD RGB2PIXEL(rgb& val)
@@ -537,7 +635,19 @@ void RastaConverter::LoadDetailsMap()
 	Message("Loading details map");
 	string error;
 	bool loaded = false;
-	if (cfg.details_mode == "refined")
+	if (cfg.details_layer)
+	{
+		loaded = details_mask.LoadEditableLayer(cfg.details_file, m_width, m_height,
+			&error);
+		if (loaded && cfg.details_mode == "refined")
+			loaded = details_mask.RebuildRefined(m_picture_original.data(),
+				cfg.details_strength, cfg.details_floor, cfg.details_feather,
+				cfg.details_refine_mix);
+		else if (loaded && cfg.details_mode == "normalized")
+			loaded = details_mask.RebuildNormalized(cfg.details_strength,
+				cfg.details_floor, cfg.details_feather);
+	}
+	else if (cfg.details_mode == "refined")
 		loaded = details_mask.LoadRefined(cfg.details_file, m_width, m_height,
 			m_picture_original.data(), cfg.details_strength, cfg.details_floor,
 			cfg.details_feather, cfg.details_refine_mix, &error);
@@ -555,6 +665,7 @@ void RastaConverter::LoadDetailsMap()
 	{
 		GuiDetailsMask published;
 		published.values = details_mask.Values().data();
+		published.editable_values = details_mask.EditableValues().data();
 		published.width = static_cast<int>(details_mask.Width());
 		published.height = static_cast<int>(details_mask.Height());
 		gui.PublishDetailsMask(published);
@@ -581,6 +692,30 @@ void RastaConverter::GeneratePictureErrorMap()
 
 	const int w = (int)FreeImage_GetWidth(input_bitmap);
 	const int h = (int)FreeImage_GetHeight(input_bitmap);
+	if (details_mask.Empty())
+	{
+		// A run always owns a neutral mask. In legacy mode zero has multiplier
+		// 1.0, so this is bit-identical to the historical no-mask path.
+		if (cfg.details_mode != "legacy") {
+			cfg.details_mode = "legacy";
+			Message("No details file loaded; live mask painting starts in "
+				"additive legacy mode.");
+		}
+		details_mask.InitializeNeutral(w, h);
+		GuiDetailsMask published;
+		published.values = details_mask.Values().data();
+		published.editable_values = details_mask.EditableValues().data();
+		published.width = w;
+		published.height = h;
+		gui.PublishDetailsMask(published);
+	}
+	m_target_hash = HashPicture(m_picture, m_width, m_height);
+	if (cfg.continue_processing && !m_saved_target_hash.empty()
+		&& m_saved_target_hash != m_target_hash) {
+		cfg.resume_objective_changed = true;
+		m_needs_history_reconfigure = true;
+		Message("Destination target changed; rebuilding acceptance history.");
+	}
 	const std::vector<screen_line>& scoring_picture =
 		(cfg.visual_objective == E_OBJECTIVE_LEGACY_TARGET)
 			? m_picture : m_picture_original;
@@ -616,6 +751,455 @@ void RastaConverter::GeneratePictureErrorMap()
 			}
 		}
 	}
+}
+
+bool RastaConverter::SnapshotBeforeMaskEdit()
+{
+	if (m_mask_edited_since_save)
+		return true;
+	// Workers are quiesced by the caller. Save the live best first: copying the
+	// previous autosave would lose all improvements made between that save and
+	// this stroke, defeating the promise of a true pre-edit restore point.
+	SaveBestSolution();
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	const fs::path output(cfg.output_file);
+	const fs::path parent = output.has_parent_path() ? output.parent_path() : fs::path(".");
+	auto snapshotName = [](unsigned number) {
+		std::ostringstream name;
+		name << "snap-" << std::setw(3) << std::setfill('0') << number;
+		return name.str();
+	};
+	unsigned nextSnapshot = m_snapshot_count;
+	do {
+		++nextSnapshot;
+	} while (fs::exists(parent / snapshotName(nextSnapshot), ec));
+	const fs::path snapshot = parent / snapshotName(nextSnapshot);
+	if (!fs::create_directories(snapshot, ec) && ec) {
+		Message("Could not create pre-paint snapshot: " + ec.message());
+		return false;
+	}
+	bool snapshotComplete = true;
+	std::string snapshotError;
+	const std::string prefix = output.filename().string();
+	for (const fs::directory_entry& entry : fs::directory_iterator(parent, ec)) {
+		if (ec) {
+			snapshotComplete = false;
+			snapshotError = ec.message();
+			break;
+		}
+		if (!entry.is_regular_file())
+			continue;
+		const std::string name = entry.path().filename().string();
+		if (name.compare(0, prefix.size(), prefix) != 0)
+			continue;
+		fs::copy_file(entry.path(), snapshot / entry.path().filename(),
+			fs::copy_options::overwrite_existing, ec);
+		if (ec) {
+			snapshotComplete = false;
+			snapshotError = ec.message();
+			break;
+		}
+	}
+	std::string error;
+	if (snapshotComplete && !details_mask.SaveEditableLayer(
+		(snapshot / (prefix + "-details.png")).string(), &error)) {
+		snapshotComplete = false;
+		snapshotError = error.empty()
+			? "could not save the details layer" : error;
+	}
+
+	// A snapshot must not reach back into the mutable parent run. The saved
+	// recipe contains the output prefix, so rewriting that prefix relocates
+	// /output, /details and /target together when those artifacts exist.
+	ec.clear();
+	const fs::path snapshotOutput =
+		fs::absolute(snapshot / prefix, ec).lexically_normal();
+	const std::string snapshotPrefix = ec
+		? (snapshot / prefix).string() : snapshotOutput.string();
+	for (const char* extension : {".opt", ".rp"}) {
+		const fs::path recipeFile = snapshot / (prefix + extension);
+		if (!snapshotComplete)
+			break;
+		if (!fs::exists(recipeFile, ec) || ec) {
+			snapshotComplete = false;
+			snapshotError = "missing saved recipe " + recipeFile.string();
+			break;
+		}
+		if (!ReplaceTextInFile(recipeFile, cfg.output_file, snapshotPrefix)) {
+			snapshotComplete = false;
+			snapshotError =
+				"could not make the saved recipe self-contained";
+			break;
+		}
+		ec.clear();
+	}
+	if (!snapshotComplete) {
+		std::error_code cleanupError;
+		fs::remove_all(snapshot, cleanupError);
+		Message("Could not create complete pre-paint snapshot: "
+			+ snapshotError);
+		return false;
+	}
+	m_snapshot_count = nextSnapshot;
+	return true;
+}
+
+void RastaConverter::SaveEditedMaskArtifact()
+{
+	if (!m_mask_edited)
+		return;
+	const std::string artifact = cfg.output_file + "-details.png";
+	std::string error;
+	if (!details_mask.SaveEditableLayer(artifact, &error)) {
+		Message(error.empty() ? "Could not save edited details mask." : error);
+		return;
+	}
+	if (cfg.details_file != artifact) {
+		cfg.details_file = artifact;
+		cfg.details_score = true;
+		cfg.details_layer = true;
+		std::ostringstream strength;
+		strength << std::setprecision(17) << cfg.details_strength;
+		cfg.command_line = SetRecipeOption(cfg.command_line, "details",
+			"\"" + artifact + "\"");
+		cfg.command_line = SetRecipeOption(cfg.command_line, "details_mode",
+			cfg.details_mode);
+		cfg.command_line = SetRecipeOption(cfg.command_line, "details_val",
+			strength.str());
+		cfg.command_line = SetRecipeOption(cfg.command_line, "details_floor",
+			std::to_string(cfg.details_floor));
+		cfg.command_line = SetRecipeOption(cfg.command_line, "details_feather",
+			std::to_string(cfg.details_feather));
+		cfg.command_line = SetRecipeOption(cfg.command_line, "details_refine_mix",
+			std::to_string(cfg.details_refine_mix));
+		cfg.command_line = SetRecipeOption(cfg.command_line, "details_score", "on");
+		cfg.command_line = SetRecipeOption(cfg.command_line, "details_layer", "on");
+	}
+}
+
+void RastaConverter::ApplyMaskStroke(const GuiMaskStroke& stroke)
+{
+	if (cfg.dual_mode || stroke.pixels.empty())
+		return;
+	bool hasChange = false;
+	for (const GuiMaskPixelChange& pixel : stroke.pixels) {
+		if (pixel.x < details_mask.Width() && pixel.y < details_mask.Height()
+			&& details_mask.EditableAt(pixel.x, pixel.y) != pixel.after) {
+			hasChange = true;
+			break;
+		}
+	}
+	if (!hasChange)
+		return;
+	const auto retargetStarted = std::chrono::steady_clock::now();
+
+	std::unique_lock<std::mutex> lock{m_eval_gstate.m_mutex};
+	m_eval_gstate.m_pause_requested.store(true, std::memory_order_release);
+	m_eval_gstate.m_condvar_update.notify_all();
+	m_eval_gstate.m_condvar_update.wait(lock, [this] {
+		return m_eval_gstate.m_threads_paused >= m_eval_gstate.m_threads_active;
+	});
+	if (!SnapshotBeforeMaskEdit()) {
+		m_eval_gstate.m_pause_requested.store(false, std::memory_order_release);
+		lock.unlock();
+		m_eval_gstate.m_condvar_update.notify_all();
+		GuiDetailsMask published;
+		published.values = details_mask.Values().data();
+		published.editable_values = details_mask.EditableValues().data();
+		published.width = m_width;
+		published.height = m_height;
+		gui.PublishDetailsMask(published);
+		return;
+	}
+
+	const bool scoringWasOff = !cfg.details_score;
+	cfg.details_score = true;
+	std::vector<unsigned char> priorValues;
+	priorValues.reserve(stroke.pixels.size());
+	for (const GuiMaskPixelChange& pixel : stroke.pixels) {
+		const bool inBounds = pixel.x < details_mask.Width()
+			&& pixel.y < details_mask.Height();
+		priorValues.push_back(inBounds
+			? details_mask.EditableAt(pixel.x, pixel.y) : 0);
+		if (inBounds)
+			details_mask.SetEditableValue(pixel.x, pixel.y, pixel.after);
+	}
+	bool rebuilt = false;
+	if (cfg.details_mode == "refined")
+		rebuilt = details_mask.RebuildRefined(m_picture_original.data(),
+			cfg.details_strength, cfg.details_floor, cfg.details_feather,
+			cfg.details_refine_mix);
+	else if (cfg.details_mode == "normalized")
+		rebuilt = details_mask.RebuildNormalized(cfg.details_strength,
+			cfg.details_floor, cfg.details_feather);
+	else
+		rebuilt = details_mask.RebuildLegacy();
+	if (!rebuilt) {
+		for (size_t i = 0; i < stroke.pixels.size(); ++i)
+			details_mask.SetEditableValue(
+				stroke.pixels[i].x, stroke.pixels[i].y, priorValues[i]);
+		if (cfg.details_mode == "refined")
+			details_mask.RebuildRefined(m_picture_original.data(),
+				cfg.details_strength, cfg.details_floor, cfg.details_feather,
+				cfg.details_refine_mix);
+		else if (cfg.details_mode == "normalized")
+			details_mask.RebuildNormalized(cfg.details_strength,
+				cfg.details_floor, cfg.details_feather);
+		else
+			details_mask.RebuildLegacy();
+		cfg.details_score = !scoringWasOff;
+		m_eval_gstate.m_pause_requested.store(false, std::memory_order_release);
+		lock.unlock();
+		m_eval_gstate.m_condvar_update.notify_all();
+		Message("Could not rebuild the edited details mask.");
+		return;
+	}
+
+	const std::vector<screen_line>& scoring_picture =
+		(cfg.visual_objective == E_OBJECTIVE_LEGACY_TARGET)
+			? m_picture : m_picture_original;
+	auto patchPixel = [this, &scoring_picture](unsigned x, unsigned y) {
+		const size_t offset = static_cast<size_t>(y) * m_width + x;
+		for (int palette = 0; palette < 128; ++palette) {
+			const distance_t base = distance_function(
+				scoring_picture[y][x], atari_palette[palette]);
+			m_picture_all_errors[palette][offset] = details_mask.IsNormalized()
+				? ApplyEffectiveDetailsWeight(base, details_mask.WeightAt(x, y))
+				: ApplyLegacyDetailsWeight(base, details_mask.At(x, y),
+					cfg.details_strength);
+		}
+	};
+	if (scoringWasOff || details_mask.IsNormalized()) {
+		for (unsigned y = 0; y < static_cast<unsigned>(m_height); ++y)
+			for (unsigned x = 0; x < static_cast<unsigned>(m_width); ++x)
+				patchPixel(x, y);
+	} else {
+		for (const GuiMaskPixelChange& pixel : stroke.pixels)
+			if (pixel.x < static_cast<unsigned>(m_width)
+				&& pixel.y < static_cast<unsigned>(m_height))
+				patchPixel(pixel.x, pixel.y);
+	}
+	const std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot> priorSnapshot =
+		std::atomic_load_explicit(&m_eval_gstate.m_best_snapshot,
+			std::memory_order_acquire);
+	if (priorSnapshot)
+		m_eval_gstate.m_best_pic = priorSnapshot->picture;
+	for (Evaluator& evaluator : m_evaluators)
+		evaluator.ClearAllCaches();
+	if (m_reporting_evaluator)
+		m_reporting_evaluator->ClearAllCaches();
+	m_eval_gstate.m_best_pic.uncache_insns();
+	if (cfg.details_allocate)
+		details_line_priorities = details_mask.LinePriorities(cfg.details_strength);
+
+	cfg.resume_objective_changed = true;
+	m_needs_history_reconfigure = true;
+	reconfigureAcceptanceHistory();
+	const double baseline = m_eval_gstate.m_best_result.load(std::memory_order_relaxed);
+	std::shared_ptr<EvalGlobalState::PublishedBestSnapshot> snapshot =
+		std::make_shared<EvalGlobalState::PublishedBestSnapshot>();
+	snapshot->picture = m_eval_gstate.m_best_pic;
+	snapshot->picture.uncache_insns();
+	snapshot->cost = baseline;
+	snapshot->version =
+		m_eval_gstate.m_best_state_version.load(std::memory_order_relaxed) + 1;
+	std::atomic_store_explicit(&m_eval_gstate.m_best_snapshot,
+		std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot>(snapshot),
+		std::memory_order_release);
+	m_eval_gstate.m_best_state_version.store(snapshot->version,
+		std::memory_order_release);
+	m_eval_gstate.m_objective_generation.fetch_add(1, std::memory_order_release);
+
+	m_mask_edited = true;
+	m_mask_edited_since_save = true;
+	m_last_retarget_ms = static_cast<int>(
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - retargetStarted).count());
+	GuiDetailsMask published;
+	published.values = details_mask.Values().data();
+	published.editable_values = details_mask.EditableValues().data();
+	published.width = m_width;
+	published.height = m_height;
+	gui.PublishDetailsMask(published);
+	Message("Details stroke applied in " + std::to_string(m_last_retarget_ms)
+		+ " ms; history reset to " + std::to_string(NormalizeScore(baseline)) + ".");
+
+	m_eval_gstate.m_pause_requested.store(false, std::memory_order_release);
+	lock.unlock();
+	m_eval_gstate.m_condvar_update.notify_all();
+}
+
+void RastaConverter::BranchCurrentRun()
+{
+	if (cfg.dual_mode) {
+		Message("Branching from the live editor is currently single-frame only.");
+		return;
+	}
+	SaveBestSolution();
+	std::string nextOutput;
+	std::string error;
+	if (!gui.CreateBranchOutput(cfg.input_file, nextOutput, error)) {
+		Message(error.empty() ? "Could not create branch run." : error);
+		return;
+	}
+	const std::string previousOutput = cfg.output_file;
+	cfg.output_file = nextOutput;
+	cfg.command_line = SetRecipeOption(cfg.command_line, "output",
+		"\"" + cfg.output_file + "\"", {"o"});
+	m_snapshot_count = 0;
+	m_mask_edited_since_save = true; // force the mask artifact into the branch
+	if (input_bitmap)
+		SavePicture(cfg.output_file + "-src.png", input_bitmap);
+	if (destination_bitmap)
+		SavePicture(cfg.output_file + "-dst.png", destination_bitmap);
+	SaveBestSolution();
+	Message("Branched from " + previousOutput + " to " + cfg.output_file + ".");
+	PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
+}
+
+void RastaConverter::BeginDestinationEdit()
+{
+	if (std::getenv("RASTA_TEST_DESTINATION_EDIT"))
+		std::fprintf(stderr, "destination-test: begin command\n");
+	if (cfg.dual_mode || cfg.visual_objective != E_OBJECTIVE_LEGACY_TARGET
+		|| m_destination_edit_active)
+		return;
+	std::unique_lock<std::mutex> lock{m_eval_gstate.m_mutex};
+	m_eval_gstate.m_pause_requested.store(true, std::memory_order_release);
+	m_eval_gstate.m_condvar_update.notify_all();
+	m_eval_gstate.m_condvar_update.wait(lock, [this] {
+		return m_eval_gstate.m_threads_paused >= m_eval_gstate.m_threads_active;
+	});
+	m_destination_edit_active = true;
+	lock.unlock();
+	Message("Destination editor opened; optimizer paused.");
+	PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
+}
+
+void RastaConverter::DiscardDestinationEdit()
+{
+	if (!m_destination_edit_active)
+		return;
+	{
+		std::lock_guard<std::mutex> lock{m_eval_gstate.m_mutex};
+		m_destination_edit_active = false;
+		m_eval_gstate.m_pause_requested.store(false, std::memory_order_release);
+	}
+	m_eval_gstate.m_condvar_update.notify_all();
+	Message("Destination edits discarded; workers resumed.");
+	PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
+}
+
+void RastaConverter::ApplyDestinationEdit(const GuiMaskStroke& changes)
+{
+	if (std::getenv("RASTA_TEST_DESTINATION_EDIT"))
+		std::fprintf(stderr, "destination-test: apply command (%zu pixels, active=%d)\n",
+			changes.pixels.size(), m_destination_edit_active ? 1 : 0);
+	if (!m_destination_edit_active) return;
+	if (changes.pixels.empty()) {
+		DiscardDestinationEdit();
+		return;
+	}
+	const auto started = std::chrono::steady_clock::now();
+	std::unique_lock<std::mutex> lock{m_eval_gstate.m_mutex};
+	if (!SnapshotBeforeMaskEdit()) {
+		lock.unlock();
+		PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
+		return;
+	}
+	for (const GuiMaskPixelChange& change : changes.pixels) {
+		if (change.x >= static_cast<unsigned>(m_width)
+			|| change.y >= static_cast<unsigned>(m_height))
+			continue;
+		const unsigned char index = change.after % 128;
+		m_picture[change.y][change.x] = atari_palette[index];
+		RGBQUAD color = RGB2PIXEL(atari_palette[index]);
+		FreeImage_SetPixelColor(destination_bitmap, change.x, change.y, &color);
+	}
+	for (int palette = 0; palette < 128; ++palette)
+		for (int y = 0; y < m_height; ++y)
+			for (int x = 0; x < m_width; ++x) {
+				const distance_t base = distance_function(
+					m_picture[y][x], atari_palette[palette]);
+				m_picture_all_errors[palette][static_cast<size_t>(y) * m_width + x] =
+					(!details_mask.Empty() && cfg.details_score)
+					? (details_mask.IsNormalized()
+						? ApplyEffectiveDetailsWeight(base,
+							details_mask.WeightAt(x, y))
+						: ApplyLegacyDetailsWeight(base, details_mask.At(x, y),
+							cfg.details_strength))
+					: base;
+			}
+	const std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot> prior =
+		std::atomic_load_explicit(&m_eval_gstate.m_best_snapshot,
+			std::memory_order_acquire);
+	if (prior) m_eval_gstate.m_best_pic = prior->picture;
+	for (Evaluator& evaluator : m_evaluators) evaluator.ClearAllCaches();
+	if (m_reporting_evaluator) m_reporting_evaluator->ClearAllCaches();
+	m_eval_gstate.m_best_pic.uncache_insns();
+	cfg.resume_objective_changed = true;
+	m_needs_history_reconfigure = true;
+	reconfigureAcceptanceHistory();
+	RenderCreatedPicture(m_eval_gstate.m_best_pic);
+	const double baseline = m_eval_gstate.m_best_result.load(std::memory_order_relaxed);
+	auto snapshot = std::make_shared<EvalGlobalState::PublishedBestSnapshot>();
+	snapshot->picture = m_eval_gstate.m_best_pic;
+	snapshot->picture.uncache_insns();
+	snapshot->cost = baseline;
+	snapshot->version =
+		m_eval_gstate.m_best_state_version.load(std::memory_order_relaxed) + 1;
+	std::atomic_store_explicit(&m_eval_gstate.m_best_snapshot,
+		std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot>(snapshot),
+		std::memory_order_release);
+	m_eval_gstate.m_best_state_version.store(snapshot->version,
+		std::memory_order_release);
+	m_eval_gstate.m_objective_generation.fetch_add(1, std::memory_order_release);
+	m_destination_edited = true;
+	m_target_hash = HashPicture(m_picture, m_width, m_height);
+	if (std::getenv("RASTA_TEST_DESTINATION_EDIT"))
+		std::fprintf(stderr, "destination-test: applied hash %s\n",
+			m_target_hash.c_str());
+	m_mask_edited_since_save = true;
+	m_last_retarget_ms = static_cast<int>(
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - started).count());
+	m_destination_edit_active = false;
+	m_eval_gstate.m_pause_requested.store(false, std::memory_order_release);
+	lock.unlock();
+	m_eval_gstate.m_condvar_update.notify_all();
+	ShowDestinationBitmap();
+	ShowLastCreatedPicture();
+	Message("Destination applied in " + std::to_string(m_last_retarget_ms)
+		+ " ms; history reset to " + std::to_string(NormalizeScore(baseline)) + ".");
+	PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
+}
+
+void RastaConverter::SaveEditedTargetArtifact()
+{
+	if (!m_destination_edited || !destination_bitmap) return;
+	const std::string currentHash = HashPicture(m_picture, m_width, m_height);
+	if (std::getenv("RASTA_TEST_DESTINATION_EDIT"))
+		std::fprintf(stderr, "destination-test: saving hash %s\n",
+			currentHash.c_str());
+	m_target_hash = currentHash;
+	const std::string artifact = cfg.output_file + "-target.png";
+	FIBITMAP* bitmap = FreeImage_Allocate(m_width, m_height, 24);
+	if (!bitmap) return;
+	for (int y = 0; y < m_height; ++y)
+		for (int x = 0; x < m_width; ++x) {
+			RGBQUAD color = RGB2PIXEL(m_picture[y][x]);
+			FreeImage_SetPixelColor(bitmap, x, m_height - 1 - y, &color);
+		}
+	const bool saved = FreeImage_Save(FIF_PNG, bitmap, artifact.c_str(), 0) != 0;
+	FreeImage_Unload(bitmap);
+	if (!saved) {
+		Message("Could not save edited destination artifact.");
+		return;
+	}
+	cfg.target_file = artifact;
+	cfg.command_line = SetRecipeOption(cfg.command_line, "target",
+		"\"" + artifact + "\"");
 }
 
 bool RastaConverter::OtherDithering()
@@ -722,6 +1306,16 @@ void RastaConverter::ShowDestinationBitmap()
 {
 	gui.DisplayBitmap(FreeImage_GetWidth(destination_bitmap)*2, 0, destination_bitmap);
 	gui.PublishImage(GuiImageSlot::Target, destination_bitmap);
+	m_destination_indices.resize(static_cast<size_t>(m_width) * m_height);
+	for (int y = 0; y < m_height; ++y)
+		for (int x = 0; x < m_width; ++x)
+			m_destination_indices[static_cast<size_t>(y) * m_width + x] =
+				FindAtariColorIndex(m_picture[y][x]);
+	GuiDestinationLayer layer;
+	layer.palette_indices = m_destination_indices.data();
+	layer.width = m_width;
+	layer.height = m_height;
+	gui.PublishDestinationLayer(layer);
 }
 
 
@@ -744,8 +1338,53 @@ bool RastaConverter::PrepareDestinationPicture()
 	FreeImage_FillBackground(destination_bitmap, &black, 0);
 
 
-	// Draw new picture on the screen
-	if (cfg.dual_mode)
+	// Draw new picture on the screen. A persisted destination edit bypasses
+	// preprocessing and is snapped back to the active hardware palette.
+	if (!cfg.target_file.empty())
+	{
+		FREE_IMAGE_FORMAT format = FreeImage_GetFileType(cfg.target_file.c_str(), 0);
+		if (format == FIF_UNKNOWN)
+			format = FreeImage_GetFIFFromFilename(cfg.target_file.c_str());
+		FIBITMAP* loaded = format == FIF_UNKNOWN ? nullptr
+			: FreeImage_Load(format, cfg.target_file.c_str(), 0);
+		// Rescaling an already exact-sized, palette-quantized PNG is not a
+		// no-op in every FreeImage build: FILTER_BOX can round channels by one,
+		// which then remaps pixels to a different Atari entry. Preserve exact
+		// artifacts byte-for-byte; only filter genuinely different dimensions.
+		FIBITMAP* resized = loaded
+			? (FreeImage_GetWidth(loaded) == static_cast<unsigned>(width)
+				&& FreeImage_GetHeight(loaded) == static_cast<unsigned>(height)
+				? FreeImage_Clone(loaded)
+				: FreeImage_Rescale(loaded, width, height, FILTER_BOX))
+			: nullptr;
+		if (loaded) FreeImage_Unload(loaded);
+		FIBITMAP* rgb = resized ? FreeImage_ConvertTo24Bits(resized) : nullptr;
+		if (resized) FreeImage_Unload(resized);
+		if (!rgb)
+			Error("Unable to load target override: " + cfg.target_file);
+		for (int y = 0; y < height; ++y)
+			for (int x = 0; x < width; ++x)
+				{
+					RGBQUAD color{};
+					FreeImage_GetPixelColor(rgb, x, height - 1 - y, &color);
+					const auto loadedColor = PIXEL2RGB(color);
+					unsigned char index = 128;
+					for (unsigned char candidate = 0; candidate < 128; ++candidate)
+						if (loadedColor.r == atari_palette[candidate].r
+							&& loadedColor.g == atari_palette[candidate].g
+							&& loadedColor.b == atari_palette[candidate].b) {
+							index = candidate;
+							break;
+						}
+					if (index == 128)
+						index = FindAtariColorIndex(loadedColor);
+					color_indexes_on_dst_picture.insert(index);
+					color = RGB2PIXEL(atari_palette[index]);
+				FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
+			}
+		FreeImage_Unload(rgb);
+	}
+	else if (cfg.dual_mode)
 	{
 		// In dual mode, destination is always high-color (original source or dithered source)
 		// Quantization only happens during bootstrap phase, not in destination image
@@ -811,6 +1450,8 @@ bool RastaConverter::PrepareDestinationPicture()
 			m_picture[y][x]=out_pixel; // copy it always - it is used by the color distance cache m_picture_all_errors
 		}
 	}
+	if (!cfg.preprocess_only)
+		ShowDestinationBitmap();
 	return false; // Completed successfully
 }
 
@@ -912,6 +1553,10 @@ bool RastaConverter::ProcessInit()
 
 	DBG_PRINT("[RASTA] LoadAtariPalette");
 	LoadAtariPalette();
+	// Reuse starts a fresh process and therefore has no edit metadata loaded
+	// from an .opt header. The internal artifact options carry that identity.
+	m_mask_edited = m_mask_edited || cfg.details_layer;
+	m_destination_edited = m_destination_edited || !cfg.target_file.empty();
 	DBG_PRINT("[RASTA] LoadInputBitmap");
 	if (!LoadInputBitmap())
 		Error("Error loading Input Bitmap!");
@@ -2111,6 +2756,18 @@ void RastaConverter::PublishLiveStats(bool preprocessing, bool finished)
 	stats.cache_mb = cfg.cache_size / (1024 * 1024);
 	stats.preprocessing = preprocessing;
 	stats.finished = finished;
+	stats.mask_paint_available = !cfg.dual_mode && !preprocessing && !finished;
+	stats.destination_edit_available = !cfg.dual_mode
+		&& cfg.visual_objective == E_OBJECTIVE_LEGACY_TARGET
+		&& !preprocessing && !finished;
+	stats.destination_edit_active = m_destination_edit_active;
+	stats.mask_edited = m_mask_edited;
+	stats.details_mode = cfg.details_mode;
+	stats.details_strength = cfg.details_strength;
+	stats.details_score = cfg.details_score;
+	stats.objective_revision =
+		m_eval_gstate.m_objective_generation.load(std::memory_order_relaxed);
+	stats.last_retarget_ms = m_last_retarget_ms;
 	stats.message = m_last_message;
 	if (m_ever_saved) {
 		stats.last_save_seconds_ago = std::chrono::duration<double>(
@@ -2195,10 +2852,30 @@ void RastaConverter::SaveBestSolution()
 	// Note that we are assuming that we have exclusive access to global state.
 
 	if (!cfg.dual_mode) {
+		SaveEditedMaskArtifact();
+		SaveEditedTargetArtifact();
 		const std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot> snapshot =
 			std::atomic_load_explicit(&m_eval_gstate.m_best_snapshot, std::memory_order_acquire);
 		raster_picture pic = snapshot ? snapshot->picture : m_eval_gstate.m_best_pic;
 
+		// A Continue can legitimately stop before running another mutation (for
+		// example when its saved evaluation count already exceeds /max_evals).
+		// In that case no worker has published the derived pixel/target rows in
+		// this process yet. Re-render the exact picture being saved when those
+		// rows are absent so output, MIC and PMG data are valid. Normal live
+		// saves retain the worker-published rows and do not touch a busy worker.
+		bool renderedRowsComplete =
+			m_eval_gstate.m_created_picture.size() == static_cast<size_t>(m_height)
+			&& m_eval_gstate.m_created_picture_targets.size()
+				== static_cast<size_t>(m_height);
+		for (int y = 0; renderedRowsComplete && y < m_height; ++y)
+			renderedRowsComplete =
+				m_eval_gstate.m_created_picture[y].size()
+					== static_cast<size_t>(m_width)
+				&& m_eval_gstate.m_created_picture_targets[y].size()
+					== static_cast<size_t>(m_width);
+		if (!renderedRowsComplete)
+			RenderCreatedPicture(pic);
 		ShowLastCreatedPicture();
 		SaveRasterProgram(string(cfg.output_file+".rp"), &pic);
 		OptimizeRasterProgram(&pic);
@@ -2208,6 +2885,9 @@ void RastaConverter::SaveBestSolution()
 		SavePicture     (cfg.output_file,output_bitmap);
 		SaveStatistics((cfg.output_file+".csv").c_str());
 		SaveOptimizerState((cfg.output_file+".optstate").c_str());
+		m_mask_edited_since_save = false;
+		m_ever_saved = true;
+		m_last_save_time = std::chrono::steady_clock::now();
 		return;
 	}
 
@@ -2281,6 +2961,7 @@ void RastaConverter::MainLoop()
 
 	bool clean_first_evaluation = cfg.continue_processing;
 	auto last_rate_check_tp = std::chrono::steady_clock::now();
+	auto last_ui_frame_tp = last_rate_check_tp;
 
 	bool pending_update = false;
 
@@ -2315,6 +2996,62 @@ void RastaConverter::MainLoop()
 	}
 
 	bool running = true;
+	auto handleGuiCommand = [&](GUI_command command)
+	{
+		switch (command)
+		{
+		case GUI_command::SAVE:
+			if (m_destination_edit_active) {
+				Message("Apply or discard the staged destination edit before saving.");
+				break;
+			}
+			SaveBestSolution();
+			Message("Saved.");
+			break;
+		case GUI_command::STOP:
+			if (m_destination_edit_active)
+				DiscardDestinationEdit();
+			running = false;
+			break;
+		case GUI_command::CONTINUE:
+			break;
+		case GUI_command::REDRAW:
+			ShowInputBitmap();
+			if (destination_bitmap) ShowDestinationBitmap();
+			ShowLastCreatedPicture();
+			ShowMutationStats();
+			PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
+			gui.Present();
+			break;
+		case GUI_command::MASK_EDIT:
+			{
+				GuiMaskStroke stroke;
+				if (gui.TakeMaskStroke(stroke))
+					ApplyMaskStroke(stroke);
+			}
+			break;
+		case GUI_command::BRANCH:
+			BranchCurrentRun();
+			break;
+		case GUI_command::DESTINATION_BEGIN:
+			BeginDestinationEdit();
+			break;
+		case GUI_command::DESTINATION_APPLY:
+			{
+				GuiMaskStroke changes;
+				gui.TakeDestinationChanges(changes);
+				ApplyDestinationEdit(changes);
+			}
+			break;
+		case GUI_command::DESTINATION_DISCARD:
+			DiscardDestinationEdit();
+			break;
+		case GUI_command::SHOW_A:
+		case GUI_command::SHOW_B:
+		case GUI_command::SHOW_MIX:
+			break;
+		}
+	};
 	while (running)
 	{
 
@@ -2326,7 +3063,8 @@ void RastaConverter::MainLoop()
 			auto next_rate_check_tp = std::chrono::steady_clock::now();
 
 			double secs = std::chrono::duration<double>(next_rate_check_tp - last_rate_check_tp).count();
-			if (secs > 0.25)
+			const bool statsDue = secs > 0.25;
+			if (statsDue)
 			{
 				m_rate = (double)(m_eval_gstate.m_evaluations - last_eval) / secs;
 
@@ -2341,38 +3079,13 @@ void RastaConverter::MainLoop()
 
 				ShowMutationStats();
 				PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
-
-				switch (gui.NextFrame())
-				{
-				case GUI_command::SAVE:
-					SaveBestSolution();
-					m_last_save_time = std::chrono::steady_clock::now();
-					m_ever_saved = true;
-					Message("Saved.");
-					break;
-				case GUI_command::STOP:
-					running = false;
-					break;
-				case GUI_command::CONTINUE:
-					break;
-				case GUI_command::REDRAW:
-					ShowInputBitmap();
-					if (destination_bitmap) ShowDestinationBitmap();
-					if (cfg.dual_mode) ShowLastCreatedPictureDual(); else ShowLastCreatedPicture();
-					ShowMutationStats();
-					PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
-					gui.Present();
-					break;
-				case GUI_command::SHOW_A:
-					if (cfg.dual_mode) { m_dual_display = DualDisplayMode::A; ShowLastCreatedPictureDual(); }
-					break;
-				case GUI_command::SHOW_B:
-					if (cfg.dual_mode) { m_dual_display = DualDisplayMode::B; ShowLastCreatedPictureDual(); }
-					break;
-				case GUI_command::SHOW_MIX:
-					if (cfg.dual_mode) { m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); }
-					break;
-				}
+			}
+			const bool liveFrameDue = gui.LiveUiActive()
+				&& next_rate_check_tp - last_ui_frame_tp
+					>= std::chrono::milliseconds(16);
+			if (statsDue || liveFrameDue) {
+				last_ui_frame_tp = next_rate_check_tp;
+				handleGuiCommand(gui.NextFrame());
 			}
 		}
 
@@ -2381,7 +3094,8 @@ void RastaConverter::MainLoop()
 		startRemainingWorkers();
 
 		auto now = std::chrono::steady_clock::now();
-		auto deadline = now + std::chrono::nanoseconds( 250000000 );
+		auto deadline = now + (gui.LiveUiActive()
+			? std::chrono::milliseconds(16) : std::chrono::milliseconds(250));
 
 		if ( std::cv_status::timeout == m_eval_gstate.m_condvar_update.wait_until( lock, deadline ) )
 			continue;
@@ -2401,7 +3115,7 @@ void RastaConverter::MainLoop()
 			pending_update = true;
 		}
 
-		if (cfg.save_period == -1) // auto
+		if (cfg.save_period == -1 && !m_destination_edit_active) // auto
 		{
 			using namespace std::literals::chrono_literals;
 			if ( now - m_previous_save_time > 30s )
@@ -2410,7 +3124,7 @@ void RastaConverter::MainLoop()
 				SaveBestSolution();
 			}
 		}
-		else if (m_eval_gstate.m_update_autosave)
+		else if (!m_destination_edit_active && m_eval_gstate.m_update_autosave)
 		{
 			m_eval_gstate.m_update_autosave = false;
 			SaveBestSolution();
@@ -2433,6 +3147,29 @@ void RastaConverter::MainLoop()
 	{
 		m_eval_gstate.m_condvar_update.wait( lock );
 	}
+}
+
+void RastaConverter::RenderCreatedPicture(raster_picture& picture)
+{
+	if (m_evaluators.empty())
+		return;
+	std::vector<const line_cache_result*> results(m_height, nullptr);
+	Evaluator& evaluator = m_evaluators.front();
+	evaluator.EvaluateSingle(&picture, results.data());
+	m_eval_gstate.m_created_picture.resize(m_height);
+	m_eval_gstate.m_created_picture_targets.resize(m_height);
+	for (int y = 0; y < m_height; ++y) {
+		if (results[y] == nullptr)
+			continue;
+		const line_cache_result& result = *results[y];
+		m_eval_gstate.m_created_picture[y].assign(
+			result.color_row, result.color_row + m_width);
+		m_eval_gstate.m_created_picture_targets[y].resize(m_width);
+		result.copy_target_row(
+			m_eval_gstate.m_created_picture_targets[y].data(), m_width);
+	}
+	memcpy(&m_eval_gstate.m_sprites_memory, &evaluator.GetSpritesMemory(),
+		sizeof m_eval_gstate.m_sprites_memory);
 }
 
 void RastaConverter::ShowLastCreatedPicture()
@@ -2673,6 +3410,22 @@ void RastaConverter::LoadRasterProgram(string name)
 		if (pos!=string::npos)
 			m_saved_details_effective_hash=line.substr(pos+26);
 
+		pos=line.find("; Mask Edited:");
+		if (pos!=string::npos)
+			m_mask_edited=line.substr(pos+15).find("yes") != string::npos;
+
+		pos=line.find("; Destination Edited:");
+		if (pos!=string::npos)
+			m_destination_edited=line.substr(pos+21).find("yes") != string::npos;
+
+		pos=line.find("; Target Hash:");
+		if (pos!=string::npos)
+			m_saved_target_hash=line.substr(pos+14);
+
+		pos=line.find("; Snapshots:");
+		if (pos!=string::npos)
+			m_snapshot_count=String2Value<unsigned>(line.substr(pos+12));
+
 		if (line.compare(0, 4, "line", 4) == 0)
 		{
 			line_started = true;
@@ -2769,6 +3522,9 @@ bool RastaConverter::Resume()
 	{
 		Error("/continue: no saved program found for resume (looked for single and dual outputs)");
 	}
+	m_ever_saved = true;
+	m_last_save_time = std::chrono::steady_clock::now();
+	m_mask_edited_since_save = false;
 
 	// Load optimizer state if present
 	if (file_exists(sf_opt)) {
@@ -3040,7 +3796,10 @@ void RastaConverter::reconfigureAcceptanceHistory()
 
 	auto recompute_single_cost = [this]() -> double {
 		Evaluator& ev = m_evaluators.front();
-		raster_picture pic = m_eval_gstate.m_best_pic;
+		const std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot> snapshot =
+			std::atomic_load_explicit(&m_eval_gstate.m_best_snapshot,
+				std::memory_order_acquire);
+		raster_picture pic = snapshot ? snapshot->picture : m_eval_gstate.m_best_pic;
 		std::vector<const line_cache_result*> res(m_height, nullptr);
 		ev.RecachePicture(&pic);
 		double cost = (double)ev.EvaluateSingle(&pic, res.data());
@@ -3150,6 +3909,11 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 		asmOut << "; Details Allocation: " << (cfg.details_allocate ? "on" : "off") << '\n';
 		asmOut << "; Details Global Period: " << cfg.details_global_period << '\n';
 	}
+	asmOut << "; Mask Edited: " << (m_mask_edited ? "yes" : "no") << '\n';
+	asmOut << "; Destination Edited: "
+		<< (m_destination_edited ? "yes" : "no") << '\n';
+	asmOut << "; Target Hash: " << m_target_hash << '\n';
+	asmOut << "; Snapshots: " << m_snapshot_count << '\n';
     asmOut << "; Evaluations: " << static_cast<unsigned long long>(m_eval_gstate.m_evaluations) << '\n';
     asmOut << "; Score: " << NormalizeScore(m_eval_gstate.m_best_result) << '\n';
 	if (!cfg.dual_mode && !m_evaluators.empty())

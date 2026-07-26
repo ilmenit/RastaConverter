@@ -23,10 +23,14 @@ public:
     void PublishStats(const LiveStats&) {}
     void PublishImage(GuiImageSlot, FIBITMAP*) {}
     void PublishDetailsMask(const GuiDetailsMask&) {}
+    void PublishDestinationLayer(const GuiDestinationLayer&) {}
+    bool TakeMaskStroke(GuiMaskStroke&) { return false; }
+    bool TakeDestinationChanges(GuiMaskStroke&) { return false; }
+    bool CreateBranchOutput(const std::string&, std::string&, std::string&) {
+        return false;
+    }
     bool LiveUiActive() const { return false; }
     bool AbortRequested() const { return false; }
 };
 
 #endif // NO_GUI
-
-

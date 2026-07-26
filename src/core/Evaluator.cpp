@@ -1598,6 +1598,8 @@ void Evaluator::Run() {
 	OptimizerState islandState;
 	unsigned long long observedBestVersion =
 		m_gstate->m_best_state_version.load(std::memory_order_acquire);
+	unsigned long long observedObjectiveGeneration =
+		m_gstate->m_objective_generation.load(std::memory_order_acquire);
 	if (m_gstate->m_best_result != DBL_MAX)
 	{
 		// Saved optimizer history cannot be resumed coherently without its
@@ -1634,6 +1636,35 @@ void Evaluator::Run() {
 	RasterMutationTransaction mutationTransaction;
 
 	for (;;) {
+		if (m_gstate->m_pause_requested.load(std::memory_order_acquire)) {
+			std::unique_lock<std::mutex> pauseLock{m_gstate->m_mutex};
+			++m_gstate->m_threads_paused;
+			m_gstate->m_condvar_update.notify_all();
+			m_gstate->m_condvar_update.wait(pauseLock, [this] {
+				return !m_gstate->m_pause_requested.load(std::memory_order_acquire)
+					|| m_gstate->m_finished.load(std::memory_order_acquire);
+			});
+			--m_gstate->m_threads_paused;
+			const unsigned long long generation =
+				m_gstate->m_objective_generation.load(std::memory_order_acquire);
+			if (generation != observedObjectiveGeneration) {
+				const std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot> snapshot =
+					std::atomic_load_explicit(&m_gstate->m_best_snapshot,
+						std::memory_order_acquire);
+				m_best_pic = snapshot ? snapshot->picture : m_gstate->m_best_pic;
+				currentPicture = m_best_pic;
+				m_best_pic.recache_insns(m_insn_seq_cache, m_insn_allocator);
+				currentPicture.recache_insns(m_insn_seq_cache, m_insn_allocator);
+				islandState.Initialize(
+					m_gstate->m_best_result.load(std::memory_order_acquire),
+					static_cast<std::size_t>(std::max(m_solutions, 1)));
+				observedBestVersion =
+					m_gstate->m_best_state_version.load(std::memory_order_acquire);
+				observedObjectiveGeneration = generation;
+			}
+			if (m_gstate->m_finished.load(std::memory_order_acquire))
+				break;
+		}
 		if (m_cache_allocator_stats.resident_bytes > m_cache_size) {
 			// Acquire a mutex to coordinate cache clearing
 			std::unique_lock<std::mutex> cache_lock(m_gstate->m_cache_mutex);

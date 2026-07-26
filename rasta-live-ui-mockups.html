@@ -1,0 +1,1030 @@
+<title>RastaConverter — Live UI Mockups</title>
+<style>
+  :root{
+    --page-bg: #f3f1ec;
+    --page-fg: #26241f;
+    --page-muted: #6b675c;
+    --page-accent: #b4602f;
+    --page-card: #ffffff;
+    --page-border: #ddd8cc;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --page-bg: #17161a;
+      --page-fg: #ece9e2;
+      --page-muted: #a29d90;
+      --page-accent: #e2934f;
+      --page-card: #201f24;
+      --page-border: #35333a;
+    }
+  }
+  :root[data-theme="dark"]{
+    --page-bg: #17161a; --page-fg: #ece9e2; --page-muted: #a29d90;
+    --page-accent: #e2934f; --page-card: #201f24; --page-border: #35333a;
+  }
+  :root[data-theme="light"]{
+    --page-bg: #f3f1ec; --page-fg: #26241f; --page-muted: #6b675c;
+    --page-accent: #b4602f; --page-card: #ffffff; --page-border: #ddd8cc;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding: 48px 24px 96px;
+    background: var(--page-bg); color: var(--page-fg);
+    font-family: ui-sans-serif, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+  }
+
+  .wrap{ width:100%; max-width: 1180px; }
+
+  header.intro{ margin-bottom: 44px; }
+  .eyebrow{
+    font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color: var(--page-accent); font-weight:700; margin-bottom:10px;
+  }
+  h1{
+    font-size: clamp(28px,4vw,40px); line-height:1.08; margin:0 0 14px;
+    text-wrap: balance; font-weight:700; letter-spacing:-.01em;
+  }
+  .lede{
+    max-width: 66ch; color: var(--page-muted); font-size:16px; line-height:1.6;
+  }
+  .lede b{ color: var(--page-fg); }
+
+  section.screen{ margin-bottom: 64px; }
+  .screen-label{
+    display:flex; align-items:baseline; gap:14px; margin-bottom:16px;
+    flex-wrap:wrap;
+  }
+  .screen-label .tag{
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size:12px; color: var(--page-muted); background: var(--page-card);
+    border:1px solid var(--page-border); padding:3px 8px; border-radius:4px;
+  }
+  .screen-label h2{ font-size:22px; margin:0; letter-spacing:-.01em; }
+  .screen-label p{ margin:6px 0 0; color:var(--page-muted); font-size:14px; max-width:70ch; }
+
+  /* ---- legend ---- */
+  .legend{
+    display:flex; gap:18px; flex-wrap:wrap; margin: 14px 0 22px;
+    font-size:12.5px; color: var(--page-muted);
+  }
+  .legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .legend i{ width:10px; height:10px; border-radius:2px; display:inline-block; }
+  .sw-new{ background:#57c7ff; box-shadow:0 0 0 1px #1c7fae inset; }
+  .sw-existing{ background:#8b8a92; }
+
+  /* ================= IMGUI MOCK CHROME ================= */
+  .app{
+    --ig-bg: #1b1c20;
+    --ig-panel: #232428;
+    --ig-panel-2: #26272c;
+    --ig-header: #2c2d33;
+    --ig-header-active: #34363e;
+    --ig-border: #3c3d44;
+    --ig-text: #e5e5e8;
+    --ig-text-dim: #9a9aa3;
+    --ig-accent: #f2a93b;      /* existing / status */
+    --ig-accent-new: #57c7ff;  /* newly proposed live controls */
+    --ig-good: #6fcf7c;
+    --ig-warn: #e8b339;
+    --ig-crit: #e5534b;
+    --ig-pending: #a78bfa;   /* staged edit, needs explicit Apply (destination retarget) */
+
+    background: var(--ig-bg);
+    color: var(--ig-text);
+    border-radius: 8px;
+    border: 1px solid #000;
+    box-shadow: 0 20px 60px -20px rgba(0,0,0,.6), 0 1px 0 rgba(255,255,255,.04) inset;
+    overflow: hidden;
+    font-family: ui-sans-serif, "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+  }
+  .titlebar{
+    display:flex; align-items:center; justify-content:space-between;
+    background: linear-gradient(180deg,#2a2b30,#232428);
+    border-bottom: 1px solid var(--ig-border);
+    padding: 7px 10px;
+  }
+  .titlebar .name{ font-size:12.5px; color: var(--ig-text-dim); letter-spacing:.02em; }
+  .dots{ display:flex; gap:6px; }
+  .dots i{ width:10px; height:10px; border-radius:50%; display:block; background:#45464e; }
+
+  .menubar{
+    display:flex; gap:2px; padding: 3px 8px; background:#202126;
+    border-bottom:1px solid var(--ig-border); font-size:12px; color:var(--ig-text-dim);
+  }
+  .menubar span{ padding:4px 9px; border-radius:4px; }
+  .menubar span.active{ background: var(--ig-header-active); color: var(--ig-text); }
+
+  .panel-title{
+    background: var(--ig-header);
+    border-bottom: 1px solid var(--ig-border);
+    padding: 5px 10px;
+    font-size: 11.5px; font-weight:600; letter-spacing:.03em; text-transform:uppercase;
+    color: var(--ig-text-dim);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .panel-title .arrow{ opacity:.6; margin-right:6px; font-size:10px; }
+  .panel{ background: var(--ig-panel); border:1px solid var(--ig-border); border-radius:5px; overflow:hidden; }
+  .panel.new{ border-color: rgba(87,199,255,.55); box-shadow: 0 0 0 1px rgba(87,199,255,.18) inset; }
+  .panel-body{ padding: 12px; display:flex; flex-direction:column; gap:12px; }
+
+  .field label{
+    display:flex; justify-content:space-between; font-size:11.5px; color: var(--ig-text-dim);
+    margin-bottom:5px; font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+  }
+  .field label .val{ color: var(--ig-text); font-variant-numeric: tabular-nums; }
+
+  .textbox{
+    background:#18191c; border:1px solid var(--ig-border); border-radius:4px;
+    padding:6px 8px; font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+    font-size:12px; color:var(--ig-text); display:flex; justify-content:space-between; gap:8px;
+  }
+  .textbox .path{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ig-text-dim); }
+  .textbox .btn-mini{
+    background: var(--ig-header-active); border-radius:3px; padding:1px 7px; font-size:11px; flex:none;
+  }
+
+  .slider{ position:relative; height:18px; }
+  .slider .track{
+    position:absolute; inset:0; background:#18191c; border:1px solid var(--ig-border);
+    border-radius:4px; overflow:hidden;
+  }
+  .slider .fill{ position:absolute; inset:0; background: linear-gradient(90deg,#3b3c42,#46474e); }
+  .slider.accent .fill{ background: linear-gradient(90deg, color-mix(in srgb, var(--ig-accent) 55%, #2a2b30), var(--ig-accent)); }
+  .slider.new .fill{ background: linear-gradient(90deg, color-mix(in srgb, var(--ig-accent-new) 50%, #2a2b30), var(--ig-accent-new)); }
+  .slider .grab{
+    position:absolute; top:1px; bottom:1px; width:3px; background:#fff; opacity:.85; border-radius:2px;
+  }
+  .slider .num{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:11px; font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+    color:var(--ig-text); mix-blend-mode: difference;
+  }
+
+  .combo{
+    background:#18191c; border:1px solid var(--ig-border); border-radius:4px;
+    padding:6px 8px; font-size:12px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .combo .car{ color: var(--ig-text-dim); font-size:10px; }
+
+  .row{ display:flex; gap:8px; }
+  .row > *{ flex:1; }
+
+  .checkline{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ig-text-dim); }
+  .checkline .box{ width:13px; height:13px; border:1px solid var(--ig-border); border-radius:3px; background:#18191c; display:flex; align-items:center; justify-content:center; flex:none; }
+  .checkline .box.on{ background: var(--ig-accent-new); border-color: var(--ig-accent-new); }
+  .checkline .box.on::after{ content:"✓"; font-size:9px; color:#0d1b22; }
+
+  .btn{
+    border-radius:4px; padding:8px 14px; font-size:12.5px; font-weight:600; text-align:center;
+    border:1px solid var(--ig-border); background: var(--ig-header-active); color: var(--ig-text);
+  }
+  .btn.primary{ background: linear-gradient(180deg,#66d1ff,#2fa1e8); color:#08202b; border-color:#1c7fae; }
+  .btn.ghost{ background:transparent; }
+  .btn.small{ padding:5px 10px; font-size:11.5px; }
+
+  .thumb{
+    aspect-ratio: 4/3; border-radius:4px; border:1px solid var(--ig-border); position:relative; overflow:hidden;
+    background:
+      repeating-linear-gradient(100deg,
+        #2b3a53 0 3%, #4a5f86 3% 6%, #7a8fb0 6% 9%,
+        #202b3d 9% 12%, #34455f 12% 16%);
+  }
+  .thumb.mask::after{
+    content:""; position:absolute; inset:0;
+    background: repeating-linear-gradient(115deg, rgba(87,199,255,.28) 0 2px, transparent 2px 9px);
+    mix-blend-mode: screen;
+  }
+  .thumb .cap{
+    position:absolute; left:0; right:0; bottom:0; padding:3px 6px; font-size:10px;
+    background:rgba(0,0,0,.55); color:#dcdde2; letter-spacing:.03em;
+  }
+
+  .pill{
+    font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    padding:2px 7px; border-radius:20px;
+  }
+  .pill.good{ background: rgba(111,207,124,.16); color: var(--ig-good); border:1px solid rgba(111,207,124,.4); }
+  .pill.info{ background: rgba(87,199,255,.16); color: var(--ig-accent-new); border:1px solid rgba(87,199,255,.4); }
+  .pill.new{ background: rgba(87,199,255,.22); color:#bfe9ff; border:1px solid rgba(87,199,255,.55); }
+
+  table.stats{ width:100%; border-collapse:collapse; font-size:12px; }
+  table.stats th{
+    text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em;
+    color: var(--ig-text-dim); font-weight:600; padding:0 8px 6px; border-bottom:1px solid var(--ig-border);
+  }
+  table.stats td{
+    padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.03);
+    font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace; font-variant-numeric: tabular-nums;
+  }
+  table.stats tr:last-child td{ border-bottom:none; }
+
+  .spark{ display:flex; align-items:flex-end; gap:2px; height:34px; }
+  .spark i{ width:5px; background: linear-gradient(180deg, var(--ig-accent-new), color-mix(in srgb, var(--ig-accent-new) 30%, transparent)); border-radius:1px 1px 0 0; display:block; }
+
+  .callout{
+    position:absolute; font-size:10.5px; font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+    color:#bfe9ff; background: rgba(20,30,38,.92); border:1px solid rgba(87,199,255,.5);
+    padding:3px 7px; border-radius:4px; white-space:nowrap; pointer-events:none;
+  }
+  .callout::before{
+    content:""; position:absolute; width:7px; height:7px; background:inherit; border:inherit;
+    border-right:none; border-top:none; transform: rotate(45deg);
+  }
+
+  .grid-setup{ display:grid; grid-template-columns: 280px 1fr 260px; gap: 12px; padding: 14px; }
+  .stack{ display:flex; flex-direction:column; gap:12px; }
+
+  .grid-run{ display:grid; grid-template-columns: 1fr 280px; gap:12px; padding:12px; }
+  .imgrow{ display:grid; grid-template-columns: repeat(3,1fr); gap:10px; }
+  .tabs{ display:flex; gap:2px; padding:5px 6px 0; background:var(--ig-panel-2); }
+  .tabs span{ font-size:11px; padding:4px 10px; border-radius:4px 4px 0 0; color:var(--ig-text-dim); }
+  .tabs span.active{ background:var(--ig-panel); color:var(--ig-text); }
+
+  .transport{
+    display:flex; align-items:center; gap:8px; padding:10px 14px; background: var(--ig-panel-2);
+    border-top:1px solid var(--ig-border);
+  }
+  .transport .spacer{ flex:1; }
+
+  footer.note{
+    max-width: 74ch; margin: 8px auto 0; color: var(--page-muted); font-size:13.5px; line-height:1.6;
+  }
+  footer.note h3{ font-size:15px; color:var(--page-fg); margin:0 0 6px; }
+  footer.note + footer.note{ margin-top:22px; }
+
+  @media (max-width: 860px){
+    .grid-setup{ grid-template-columns: 1fr; }
+    .grid-run{ grid-template-columns: 1fr; }
+    .imgrow{ grid-template-columns: 1fr; }
+  }
+
+  /* ================= PAINT / EDIT MODE ================= */
+  .grid-edit{ display:grid; grid-template-columns: 1fr 250px; gap:10px; padding:10px; }
+
+  .paint-toolbar{
+    display:flex; align-items:center; gap:6px; padding:6px 8px; flex-wrap:wrap;
+    background: var(--ig-panel-2); border:1px solid var(--ig-border); border-radius:5px;
+  }
+  .paint-toolbar .grp{ display:flex; gap:3px; padding-right:8px; margin-right:8px; border-right:1px solid var(--ig-border); }
+  .paint-toolbar .grp:last-child{ border-right:none; }
+  .tbtn{
+    display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--ig-text-dim);
+    border:1px solid transparent; border-radius:4px; padding:5px 8px; background:transparent;
+    font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+  }
+  .tbtn .glyph{ font-size:13px; line-height:1; color:var(--ig-text); }
+  .tbtn.active{ background: var(--ig-header-active); border-color:#4a4c56; color:var(--ig-text); }
+  .tbtn.disabled{ opacity:.35; }
+
+  .target-toggle{ display:flex; gap:2px; }
+  .target-toggle span{
+    font-size:11px; padding:5px 10px; border-radius:4px; color:var(--ig-text-dim);
+    border:1px solid var(--ig-border);
+  }
+  .target-toggle span.sel-mask{ background: rgba(87,199,255,.16); border-color:rgba(87,199,255,.55); color:#bfe9ff; }
+  .target-toggle span.sel-dest{ background: rgba(167,139,250,.18); border-color:rgba(167,139,250,.6); color:#e2d6ff; }
+
+  .canvas-wrap{
+    position:relative; border:1px solid var(--ig-border); border-radius:5px; overflow:hidden;
+    background:#0e0f11;
+    min-height: 420px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .canvas-wrap.editing-dest{ box-shadow: 0 0 0 2px rgba(167,139,250,.6) inset; }
+  .canvas-wrap.editing-mask{ box-shadow: 0 0 0 2px rgba(87,199,255,.6) inset; }
+
+  .pixel-canvas{
+    position:relative; width: 560px; aspect-ratio: 320/240;
+    background:
+      repeating-linear-gradient(100deg,#2b3a53 0 3%, #4a5f86 3% 6%, #7a8fb0 6% 9%, #202b3d 9% 12%, #34455f 12% 16%);
+    background-size: cover;
+    image-rendering: pixelated;
+  }
+  .pixel-canvas.mask-view::after{
+    content:""; position:absolute; inset:0;
+    background: repeating-linear-gradient(115deg, rgba(87,199,255,.32) 0 3px, transparent 3px 11px),
+                repeating-linear-gradient(25deg, rgba(87,199,255,.14) 0 6px, transparent 6px 18px);
+    mix-blend-mode: screen;
+  }
+  .pixel-grid{
+    position:absolute; inset:0; pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px);
+    background-size: 17.5px 17.5px;
+  }
+  .brush-cursor{
+    position:absolute; width:36px; height:36px; border:1.5px solid #fff; border-radius:3px;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.6);
+    top: 46%; left: 54%; pointer-events:none;
+  }
+  .stroke-demo{
+    position:absolute; left:38%; top:30%; width:120px; height:64px;
+  }
+  .stroke-demo .blob{
+    position:absolute; background: var(--ig-pending); opacity:.85; border-radius:2px;
+  }
+  .pixel-canvas.mask-view .stroke-demo .blob{ background: var(--ig-accent-new); }
+
+  .canvas-statusbar{
+    display:flex; align-items:center; gap:14px; padding:5px 10px; font-size:11px;
+    color:var(--ig-text-dim); background:var(--ig-panel-2); border:1px solid var(--ig-border);
+    border-top:none; border-radius:0 0 5px 5px; font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+  }
+  .canvas-statusbar .spacer{ flex:1; }
+  .canvas-statusbar .swatch-mini{ width:10px; height:10px; border-radius:2px; display:inline-block; vertical-align:-1px; border:1px solid rgba(255,255,255,.3); }
+
+  .color-pair{ display:flex; align-items:center; gap:10px; }
+  .color-stack{ position:relative; width:38px; height:38px; }
+  .color-stack .sw{ position:absolute; width:26px; height:26px; border-radius:4px; border:1px solid rgba(255,255,255,.25); }
+  .color-stack .sw.primary{ top:0; left:0; z-index:2; }
+  .color-stack .sw.secondary{ bottom:0; right:0; z-index:1; }
+  .mouse-tag{ font-size:9.5px; color:var(--ig-text-dim); }
+
+  .palette-grid{ display:grid; grid-template-columns: repeat(8,1fr); gap:3px; }
+  .palette-grid .sw{ aspect-ratio:1; border-radius:3px; border:1px solid rgba(255,255,255,.12); }
+  .palette-grid .sw.sel{ outline:2px solid #fff; outline-offset:1px; }
+
+  .snap-item{
+    display:flex; gap:8px; padding:7px; border:1px solid var(--ig-border); border-radius:5px;
+    align-items:center; background:var(--ig-panel-2);
+  }
+  .snap-item .thumb{ width:44px; height:33px; flex:none; border-radius:3px; }
+  .snap-item .meta{ flex:1; min-width:0; }
+  .snap-item .meta .name{ font-size:11.5px; color:var(--ig-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .snap-item .meta .when{ font-size:10px; color:var(--ig-text-dim); font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace; }
+  .snap-item .go{ font-size:10.5px; color:#bfe9ff; flex:none; }
+
+  .apply-bar{
+    display:flex; align-items:center; gap:8px; padding:9px 12px; border-radius:5px;
+    background: rgba(167,139,250,.12); border:1px solid rgba(167,139,250,.5);
+  }
+  .apply-bar .msg{ flex:1; font-size:11.5px; color:#e2d6ff; }
+
+  /* ---- build & run panel ---- */
+  .console{
+    background:#0e0f11; border:1px solid var(--ig-border); border-radius:4px;
+    padding:7px 9px; font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+    font-size:11px; line-height:1.6; color:#9fd9a8; max-height:96px; overflow:hidden;
+  }
+  .console .dim{ color:var(--ig-text-dim); }
+  .console .err{ color:#ff9d94; }
+  .build-result{
+    display:flex; align-items:center; gap:8px; font-size:11.5px;
+    font-family: ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+    color:var(--ig-text-dim); background:#18191c; border:1px solid var(--ig-border);
+    border-radius:4px; padding:6px 8px;
+  }
+  .build-result .path{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ig-text); }
+</style>
+
+<div class="wrap">
+
+  <header class="intro">
+    <div class="eyebrow">RastaConverter · Live UI proposal</div>
+    <h1>Two new screens, one existing renderer</h1>
+    <p class="lede">
+      Both mockups below assume the <b>ImGui-over-SDL3-Renderer</b> integration
+      described earlier — same window, same texture uploads RastaSDL already does.
+      <span style="color:#57c7ff;">Cyan-bordered</span> elements are net-new; everything
+      else is today's behavior re-skinned. Screenshots are deliberately dark —
+      this is the actual Dear ImGui dark theme the tool would ship, not page chrome.
+    </p>
+  </header>
+
+  <!-- ===================== SCREEN 1: BEFORE RUN ===================== -->
+  <section class="screen">
+    <div class="screen-label">
+      <span class="tag">/livegui</span>
+      <h2>Before run — Setup</h2>
+    </div>
+    <p style="color:var(--page-muted);font-size:14px;max-width:70ch;margin:0 0 14px;">
+      Replaces hand-edited <code>config.env</code> / CLI flags for interactive use.
+      Values map 1:1 onto the existing <code>Configuration</code> struct, so the same
+      clamping rules from <code>config.cpp</code> apply before <b>Start</b> is enabled.
+    </p>
+    <div class="legend">
+      <span><i class="sw-new"></i> new in this proposal</span>
+      <span><i class="sw-existing"></i> existing config value, new form control</span>
+    </div>
+
+    <div class="app">
+      <div class="titlebar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="name">RastaConverter — Setup</div>
+        <div style="width:40px"></div>
+      </div>
+      <div class="menubar">
+        <span class="active">Setup</span><span>Presets</span><span>Help</span>
+      </div>
+
+      <div class="grid-setup">
+        <!-- LEFT: source/output -->
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Source &amp; Output</span></div>
+            <div class="panel-body">
+              <div class="field">
+                <label>Input image</label>
+                <div class="textbox"><span class="path">test.jpg</span><span class="btn-mini">Browse…</span></div>
+              </div>
+              <div class="field">
+                <label>Output prefix</label>
+                <div class="textbox"><span class="path">output/test</span><span class="btn-mini">Browse…</span></div>
+              </div>
+              <div class="field">
+                <label>Palette</label>
+                <div class="combo"><span>altirra_ntsc_xl.pal</span><span class="car">▾</span></div>
+              </div>
+              <div class="field">
+                <label>Preprocess</label>
+                <div class="combo"><span>Auto contrast + dither</span><span class="car">▾</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Resources</span></div>
+            <div class="panel-body">
+              <div class="field">
+                <label>Threads <span class="val">12 / 16</span></label>
+                <div class="slider"><div class="track"><div class="fill" style="width:75%"></div></div><div class="grab" style="left:75%"></div></div>
+              </div>
+              <div class="field">
+                <label>Time budget <span class="val">45 min</span></label>
+                <div class="slider"><div class="track"><div class="fill" style="width:38%"></div></div><div class="grab" style="left:38%"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENTER: conversion settings -->
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Conversion Settings</span></div>
+            <div class="panel-body">
+              <div class="row">
+                <div class="field">
+                  <label>Optimizer</label>
+                  <div class="combo"><span>Island model (multi-thread)</span><span class="car">▾</span></div>
+                </div>
+                <div class="field">
+                  <label>Visual objective</label>
+                  <div class="combo"><span>source-spatial</span><span class="car">▾</span></div>
+                </div>
+              </div>
+
+              <div class="field">
+                <label>Dithering strength <span class="val">0.62</span></label>
+                <div class="slider"><div class="track"><div class="fill" style="width:62%"></div></div><div class="grab" style="left:62%"></div></div>
+              </div>
+
+              <div class="field">
+                <label>Mutation rate <span class="val">0.08</span></label>
+                <div class="slider"><div class="track"><div class="fill" style="width:22%"></div></div><div class="grab" style="left:22%"></div></div>
+              </div>
+
+              <div style="height:1px;background:var(--ig-border);margin:2px 0;"></div>
+
+              <div class="field">
+                <label>Details floor <span class="val">0.25</span></label>
+                <div class="slider new"><div class="track"><div class="fill" style="width:25%"></div></div><div class="grab" style="left:25%"></div></div>
+              </div>
+              <div class="field">
+                <label>Details strength <span class="val">0.50</span></label>
+                <div class="slider new"><div class="track"><div class="fill" style="width:50%"></div></div><div class="grab" style="left:50%"></div></div>
+              </div>
+
+              <div class="checkline"><span class="box on"></span> Enable dual-frame (A/B flicker) mode</div>
+              <div class="checkline"><span class="box"></span> Resume from checkpoint if present</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: preview -->
+        <div class="stack">
+          <div class="panel new" style="position:relative;">
+            <div class="panel-title"><span><span class="arrow">▾</span>Details Mask Preview</span><span class="pill new">NEW</span></div>
+            <div class="panel-body">
+              <div class="thumb mask"><span class="cap">test.jpg + mask overlay</span></div>
+              <div class="checkline"><span class="box on"></span> Show mask overlay</div>
+              <p style="font-size:11px;color:var(--ig-text-dim);line-height:1.5;margin:0;">
+                Regenerates instantly as Details Floor / Strength move —
+                <code>DetailsMask</code> load is cheap outside the hot loop.
+              </p>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-body" style="gap:8px;">
+              <div class="btn primary">Start Conversion</div>
+              <div class="btn ghost small">Save as preset…</div>
+              <div class="btn ghost small">Load config.env…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SCREEN 2: DURING RUN ===================== -->
+  <section class="screen">
+    <div class="screen-label">
+      <span class="tag">running</span>
+      <h2>During run — Live dashboard</h2>
+    </div>
+    <p style="color:var(--page-muted);font-size:14px;max-width:70ch;margin:0 0 14px;">
+      The three image panels and stats table are today's <code>DisplayBitmap</code> /
+      status-text output, docked as real panels instead of fixed blits. The
+      <b>Live Tuning</b> panel is the new piece — sliders write into a small
+      <code>LiveTunables</code> struct of atomics that workers read per-iteration,
+      the same acquire/release pattern already used for best-solution snapshots.
+    </p>
+    <div class="legend">
+      <span><i class="sw-new"></i> new — live-tunable mid-run</span>
+      <span><i class="sw-existing"></i> existing display, re-docked</span>
+    </div>
+
+    <div class="app">
+      <div class="titlebar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="name">RastaConverter — Converting… test.jpg</div>
+        <div style="width:40px"></div>
+      </div>
+
+      <div class="grid-run">
+        <!-- LEFT: images + stats -->
+        <div class="stack">
+          <div class="imgrow">
+            <div class="panel">
+              <div class="tabs"><span class="active">Source</span></div>
+              <div class="panel-body" style="padding:8px;">
+                <div class="thumb"><span class="cap">Source (original)</span></div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="tabs"><span>A</span><span class="active">B</span><span>Mix</span></div>
+              <div class="panel-body" style="padding:8px;">
+                <div class="thumb"><span class="cap">Destination (dithered)</span></div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="tabs"><span class="active">Best</span></div>
+              <div class="panel-body" style="padding:8px;">
+                <div class="thumb mask"><span class="cap">Output (current best)</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">
+              <span><span class="arrow">▾</span>Optimizer Stats</span>
+              <span class="pill good">Phase: Refine</span>
+            </div>
+            <div class="panel-body">
+              <table class="stats">
+                <thead>
+                  <tr><th>Metric</th><th>Value</th><th>Metric</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Elapsed</td><td>18m 42s</td><td>ETA</td><td>~26m 10s</td></tr>
+                  <tr><td>Evaluations</td><td>412,880,204</td><td>Eval/s</td><td>371,204</td></tr>
+                  <tr><td>Best score</td><td>0.021438</td><td>Threads active</td><td>12 / 12</td></tr>
+                  <tr><td>Current mutation</td><td>LineRecolor</td><td>Accept rate</td><td>4.8%</td></tr>
+                </tbody>
+              </table>
+              <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                <span style="font-size:11px;color:var(--ig-text-dim);">Score history</span>
+                <div class="spark">
+                  <i style="height:30px"></i><i style="height:26px"></i><i style="height:24px"></i>
+                  <i style="height:21px"></i><i style="height:19px"></i><i style="height:17px"></i>
+                  <i style="height:15px"></i><i style="height:13px"></i><i style="height:12px"></i>
+                  <i style="height:10px"></i><i style="height:9px"></i><i style="height:8px"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: live tuning -->
+        <div class="stack" style="position:relative;">
+          <div class="panel new">
+            <div class="panel-title"><span><span class="arrow">▾</span>Live Tuning</span><span class="pill new">NEW</span></div>
+            <div class="panel-body">
+              <div class="field">
+                <label>Details floor <span class="val">0.31</span></label>
+                <div class="slider new"><div class="track"><div class="fill" style="width:31%"></div></div><div class="grab" style="left:31%"></div></div>
+              </div>
+              <div class="field">
+                <label>Details strength <span class="val">0.58</span></label>
+                <div class="slider new"><div class="track"><div class="fill" style="width:58%"></div></div><div class="grab" style="left:58%"></div></div>
+              </div>
+              <div class="checkline"><span class="box on"></span> Show mask overlay on Best</div>
+
+              <div style="height:1px;background:var(--ig-border);margin:2px 0;"></div>
+
+              <div class="field">
+                <label>Dual-mode view</label>
+              </div>
+              <div class="row">
+                <div class="btn ghost small">A</div>
+                <div class="btn primary small">B</div>
+                <div class="btn ghost small">Mix</div>
+              </div>
+
+              <div style="height:1px;background:var(--ig-border);margin:2px 0;"></div>
+              <div class="checkline"><span class="box on"></span> Visual objective: source-spatial</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Checkpoints</span></div>
+            <div class="panel-body" style="gap:8px;">
+              <div class="btn ghost small">Save checkpoint now</div>
+              <div style="font-size:11px;color:var(--ig-text-dim);">
+                Last auto-save: 3m ago (evaluations #409,112,880)
+              </div>
+            </div>
+          </div>
+
+          <div class="panel new">
+            <div class="panel-title"><span><span class="arrow">▾</span>Build &amp; Run on Atari</span><span class="pill new">NEW</span></div>
+            <div class="panel-body">
+              <div class="row">
+                <div class="combo"><span>Single (current mode)</span><span class="car">▾</span></div>
+                <div class="btn primary small" style="flex:none;">⚙ Build .xex</div>
+              </div>
+              <div class="console">
+                <div class="dim">mads no_name.asq -o:output.xex</div>
+                <div>144 lines assembled, 0 errors</div>
+                <div>output.xex — 12,304 bytes</div>
+              </div>
+              <div class="build-result">
+                <span class="pill good">Success</span>
+                <span class="path">xex_build/output.xex</span>
+                <span class="glyph" style="cursor:pointer;">Open ▸</span>
+              </div>
+              <div class="checkline"><span class="box on"></span> Auto-open on success</div>
+              <p style="font-size:11px;color:var(--ig-text-dim);line-height:1.5;margin:0;">
+                Builds from the current best in a scratch <code>xex_build/</code>
+                folder (never the installed Generator/ in place). "Open" hands off
+                to whatever's associated with <code>.xex</code> on this machine —
+                best-effort, not guaranteed.
+              </p>
+            </div>
+          </div>
+
+          <div class="callout" style="top:52px; left:-172px;">writes to LiveTunables<br>(atomic, no lock)</div>
+        </div>
+      </div>
+
+      <div class="transport">
+        <div class="btn small">⏸ Pause</div>
+        <div class="btn small">💾 Save (S)</div>
+        <div class="spacer"></div>
+        <span class="pill info">12 workers</span>
+        <div class="btn small" style="border-color:var(--ig-crit);color:#ffb4ae;">■ Stop</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SCREEN 3: EDIT MODE ===================== -->
+  <section class="screen">
+    <div class="screen-label">
+      <span class="tag">edit mode</span>
+      <h2>During run — Paint canvas (Destination)</h2>
+    </div>
+    <p style="color:var(--page-muted);font-size:14px;max-width:74ch;margin:0 0 8px;">
+      Reached by clicking <b>Edit</b> on the Destination or Best-output tab in the
+      dashboard. No off-the-shelf ImGui+SDL3 paint widget covers this
+      (<code>imgui-paint</code> exists but renders through NanoVG — a second
+      rendering backend we don't need; <code>imgui_canvas</code> is a bare
+      shape/masking primitive, not a tool palette) — proposal below is a small
+      custom layer: plain <code>ImDrawList</code> for the toolbar/cursor, a CPU
+      pixel buffer for the canvas (these images top out around 320×240, so
+      Bresenham lines / flood fill / midpoint circles are trivial at this scale),
+      uploaded to the existing <code>SDL_Texture</code> only on stroke-end.
+    </p>
+    <div class="legend">
+      <span><i class="sw-new"></i> Details Mask — tier 3, but only over the stroke's dirty rect: auto-applies on release</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><i style="background:#a78bfa;box-shadow:0 0 0 1px #6b46c1 inset;"></i> Destination — tier 3 over the whole target: staged, needs Apply</span>
+    </div>
+
+    <div class="app">
+      <div class="titlebar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="name">RastaConverter — Editing Destination · test.jpg</div>
+        <div style="width:40px"></div>
+      </div>
+
+      <div style="padding:10px 10px 0;">
+        <div class="paint-toolbar">
+          <div class="grp">
+            <span class="target-toggle">
+              <span class="sel-dest">Destination</span>
+              <span>Details Mask</span>
+            </span>
+          </div>
+          <div class="grp">
+            <div class="tbtn"><span class="glyph">↶</span>Undo</div>
+            <div class="tbtn disabled"><span class="glyph">↷</span>Redo</div>
+          </div>
+          <div class="grp">
+            <div class="tbtn"><span class="glyph">✥</span>Pan</div>
+            <div class="tbtn"><span class="glyph">🔍</span>Zoom 200%</div>
+          </div>
+          <div class="grp">
+            <div class="tbtn active"><span class="glyph">✎</span>Brush</div>
+            <div class="tbtn"><span class="glyph">╱</span>Line</div>
+            <div class="tbtn"><span class="glyph">▭</span>Rect</div>
+            <div class="tbtn"><span class="glyph">▬</span>Rect·fill</div>
+            <div class="tbtn"><span class="glyph">◯</span>Oval</div>
+            <div class="tbtn"><span class="glyph">●</span>Oval·fill</div>
+            <div class="tbtn"><span class="glyph">◨</span>Fill</div>
+            <div class="tbtn"><span class="glyph">⏱</span>Eyedrop</div>
+            <div class="tbtn"><span class="glyph">▧</span>Revert-brush</div>
+          </div>
+          <div class="grp">
+            <div class="tbtn">Size <span class="glyph">3px</span></div>
+            <div class="tbtn">Shape <span class="glyph">■</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-edit">
+        <div class="stack">
+          <div class="canvas-wrap editing-dest">
+            <div class="pixel-canvas">
+              <div class="pixel-grid"></div>
+              <div class="stroke-demo">
+                <div class="blob" style="left:0;top:20px;width:46px;height:8px;transform:rotate(-8deg);"></div>
+                <div class="blob" style="left:40px;top:0;width:22px;height:22px;border-radius:50%;"></div>
+              </div>
+              <div class="brush-cursor"></div>
+            </div>
+          </div>
+          <div class="canvas-statusbar">
+            <span>x=142 y=88</span>
+            <span><span class="swatch-mini" style="background:#a78bfa;"></span> under cursor: idx 34 (162,74,201)</span>
+            <span class="spacer"></span>
+            <span>zoom 200%</span>
+            <span class="pill good" style="margin-left:2px;">Optimizer paused</span>
+          </div>
+
+          <div class="apply-bar">
+            <span class="msg">14 strokes staged since entering edit mode — search is paused and scoring against the <b>last applied</b> destination until you Apply.</span>
+            <div class="btn ghost small">Discard</div>
+            <div class="btn small" style="background:linear-gradient(180deg,#c4b0ff,#8b6ae8);color:#1c1030;border-color:#6b46c1;">Apply &amp; Retarget</div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Color</span></div>
+            <div class="panel-body">
+              <div class="color-pair">
+                <div class="color-stack">
+                  <div class="sw primary" style="background:#a259ff;"></div>
+                  <div class="sw secondary" style="background:#2b3a53;"></div>
+                </div>
+                <div style="font-size:11px;color:var(--ig-text-dim);line-height:1.5;">
+                  <div><span class="mouse-tag">L-click</span> paints primary</div>
+                  <div><span class="mouse-tag">R-click</span> paints secondary</div>
+                </div>
+              </div>
+              <div class="field" style="margin-top:2px;">
+                <label>Snap to hardware palette</label>
+              </div>
+              <div class="checkline"><span class="box on"></span> Restrict picker to atari_ntsc_xl.pal</div>
+              <div class="palette-grid">
+                <span class="sw sel" style="background:#a259ff;"></span>
+                <span class="sw" style="background:#2b3a53;"></span>
+                <span class="sw" style="background:#4a5f86;"></span>
+                <span class="sw" style="background:#7a8fb0;"></span>
+                <span class="sw" style="background:#202b3d;"></span>
+                <span class="sw" style="background:#34455f;"></span>
+                <span class="sw" style="background:#e2934f;"></span>
+                <span class="sw" style="background:#e5534b;"></span>
+                <span class="sw" style="background:#6fcf7c;"></span>
+                <span class="sw" style="background:#57c7ff;"></span>
+                <span class="sw" style="background:#f2a93b;"></span>
+                <span class="sw" style="background:#ece9e2;"></span>
+                <span class="sw" style="background:#17161a;"></span>
+                <span class="sw" style="background:#8b6ae8;"></span>
+                <span class="sw" style="background:#c4b0ff;"></span>
+                <span class="sw" style="background:#0e0f11;"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Snapshots</span></div>
+            <div class="panel-body">
+              <div class="snap-item">
+                <div class="thumb" style="background:linear-gradient(135deg,#2b3a53,#7a8fb0);"></div>
+                <div class="meta"><div class="name">before mask edit</div><div class="when">-12m · eval #398M</div></div>
+                <div class="go">Restore</div>
+              </div>
+              <div class="snap-item">
+                <div class="thumb" style="background:linear-gradient(135deg,#4a5f86,#202b3d);"></div>
+                <div class="meta"><div class="name">sky detail boost</div><div class="when">-4m · eval #405M</div></div>
+                <div class="go">Restore</div>
+              </div>
+              <div class="btn ghost small">＋ Save snapshot now</div>
+              <p style="font-size:11px;color:var(--ig-text-dim);line-height:1.5;margin:0;">
+                Snapshot = destination + mask + objective weights + current best
+                raster program, bundled via the existing checkpoint format.
+                Coarser and rarer than Undo — a save point across the whole
+                session, not a per-stroke step.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen">
+    <div class="screen-label">
+      <span class="tag">edit mode</span>
+      <h2>During run — Painting the details mask</h2>
+    </div>
+    <p style="color:var(--page-muted);font-size:14px;max-width:74ch;margin:0 0 8px;">
+      The other half of paint mode, and the half worth building first. Reached from
+      <b>Overlay ▸ ✎Edit</b> on the dashboard <i>whether or not a mask file was chosen in
+      Setup</i> — the run always owns a mask layer, and an unpainted one is all zeroes,
+      which in legacy mode weighs exactly 1.0 everywhere and so is bit-identical to having
+      no mask at all. The brush paints <b>priority</b>, so there is no colour picker and no
+      palette: a 0–1 strength ramp replaces them, and the eyedropper is hidden rather than
+      disabled. Strokes apply on release — no Apply button — because the rebuild is confined
+      to the pixels the stroke covered.
+    </p>
+
+    <div class="app">
+      <div class="titlebar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="name">RastaConverter — Editing Details Mask · test.jpg</div>
+        <div style="width:40px"></div>
+      </div>
+
+      <div style="padding:10px 10px 0;">
+        <div class="paint-toolbar">
+          <div class="grp">
+            <span class="target-toggle">
+              <span>Destination</span>
+              <span class="sel-mask">Details Mask</span>
+            </span>
+          </div>
+          <div class="grp">
+            <div class="tbtn"><span class="glyph">↶</span>Undo</div>
+            <div class="tbtn disabled"><span class="glyph">↷</span>Redo</div>
+          </div>
+          <div class="grp">
+            <div class="tbtn"><span class="glyph">✥</span>Pan</div>
+            <div class="tbtn"><span class="glyph">🔍</span>Zoom 200%</div>
+          </div>
+          <div class="grp">
+            <div class="tbtn active"><span class="glyph">✎</span>Brush</div>
+            <div class="tbtn"><span class="glyph">╱</span>Line</div>
+            <div class="tbtn"><span class="glyph">▭</span>Rect</div>
+            <div class="tbtn"><span class="glyph">▬</span>Rect·fill</div>
+            <div class="tbtn"><span class="glyph">◯</span>Oval</div>
+            <div class="tbtn"><span class="glyph">●</span>Oval·fill</div>
+            <div class="tbtn"><span class="glyph">◨</span>Fill</div>
+            <div class="tbtn"><span class="glyph">▧</span>Revert-brush</div>
+          </div>
+          <div class="grp">
+            <div class="tbtn">Size <span class="glyph">5px</span></div>
+            <div class="tbtn">Shape <span class="glyph">●</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-edit">
+        <div class="stack">
+          <div class="canvas-wrap editing-mask">
+            <div class="pixel-canvas mask-view">
+              <div class="pixel-grid"></div>
+              <div class="stroke-demo">
+                <div class="blob" style="left:34px;top:10px;width:30px;height:26px;border-radius:50%;"></div>
+                <div class="blob" style="left:28px;top:30px;width:42px;height:12px;border-radius:8px;opacity:.55;"></div>
+              </div>
+              <div class="brush-cursor"></div>
+            </div>
+          </div>
+          <div class="canvas-statusbar">
+            <span>x=142 y=88</span>
+            <span><span class="swatch-mini" style="background:#cfe9ff;"></span> mask 0.80 · err 14.2</span>
+            <span class="spacer"></span>
+            <span>zoom 200%</span>
+            <span class="pill good" style="margin-left:2px;">applied · 6 ms</span>
+          </div>
+
+          <div class="apply-bar" style="border-color:rgba(87,199,255,.45);background:rgba(87,199,255,.08);">
+            <span class="msg" style="color:#bfe9ff;">Stroke applied on release: dirty rect repatched across 128 palette planes,
+              line caches flushed, best re-scored — <b>acceptance history reset to 0.0217</b>, workers resumed.
+              The convergence chart marks the step.</span>
+            <div class="btn ghost small">↶ Undo stroke</div>
+            <div class="btn ghost small">Branch to new run…</div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Brush</span></div>
+            <div class="panel-body">
+              <div class="field"><label>Strength</label></div>
+              <div class="palette-grid" style="grid-template-columns:repeat(8,1fr);">
+                <span class="sw" style="background:#0e0f11;"></span>
+                <span class="sw" style="background:#26292e;"></span>
+                <span class="sw" style="background:#3d424a;"></span>
+                <span class="sw" style="background:#565c66;"></span>
+                <span class="sw" style="background:#727984;"></span>
+                <span class="sw" style="background:#9aa1ac;"></span>
+                <span class="sw sel" style="background:#c6ccd4;"></span>
+                <span class="sw" style="background:#ffffff;"></span>
+              </div>
+              <div style="font-size:11px;color:var(--ig-text-dim);line-height:1.5;">
+                <div><span class="mouse-tag">L-click</span> paints 0.80</div>
+                <div><span class="mouse-tag">R-click</span> paints back towards 0</div>
+              </div>
+              <div class="checkline"><span class="box on"></span> Soft edge (feathered stamp)</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Mask</span><span class="pill new">NEW</span></div>
+            <div class="panel-body">
+              <div class="field"><label>Mode</label><span class="val">legacy ▾</span></div>
+              <div class="field"><label>Strength</label><span class="val">3.00</span></div>
+              <p style="font-size:11px;color:var(--ig-text-dim);line-height:1.5;margin:0;">
+                White areas weigh <b>4.00x</b> the error of black areas (1 + strength).
+                Legacy is additive and local — the only mode where a stroke cannot change
+                the weight of a pixel you did not touch. Normalized and refined renormalize
+                to mean 1, so every stroke demotes the rest of the picture.
+              </p>
+              <div class="field"><label>Overlay</label><span class="val">Off | <b>On</b> | Only</span></div>
+              <div class="field"><label>Opacity</label><span class="val">40%</span></div>
+              <div class="checkline"><span class="box on"></span> Apply to scoring <span style="color:var(--ig-text-dim);">— turned on by painting</span></div>
+              <div class="checkline"><span class="box on"></span> Show error heatmap underneath</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span><span class="arrow">▾</span>Snapshots</span></div>
+            <div class="panel-body">
+              <div class="snap-item">
+                <div class="thumb" style="background:linear-gradient(135deg,#2b3a53,#7a8fb0);"></div>
+                <div class="meta"><div class="name">before mask edit</div><div class="when">auto · eval #398M</div></div>
+                <div class="go">Restore</div>
+              </div>
+              <div class="btn ghost small">＋ Save snapshot now</div>
+              <p style="font-size:11px;color:var(--ig-text-dim);line-height:1.5;margin:0;">
+                Taken automatically before the first stroke after a save, so painting is
+                never destructive. The painted mask itself is saved with the run as
+                <code>OUTPUT-details.png</code> and the recorded command line is rewritten to
+                point at it — which is what makes Continue, Reuse and Recent still mean
+                something once a run has been painted.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="note">
+    <h3>Undo vs. Snapshot — two different safety nets</h3>
+    <p>
+      <b>Undo</b> (Ctrl+Z, toolbar buttons) is per-stroke and scoped to the canvas
+      being edited — cheap, since a full 320×240 buffer copy is ~230&nbsp;KB, so
+      snapshotting the whole buffer before each stroke (rather than diffing) is
+      simplest and still trivial at this resolution. <b>Snapshot</b> is a manual,
+      named restore point spanning the entire conversion state — destination,
+      mask, objective weights, and the current best raster program — reusing the
+      checkpoint format that already backs <code>/resume</code>. Undo protects a
+      brush stroke; Snapshot protects a session.
+    </p>
+  </footer>
+
+  <footer class="note">
+    <h3>What stays exactly as-is</h3>
+    <p>
+      Nogui/console builds, <code>gui.h</code>'s four-primitive contract, and the
+      existing keyboard shortcuts (A/B/M, S/D, Esc) are untouched — the mockups
+      above are what <code>/livegui</code> adds on top, not a replacement path.
+    </p>
+  </footer>
+  <footer class="note">
+    <h3>Smallest slice to prototype first</h3>
+    <p>
+      The <span style="color:#57c7ff;">Live Tuning</span> panel on screen 2 (details
+      floor/strength only) exercises the full new mechanism — ImGui event routing,
+      the <code>LiveTunables</code> atomics, mask-preview regen — in isolation, before
+      building the full setup screen around it.
+    </p>
+  </footer>
+
+</div>

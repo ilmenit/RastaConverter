@@ -32,6 +32,8 @@ struct RunSummary {
 	unsigned long long evaluations = 0;
 	double score = 0.0;       // normalized distance; 0 when unknown
 	bool has_score = false;
+	bool mask_edited = false;
+	unsigned snapshots = 0;
 	std::int64_t modified_time = 0; // for ordering, seconds
 
 	// Set when the run's picture could be read, for the gallery thumbnail.

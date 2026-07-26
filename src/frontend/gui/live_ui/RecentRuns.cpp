@@ -341,6 +341,17 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 					summary.score = std::strtod(score.c_str(), nullptr);
 					summary.has_score = true;
 				}
+				const std::string edited = ValueAfter(line, "; Mask Edited:");
+				if (!edited.empty())
+					summary.mask_edited = edited == "yes";
+				const std::string destinationEdited =
+					ValueAfter(line, "; Destination Edited:");
+				if (!destinationEdited.empty() && destinationEdited == "yes")
+					summary.mask_edited = true;
+				const std::string snapshots = ValueAfter(line, "; Snapshots:");
+				if (!snapshots.empty())
+					summary.snapshots = static_cast<unsigned>(
+						std::strtoul(snapshots.c_str(), nullptr, 10));
 			}
 		}
 

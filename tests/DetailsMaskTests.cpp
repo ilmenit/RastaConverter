@@ -31,6 +31,29 @@ int main(int argc, char** argv)
 {
 	Require(argc == 2 || argc == 3,
 		"test requires a temporary output path and optional real mask");
+	DetailsMask neutral;
+	neutral.InitializeNeutral(4, 3);
+	Require(!neutral.Empty(), "a neutral live mask must still own its pixels");
+	Require(neutral.Width() == 4 && neutral.Height() == 3,
+		"neutral live mask dimensions must match the target");
+	for (unsigned y = 0; y < neutral.Height(); ++y)
+		for (unsigned x = 0; x < neutral.Width(); ++x) {
+			Require(neutral.At(x, y) == 0, "neutral mask bytes must be zero");
+			Require(ApplyLegacyDetailsWeight(1234, neutral.At(x, y), 9.0) == 1234,
+				"neutral live mask must be bit-identical to no mask");
+		}
+	const std::string neutralHash = neutral.EffectiveHash();
+	Require(neutral.SetEditableValue(2, 1, 200), "painting must change a mask byte");
+	Require(!neutral.SetEditableValue(2, 1, 200),
+		"painting the existing value must be a no-op");
+	Require(neutral.RebuildLegacy(), "edited legacy mask must rebuild");
+	Require(neutral.EffectiveHash() != neutralHash,
+		"paint must change the effective mask hash");
+	Require(ApplyLegacyDetailsWeight(100, neutral.At(2, 1), 1.0) > 100,
+		"painted pixels must receive more error weight");
+	Require(!neutral.SetEditableValue(99, 99, 1),
+		"out-of-bounds paint must be rejected");
+
 	const std::string path = argv[1];
 	FIBITMAP* bitmap = FreeImage_Allocate(2, 2, 32);
 	Require(bitmap != nullptr, "synthetic RGBA mask must allocate");
@@ -81,6 +104,22 @@ int main(int argc, char** argv)
 		"normalized effective weights must have fixed mean one");
 	Require(mask.WeightAt(1, 0) > mask.WeightAt(0, 1),
 		"linear-light white priority must exceed black priority");
+	Require(mask.SetEditableValue(0, 1, 160),
+		"normalized masks must expose an editable source layer");
+	Require(mask.RebuildNormalized(1.0, 0.25, 0),
+		"normalized edits must rebuild effective weights");
+	const std::string editedNormalizedHash = mask.EffectiveHash();
+	const std::string editablePath = path + "-editable.png";
+	Require(mask.SaveEditableLayer(editablePath, &error),
+		"normalized editable source must save");
+	DetailsMask normalizedReload;
+	Require(normalizedReload.LoadEditableLayer(editablePath, 2, 2, &error)
+		&& normalizedReload.RebuildNormalized(1.0, 0.25, 0),
+		"saved normalized source must reload");
+	Require(normalizedReload.EditableAt(0, 1) == 160,
+		"normalized editable bytes must round-trip through PNG");
+	Require(normalizedReload.EffectiveHash() == editedNormalizedHash,
+		"normalized effective metric must be stable across save and reload");
 
 	// Degenerate all-zero-weight input (floor=0, strength=0) must not divide
 	// by a zero mean/max and produce NaN/UB when cast to unsigned char.
@@ -96,6 +135,8 @@ int main(int argc, char** argv)
 				"degenerate mask byte values must be well-defined, not UB from a NaN cast");
 		}
 
+	Require(mask.LoadNormalized(path, 2, 2, 1.0, 0.25, 0, &error),
+		"original normalized mask must reload after edit round-trip test");
 	const std::string sourceHash = mask.SourceHash();
 	const std::string effectiveHash = mask.EffectiveHash();
 	Require(sourceHash.size() == 16 && effectiveHash.size() == 16,

@@ -7,11 +7,14 @@
 // stage, a shared zoom/pan state across stages, and the three comparison modes.
 
 #include <cstdint>
+#include <unordered_map>
+#include <vector>
 #include <string>
 
 #include <imgui.h>
 
 #include "TargetPreview.h"
+#include "gui.h"
 
 struct SDL_Renderer;
 struct SDL_Texture;
@@ -20,6 +23,17 @@ namespace rc_live_ui {
 
 class ImageViewer {
 public:
+	enum class PaintTool {
+		Brush,
+		Line,
+		Rectangle,
+		FilledRectangle,
+		Ellipse,
+		FilledEllipse,
+		Fill,
+		Eyedropper,
+		RevertBrush,
+	};
 	enum class Compare {
 		Off,
 		Split, // vertical wipe, dragged with the mouse
@@ -57,12 +71,34 @@ public:
 	// Supplies the details-mask overlay. An invalid image removes it, and the
 	// control disappears with it.
 	void SetMask(const PreviewImage& mask);
+	void SetEditableMask(const std::vector<unsigned char>& values);
+	void SetDestinationLayer(const std::vector<unsigned char>& values,
+		int width, int height);
+	void SetDestinationPainting(bool enabled);
+	void ResetDestinationEdits();
+	GuiMaskStroke DestinationChanges() const;
+	const std::vector<unsigned char>& DestinationValues() const {
+		return destination_painting_ ? mask_values_ : destination_values_;
+	}
+	void SetMaskPainting(bool enabled, PaintTool tool, int radius,
+		unsigned char value, unsigned char secondary_value = 0);
+	void ApplyMaskStroke(const GuiMaskStroke& stroke);
+	bool TakeMaskStroke(GuiMaskStroke& stroke);
+	bool TakeSampledValue(unsigned char& value);
 
 	bool has_content() const { return content_valid_; }
 
 private:
 	void DrawToolbar();
 	void DrawCanvas();
+	void PaintPixel(int x, int y, unsigned char value, bool revert);
+	void PaintAt(int x, int y, unsigned char value, bool revert = false);
+	void PaintLine(int x0, int y0, int x1, int y1, unsigned char value,
+		bool revert = false);
+	void PaintShape(int x0, int y0, int x1, int y1, unsigned char value);
+	void FloodFill(int x, int y, unsigned char value);
+	void FinishMaskStroke();
+	void UploadMaskValues();
 	void DrawPaletteReadout();
 	// Ensures a texture of the right size exists in `slot` and uploads pixels.
 	void UploadStage(int slot, const PreviewImage& image);
@@ -79,10 +115,32 @@ private:
 	SDL_Texture* mask_texture_ = nullptr;
 	int mask_width_ = 0;
 	int mask_height_ = 0;
+	std::vector<unsigned char> mask_values_;
+	std::vector<unsigned char> mask_original_values_;
+	std::vector<unsigned char> stored_mask_values_;
+	std::vector<unsigned char> stored_mask_original_values_;
+	std::vector<unsigned char> destination_values_;
+	std::vector<unsigned char> destination_original_values_;
+	bool destination_painting_ = false;
+	bool mask_painting_enabled_ = false;
+	PaintTool mask_paint_tool_ = PaintTool::Brush;
+	int mask_brush_radius_ = 3;
+	unsigned char mask_brush_value_ = 192;
+	unsigned char mask_secondary_value_ = 0;
+	bool mask_stroke_active_ = false;
+	int last_paint_x_ = -1;
+	int last_paint_y_ = -1;
+	int stroke_start_x_ = -1;
+	int stroke_start_y_ = -1;
+	unsigned char mask_stroke_value_ = 0;
+	std::unordered_map<size_t, GuiMaskPixelChange> active_mask_changes_;
+	GuiMaskStroke completed_mask_stroke_;
+	int sampled_value_ = -1;
 
 	// How the mask is shown over the picture.
 	enum class MaskView { Off, Overlay, Only };
 	MaskView mask_view_ = MaskView::Overlay;
+	MaskView stored_mask_view_ = MaskView::Overlay;
 	// Percent, because that is what the slider shows; ImGui does not scale a
 	// 0..1 value for a "%%" format and rendered 0.55 as "1%".
 	float mask_opacity_percent_ = 40.0f;

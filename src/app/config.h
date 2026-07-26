@@ -71,6 +71,7 @@ struct Configuration {
 	std::string output_file;
 	std::string palette_file;
 	std::string details_file;
+	std::string target_file;
 	std::string command_line;
 	std::string on_off_file;
 
@@ -91,6 +92,7 @@ struct Configuration {
 	unsigned details_feather = 1;
 	double details_refine_mix = 0.5;
 	bool details_score = true;
+	bool details_layer = false; // /details is a persisted target-space edit layer
 	bool details_allocate = false;
 	unsigned details_global_period = 5;
 
