@@ -3,6 +3,22 @@ RastaConverter – Build Guide
 
 This guide explains how to build RastaConverter on Windows, macOS, and Linux using the provided scripts or CMake directly. It uses a system‑first dependency resolution with fast Release builds by default.
 
+Live UI
+-------
+GUI builds include the Dear ImGui setup screen and dashboard by default:
+
+```sh
+cmake -S . -B build
+cmake --build build --config Release
+```
+
+Launch the binary without arguments to open interactive setup. `/livegui` (or
+`--livegui`) explicitly selects it when other arguments are present. Ordinary
+command-line conversions continue to use the existing SDL interface. Pass
+`-DENABLE_LIVE_UI=OFF` (or `noliveui` to a build wrapper) to omit Dear ImGui.
+Console-only builds disable it automatically and do not fetch or compile GUI
+dependencies.
+
 Requirements
 ------------
 - CMake 3.21+
@@ -18,32 +34,35 @@ Requirements
 Dependencies
 ------------
 - FreeImage
-- SDL2
-- SDL2_ttf
+- SDL3
+- SDL3_ttf
+- Dear ImGui (Live UI only; fetched and built automatically by CMake, nothing to install)
 
 The build prefers system-installed packages first (find_package). If configs are not present, it falls back to module variables and finally to manual header/library discovery using optional hints from `config.env`.
+
+If SDL3 and/or SDL3_ttf still cannot be found after all of that (a common case: a distro ships an SDL3 package but not SDL3_ttf, or vice versa), the GUI build automatically fetches and builds the missing piece from source via CMake `FetchContent` — no manual install is required to get a working GUI build. The fetched SDL3_ttf build vendors its own FreeType (harfbuzz/plutosvg disabled, since RastaConverter only renders plain stats text), so it needs no extra system devel packages either. This only kicks in for whichever piece is actually missing — e.g. if SDL3 is found on the system but SDL3_ttf is not, only SDL3_ttf is fetched. Force a from-source build of either regardless of what's installed with `-DFETCH_SDL3=ON` / `-DFETCH_SDL3_TTF=ON` (useful if `find_package` picks up a broken or mismatched install). The console-only (`nogui`/`BUILD_NO_GUI=ON`) build needs neither SDL3 nor SDL3_ttf and never fetches anything.
 
 Installing dependencies
 -----------------------
 - Ubuntu/Debian
-  - `sudo apt install libfreeimage-dev libsdl2-dev libsdl2-ttf-dev`
+  - `sudo apt install libfreeimage-dev libsdl3-dev libsdl3-ttf-dev` (where SDL3 packages are available in the configured repositories)
 - Fedora
-  - `sudo dnf install FreeImage-devel SDL2-devel SDL2_ttf-devel`
+  - Install the FreeImage, SDL3, and SDL3_ttf development packages for your distribution.
 - Arch
-  - `sudo pacman -S freeimage sdl2 sdl2_ttf`
+  - `sudo pacman -S freeimage sdl3 sdl3_ttf`
 - macOS (Homebrew)
-  - `brew install freeimage sdl2 sdl2_ttf`
+  - `brew install freeimage sdl3 sdl3_ttf`
 - Windows
   - Recommended: vcpkg with the provided `vcpkg.json`
-  - Or vendor SDKs for FreeImage/SDL2/SDL2_ttf and set `FREEIMAGE_DIR`, `SDL2_DIR`, `SDL2_TTF_DIR`
+  - Or vendor SDKs for FreeImage/SDL3/SDL3_ttf and set `FREEIMAGE_DIR`, `SDL3_DIR`, `SDL3_TTF_DIR`
 
 Optional: config.env
 --------------------
 Create a `config.env` at the project root to provide hints:
 ```
 FREEIMAGE_DIR=d:/libs/FreeImage
-SDL2_DIR=d:/libs/SDL2
-SDL2_TTF_DIR=d:/libs/SDL2_ttf
+SDL3_DIR=d:/libs/SDL3
+SDL3_TTF_DIR=d:/libs/SDL3_ttf
 ```
 These values are added to `CMAKE_PREFIX_PATH` and used as fallbacks for manual header/library discovery.
 
@@ -66,7 +85,7 @@ build.bat
 # Debug:
 build.bat debug
 
-# Console-only (no SDL2/GUI):
+# Console-only (no SDL3/GUI):
 build.bat nogui
 
 # Clean or clean only:
@@ -157,12 +176,14 @@ Release performance options
 Troubleshooting tips
 --------------------
 - Configuration failed:
-  - Add hints via `config.env` (FREEIMAGE_DIR, SDL2_DIR, SDL2_TTF_DIR)
+  - Add hints via `config.env` (FREEIMAGE_DIR, SDL3_DIR, SDL3_TTF_DIR)
   - Install packages (see above)
   - Use vcpkg toolchain with the provided `vcpkg.json`
   - Run `cmake -P check_dependencies.cmake` for a discovery report
-- Cannot find SDL2main (Windows):
-  - It’s optional; ensure SDL2 import library location is visible (e.g., SDL2/lib/x64)
+- Cannot find SDL3 (Windows):
+  - Ensure the SDL3 import library location is visible (for example `SDL3/lib/x64`).
+- Cannot find SDL3_ttf on Linux/macOS (e.g. distro ships SDL3 but not SDL3_ttf devel packages):
+  - No action needed — the GUI build now auto-fetches and builds SDL3_ttf from source the first time (adds a few minutes to a clean build; cached afterward). Pass `-DFETCH_SDL3_TTF=ON` to force this even if a system copy exists, or install the system package to skip the from-source build entirely.
 - AVX2 unsupported on target CPU:
   - Use `*-release-legacy` presets or pass `-DENABLE_AVX2=OFF`
 - LTO issues with specific toolchains:
@@ -177,9 +198,31 @@ Installs the binary in `bin/` and resources/docs in `share/`.
 
 Notes
 -----
-- With `-DBUILD_NO_GUI=ON` (or `nogui` in wrappers), the build is console-only: target `RastaConverter-NO_GUI` is produced and SDL2/SDL2_ttf discovery/linking is skipped.
-- Without NO_GUI the default GUI target `RastaConverter` is built and SDL2/SDL2_ttf are required.
+- With `-DBUILD_NO_GUI=ON` (or `nogui` in wrappers), the build is console-only: target `RastaConverter-NO_GUI` is produced and SDL3/SDL3_ttf discovery/linking is skipped.
+- Without NO_GUI the default GUI target `RastaConverter` is built and SDL3/SDL3_ttf are required.
+- The wrappers keep GUI and console configurations in separate sibling trees.
+  Production pairs are `build/linux-gcc{,-nogui}` on Linux,
+  `build/macos-clang{,-nogui}` on macOS, and
+  `build/x64-release{,-nogui}` on Windows. Platform-specific trees should be
+  generated on their corresponding host rather than kept as empty placeholders.
 - Clear build summaries are printed with dependency resolution info.
+
+Generate Atari executables
+--------------------------
+After a conversion has produced the generator inputs, assemble the single- or
+dual-frame XEX with the platform wrapper:
+
+```bash
+# macOS arm64 or Linux x86-64
+Generator/build.sh
+GeneratorDual/build.sh
+```
+
+On Windows, run `Generator\build.bat` or `GeneratorDual\build.bat`. The Unix
+`mads` launchers select separate bundled macOS arm64 and Linux x86-64 binaries;
+the batch files invoke the bundled 32-bit Windows `mads.exe` by absolute local
+path. Unsupported host architectures fail explicitly. See
+`Generator/README.md` for binary provenance and checksums.
 
 Profile-guided optimization (PGO)
 ---------------------------------
@@ -269,7 +312,7 @@ PGO for Intel oneAPI icx (Windows) – LLVM-style (recommended)
 Prerequisites
 - Run from an Intel oneAPI Developer Command Prompt (so that `icx` and `llvm-profdata` are on PATH), or run the oneAPI environment script first:
   - `"C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64`
-- On Windows (Ninja), ensure required runtime DLLs are next to the executable. The build can copy them automatically if you pass `-DCOPY_ALL_RUNTIME_DLLS=ON` or if you maintain a `dlls/` directory at the repo root containing `FreeImage.dll`, `SDL2.dll`, `SDL2_ttf.dll` (copied post-build).
+- On Windows (Ninja), ensure required runtime DLLs are next to the executable. Prefer automatic copying with `-DCOPY_ALL_RUNTIME_DLLS=ON`. A repo-root `dlls/` directory can also stage host-validated current `FreeImage.dll`, `SDL3.dll`, and `SDL3_ttf.dll` files for post-build copying. The obsolete bundled DLLs were intentionally removed and must not be treated as available until replacements are validated on Windows.
 - If you keep a `test.jpg` in the repo root, it will be copied to the run directory as well.
 
 Using presets (recommended)
@@ -301,7 +344,7 @@ Details:
 - Phase 3 (optimized build) includes additional performance optimizations:
   - **LTO**: `-flto` (Ninja) or `-Qipo` (Visual Studio) for Link Time Optimization
   - **CPU Tuning**: `-xHost` (Ninja) or `-QxHost` (Visual Studio) for optimal CPU-specific optimizations
-  - **LAHC Scaling**: Solutions count scales with thread count (`/s=1` for 1 thread, `/s=5000` for 4 threads, `/s=50000` for 8 threads)
+  - **Optimizer parameters**: history length (`/s`) is a search-quality parameter, not a compiler or thread-count scaling rule. Values must be selected from benchmark and visual-review evidence; the example run used for PGO training is not a quality recommendation.
 - Alternative with wrapper (PowerShell):
 ```
 ./build.ps1 -Preset ninja-pgo-icx-gen -Config Release -Extra -DCOPY_ALL_RUNTIME_DLLS=ON
@@ -366,5 +409,3 @@ General guidance
 - Prefer training the console binary for automation: add `-Extra -DBUILD_NO_GUI=ON` at configure time, then run `RastaConverter-NO_GUI` with realistic CLI options.
 - Store profiles under `pgo/` in the repo root for easy cleanup and repeatability.
 - Do not mix compilers or change major compile options between phases.
-
-

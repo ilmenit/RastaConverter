@@ -1,5 +1,6 @@
 @echo off
 setlocal ENABLEDELAYEDEXPANSION
+set "SOURCE_DIR=%~dp0"
 
 echo === RastaConverter Build (Windows) ===
 
@@ -21,6 +22,7 @@ set PRESET=x64-release
 set CONFIG=Release
 set CHECK_DEPS=0
 set BUILD_NO_GUI=0
+set ENABLE_LIVE_UI=1
 set CLEAN=0
 set CLEANONLY=0
 set EXTRA_CMAKE_ARGS=
@@ -50,10 +52,12 @@ if /I "%~1"=="clang-cl" ( set COMPILER=clang-cl & shift & goto parse_args )
 if /I "%~1"=="gcc" ( set COMPILER=gcc & shift & goto parse_args )
 if /I "%~1"=="mingw" ( set COMPILER=gcc & shift & goto parse_args )
 if /I "%~1"=="icx" ( set COMPILER=icx & shift & goto parse_args )
-if /I "%~1"=="nogui" ( set BUILD_NO_GUI=1 & shift & goto parse_args )
+if /I "%~1"=="nogui" ( set BUILD_NO_GUI=1 & set ENABLE_LIVE_UI=0 & shift & goto parse_args )
+if /I "%~1"=="liveui" ( set ENABLE_LIVE_UI=1 & shift & goto parse_args )
+if /I "%~1"=="noliveui" ( set ENABLE_LIVE_UI=0 & shift & goto parse_args )
 if /I "%~1"=="check" ( set CHECK_DEPS=1 & shift & goto parse_args )
 if /I "%~1"=="CLEAN" ( set CLEAN=1 & shift & goto parse_args )
-if /I "%~1"=="CLEANONLY" ( set CLEANONLY=1 & shift & goto parse_args )
+if /I "%~1"=="CLEANONLY" ( set CLEAN=1 & set CLEANONLY=1 & shift & goto parse_args )
 
 REM Accumulate extra -D options and other passthrough args
 set "ARG=%~1"
@@ -94,7 +98,7 @@ if /I "%COMPILER%"=="icx" (
 
 if %CHECK_DEPS% EQU 1 (
     echo [info] Checking dependencies...
-    cmake -P check_dependencies.cmake
+    cmake -P "%SOURCE_DIR%check_dependencies.cmake"
     echo.
 )
 
@@ -105,6 +109,7 @@ if %BUILD_NO_GUI% EQU 1 (
 ) else (
     echo [info] Building GUI
 )
+echo [info] Live UI: %ENABLE_LIVE_UI%
 
 REM Show compiler information
 if defined COMPILER (
@@ -119,28 +124,39 @@ if not "%EXTRA_CMAKE_ARGS%"=="" (
 )
 
 REM Configure
-set CFG_ARGS=--preset %PRESET%
-if %BUILD_NO_GUI% EQU 1 set CFG_ARGS=%CFG_ARGS% -DBUILD_NO_GUI=ON
+set BINARY_DIR=%SOURCE_DIR%build\%PRESET%
+if %BUILD_NO_GUI% EQU 1 set BINARY_DIR=%BINARY_DIR%-nogui
+set CFG_ARGS=--preset %PRESET% -B "%BINARY_DIR%"
+set CFG_ARGS=%CFG_ARGS% -DBUILD_NO_GUI=%BUILD_NO_GUI% -DENABLE_LIVE_UI=%ENABLE_LIVE_UI%
+if defined VCPKG_ROOT (
+    if exist "%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" (
+        set CFG_ARGS=%CFG_ARGS% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_FEATURE_FLAGS=manifests
+    )
+)
 if not "%EXTRA_CMAKE_ARGS%"=="" set CFG_ARGS=%CFG_ARGS% %EXTRA_CMAKE_ARGS%
 
 if %CLEAN% EQU 1 (
-    set BINARY_DIR=build\%PRESET%
     if exist "%BINARY_DIR%" (
         echo [info] CLEAN requested: removing %BINARY_DIR%
         rmdir /s /q "%BINARY_DIR%"
     )
 )
 
+if %CLEANONLY% EQU 1 (
+    echo [success] CLEANONLY: %BINARY_DIR% has been removed.
+    goto end
+)
+
 echo [info] Configuring project...
 REM Pin source dir to avoid stray args being interpreted as a source path
-cmake -S . %CFG_ARGS%
+cmake -S "%SOURCE_DIR%" %CFG_ARGS%
 if %errorlevel% neq 0 (
     echo [error] Configuration failed.
     echo [hint] Try one of the following:
-    echo   - Provide paths in config.env: FREEIMAGE_DIR, SDL2_DIR, SDL2_TTF_DIR
+    echo   - Provide paths in config.env: FREEIMAGE_DIR, SDL3_DIR, SDL3_TTF_DIR
     echo   - OR install system packages:
-    echo       Ubuntu:   sudo apt install libfreeimage-dev libsdl2-dev libsdl2-ttf-dev
-    echo       macOS:    brew install freeimage sdl2 sdl2_ttf
+    echo       Ubuntu:   sudo apt install libfreeimage-dev libsdl3-dev libsdl3-ttf-dev
+    echo       macOS:    brew install freeimage sdl3 sdl3_ttf
     echo       Windows:  use vcpkg or vendor SDKs
     echo   - With vcpkg: set VCPKG_ROOT then pass toolchain, e.g.:
     echo       cmake --preset %PRESET% -DCMAKE_TOOLCHAIN_FILE="%%VCPKG_ROOT%%\scripts\buildsystems\vcpkg.cmake"
@@ -148,19 +164,12 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-if %CLEANONLY% EQU 1 (
-    echo [info] CLEANONLY requested, exiting after configure.
-    echo [info] Detected compiler information:
-    cmake -LA -N build\%PRESET% 2>nul | findstr /i "CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_BUILD_TYPE ENABLE_"
-    goto end
-)
-
 REM Show actual compiler being used (after configuration)
 echo [info] Detected compiler information:
-cmake -LA -N build\%PRESET% 2>nul | findstr /i "CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_BUILD_TYPE ENABLE_"
+cmake -LA -N "%BINARY_DIR%" 2>nul | findstr /i "CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_BUILD_TYPE ENABLE_"
 
 echo [info] Building project...
-cmake --build --preset %PRESET% --config %CONFIG%
+cmake --build "%BINARY_DIR%" --config %CONFIG%
 if %errorlevel% neq 0 (
     echo [error] Build failed. See errors above.
     exit /b 1
@@ -168,9 +177,9 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [success] Build completed successfully.
-echo [hint] Artifacts are in build\%PRESET%\%CONFIG%\
+echo [hint] Artifacts are in %BINARY_DIR%\%CONFIG%\
 if %BUILD_NO_GUI% EQU 1 (
-    echo [hint] Console binary: build\%PRESET%\%CONFIG%-NO_GUI\RastaConverter-NO_GUI.exe
+    echo [hint] Console binary: %BINARY_DIR%\%CONFIG%-NO_GUI\RastaConverter-NO_GUI.exe
 )
 
 goto end
@@ -180,18 +189,17 @@ echo Usage: build.bat [options]
 echo   debug ^| release           Choose configuration (default: release)
 echo   x86 ^| x64 ^| ninja        Choose generator/arch preset
 echo   msvc ^| clang ^| clang-cl ^| gcc ^| icx  Optional compiler selector
-echo   nogui                      Also build console version
+echo   nogui                      Build the console-only version
+echo   liveui ^| noliveui         Enable/disable Dear ImGui UI (default: enabled)
 echo   check                      Check dependencies
 echo   CLEAN ^| CLEANONLY         Clean build directory
 echo   -DVAR=VALUE ...            Extra CMake cache options
 echo.
 echo Tips:
-echo   - Provide FREEIMAGE_DIR/SDL2_DIR/SDL2_TTF_DIR in config.env or env vars to hint discovery
+echo   - Provide FREEIMAGE_DIR/SDL3_DIR/SDL3_TTF_DIR in config.env or env vars to hint discovery
 echo   - Selecting non-MSVC compiler auto-uses Ninja preset; ensure compilers are on PATH
 echo   - Or install via vcpkg/homebrew/apt and add the toolchain when desired
 echo   - Set debug_build=1 for verbose script debug
 
 :end
 endlocal
-
-

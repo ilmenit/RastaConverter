@@ -29,6 +29,12 @@ struct insn_sequence
 class insn_sequence_cache
 {
 public:
+	// Sized so a full-budget cache (tens of thousands of interned sequences,
+	// see Evaluator.h k_instruction_cache_budget_divisor) keeps chains short;
+	// insert() below does a full linear scan per chain on every mutation
+	// candidate, so bucket count directly bounds that scan's cost.
+	static const int HTSIZE = 32768;
+
 	struct hash_block
 	{
 		static const int N = 63;
@@ -50,7 +56,7 @@ public:
 
 	void clear()
 	{
-		for(int i=0; i<1024; ++i)
+		for(int i=0; i<HTSIZE; ++i)
 		{
 			hash_table[i].first = NULL;
 			hash_table[i].offset = 0;
@@ -59,7 +65,7 @@ public:
 
 	const insn_sequence *insert(const insn_sequence& key, linear_allocator& alloc)
 	{
-		hash_chain& hc = hash_table[key.hash & 1023];
+		hash_chain& hc = hash_table[key.hash & (HTSIZE - 1)];
 		hash_block *hb = hc.first;
 		int hbidx = hc.offset;
 		int hbidx2 = hbidx;
@@ -79,7 +85,7 @@ public:
 
 		if (!hb || hbidx >= hash_block::N)
 		{
-			hash_block *hb2 = alloc.allocate<hash_block>();
+			hash_block *hb2 = alloc.allocate<hash_block>(linear_allocator::INSN_CACHE_HASH_BLOCK);
 			memset(hb2, 0, sizeof *hb2);
 			hb2->next = hb;
 			hc.first = hb2;
@@ -92,7 +98,8 @@ public:
 		SRasterInstruction *ri = NULL;
 		
 		if (key.insn_count) {
-			ri = (SRasterInstruction *)alloc.allocate(sizeof(SRasterInstruction) * key.insn_count);
+			ri = (SRasterInstruction *)alloc.allocate(
+				sizeof(SRasterInstruction) * key.insn_count, linear_allocator::INSN_CACHE_DATA);
 			memcpy(ri, key.insns, sizeof(SRasterInstruction) * key.insn_count);
 		}
 
@@ -105,7 +112,7 @@ public:
 	}
 
 private:
-	hash_chain hash_table[1024];
+	hash_chain hash_table[HTSIZE];
 };
 
 #endif

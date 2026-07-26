@@ -20,6 +20,7 @@ const char* program_version = RASTA_CONVERTER_VERSION;
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <iomanip>
 #include <memory>
 #include "FreeImage.h"
 
@@ -50,12 +51,15 @@ const char* program_version = RASTA_CONVERTER_VERSION;
 #include <random>
 
 #include "rasta.h"
+#include "ColorCorrection.h"
 #include "prng_xoroshiro.h"
 #include "LinearAllocator.h"
 #include "LineCache.h"
 #include "Program.h"
 #include "Evaluator.h"
+#include "StructuredSolver.h"
 #include "TargetPicture.h"
+#include "TargetBuilder.h"
 #include "debug_log.h"
 
 #ifndef _MSC_EXTENSIONS
@@ -72,6 +76,9 @@ unsigned char FindAtariColorIndex( const rgb& col );
 
 // global variables
 int solutions=1;
+
+// Defined below; used by the dithering path before its definition.
+double random_plus_minus(double val);
 
 bool quiet=false;
 
@@ -100,6 +107,7 @@ void RastaConverter::Message(std::string message)
 	string current_time = ctime(&t);
 	current_time = current_time.substr(0, current_time.length() - 1);
 	DBG_PRINT("[RASTA] %s", message.c_str());
+	m_last_message = message;
 	gui.DisplayText(0, 450, current_time + string(": ") + message + string("                    "));
 }
 
@@ -129,7 +137,23 @@ set < unsigned char > color_indexes_on_dst_picture;
 
 OnOffMap on_off;
 
-Evaluator eval;
+// Clears the process-global state that would otherwise leak from one
+// conversion into the next when several are run in a single process.
+//
+// The rest of the globals are safe by construction and are listed here so the
+// next person does not have to re-derive it:
+//   atari_palette, distance_function - rewritten wholesale by LoadAtariPalette
+//     and SetDistanceFunction at the start of every run.
+//   on_off - memset to all-true by LoadOnOffFile, and only handed to the
+//     evaluator when cfg.on_off_file is set, so stale ranges cannot apply.
+//   solutions - reassigned by Configuration::Process from the command line.
+// color_indexes_on_dst_picture is the exception: it accumulates, and it decides
+// both the low-colour initializer and the low-colour warning.
+void ResetProcessGlobalsForNewRun()
+{
+	color_indexes_on_dst_picture.clear();
+}
+
 
 const char *mem_regs_names[E_TARGET_MAX+1]=
 {
@@ -447,6 +471,23 @@ bool RastaConverter::LoadInputBitmap()
 	FreeImage_AdjustBrightness(input_bitmap,cfg.brightness);
 	FreeImage_AdjustContrast(input_bitmap,cfg.contrast);
 	FreeImage_AdjustGamma(input_bitmap,cfg.gamma);
+	if (cfg.saturation != 0 || cfg.vibrance != 0) {
+		const unsigned width = FreeImage_GetWidth(input_bitmap);
+		const unsigned height = FreeImage_GetHeight(input_bitmap);
+		for (unsigned y = 0; y < height; ++y) {
+			BYTE* row = FreeImage_GetScanLine(input_bitmap, y);
+			for (unsigned x = 0; x < width; ++x) {
+				const unsigned offset = x * 3;
+				const rasta::RGB8 adjusted = rasta::AdjustSaturationAndVibrance(
+					{row[offset + FI_RGBA_RED], row[offset + FI_RGBA_GREEN],
+					 row[offset + FI_RGBA_BLUE]},
+					cfg.saturation, cfg.vibrance);
+				row[offset + FI_RGBA_RED] = adjusted.r;
+				row[offset + FI_RGBA_GREEN] = adjusted.g;
+				row[offset + FI_RGBA_BLUE] = adjusted.b;
+			}
+		}
+	}
 
 	FreeImage_FlipVertical(input_bitmap);
 
@@ -494,37 +535,43 @@ void RastaConverter::InitLocalStructure()
 void RastaConverter::LoadDetailsMap()
 {
 	Message("Loading details map");
-	FIBITMAP *fbitmap = FreeImage_Load(FreeImage_GetFileType(cfg.details_file.c_str()), cfg.details_file.c_str(), 0);
-	if (!fbitmap)
-		Error(string("Error loading details file: ") + cfg.details_file);
-	fbitmap=FreeImage_Rescale(fbitmap,cfg.width,cfg.height,FILTER_BOX);
-	fbitmap = FreeImage_ConvertTo24Bits(fbitmap);	
-
-	FreeImage_FlipVertical(fbitmap);
-
-	RGBQUAD fpixel;
-
-	int x,y;
-
-	details_data.resize(m_height);	
-	for (y=0;y<m_height;++y)
+	string error;
+	bool loaded = false;
+	if (cfg.details_mode == "refined")
+		loaded = details_mask.LoadRefined(cfg.details_file, m_width, m_height,
+			m_picture_original.data(), cfg.details_strength, cfg.details_floor,
+			cfg.details_feather, cfg.details_refine_mix, &error);
+	else if (cfg.details_mode == "normalized")
+		loaded = details_mask.LoadNormalized(cfg.details_file, m_width, m_height,
+			cfg.details_strength, cfg.details_floor, cfg.details_feather, &error);
+	else
+		loaded = details_mask.LoadLegacy(cfg.details_file, m_width, m_height, &error);
+	if (!loaded)
+		Error(error);
+	Message("Details source hash: " + details_mask.SourceHash()
+		+ "; effective hash: " + details_mask.EffectiveHash());
+	// Hand the effective map to the GUI so the run can show what it weights.
+	if (!details_mask.Empty())
 	{
-		details_data[y].resize(m_width);
-
-		for (x=0;x<m_width;++x)
-		{
-			FreeImage_GetPixelColor(fbitmap, x, y, &fpixel);
-			// average as brightness
-			details_data[y][x]=(unsigned char) ( (int) ( (int)fpixel.rgbRed + (int)fpixel.rgbGreen + (int)fpixel.rgbBlue)/3);
-			fpixel.rgbRed = details_data[y][x];
-			fpixel.rgbGreen = details_data[y][x];
-			fpixel.rgbBlue = details_data[y][x];
-			if ((x+y)%2==0)
-				FreeImage_SetPixelColor(destination_bitmap, x, y, &fpixel);
-		}
-		ShowDestinationBitmap();
+		GuiDetailsMask published;
+		published.values = details_mask.Values().data();
+		published.width = static_cast<int>(details_mask.Width());
+		published.height = static_cast<int>(details_mask.Height());
+		gui.PublishDetailsMask(published);
 	}
-	FreeImage_Unload(fbitmap);
+	if (cfg.continue_processing && cfg.details_score
+		&& !m_saved_details_effective_hash.empty()
+		&& m_saved_details_effective_hash != details_mask.EffectiveHash())
+	{
+		cfg.resume_objective_changed = true;
+		m_needs_history_reconfigure = true;
+		Message("Details map changed; rebuilding acceptance history.");
+	}
+	if (cfg.details_mode != "legacy")
+	{
+		const string preview = cfg.output_file + "-details-effective.png";
+		if (!details_mask.SaveEffectivePreview(preview, &error)) Error(error);
+	}
 };
 
 void RastaConverter::GeneratePictureErrorMap()
@@ -532,10 +579,11 @@ void RastaConverter::GeneratePictureErrorMap()
 	if (!cfg.details_file.empty())
 		LoadDetailsMap();
 
-	unsigned int details_multiplier=255;
-
 	const int w = (int)FreeImage_GetWidth(input_bitmap);
 	const int h = (int)FreeImage_GetHeight(input_bitmap);
+	const std::vector<screen_line>& scoring_picture =
+		(cfg.visual_objective == E_OBJECTIVE_LEGACY_TARGET)
+			? m_picture : m_picture_original;
 
 	for(int i=0; i<128; ++i)
 	{
@@ -546,14 +594,17 @@ void RastaConverter::GeneratePictureErrorMap()
 		distance_t *dst = &m_picture_all_errors[i][0];
 		for (int y=0; y<h; ++y)
 		{
-			const screen_line& srcrow = m_picture[y];
+			const screen_line& srcrow = scoring_picture[y];
 
-			if (!details_data.empty())
+			if (!details_mask.Empty() && cfg.details_score)
 			{
 				for (int x=0; x<w; ++x)
 				{
-					details_multiplier = 255+ (unsigned int)(((double)details_data[y][x])*cfg.details_strength);
-					*dst++ = (details_multiplier*distance_function(srcrow[x], ref))/255;
+					const distance_t base = distance_function(srcrow[x], ref);
+					*dst++ = details_mask.IsNormalized()
+						? ApplyEffectiveDetailsWeight(base, details_mask.WeightAt(x, y))
+						: ApplyLegacyDetailsWeight(base, details_mask.At(x, y),
+							cfg.details_strength);
 				}
 			}
 			else
@@ -569,119 +620,27 @@ void RastaConverter::GeneratePictureErrorMap()
 
 bool RastaConverter::OtherDithering()
 {
-	int y;
-
 	const int w = FreeImage_GetWidth(input_bitmap);
 	const int h = FreeImage_GetHeight(input_bitmap);
-	const int w1 = w - 1;
 
-	for (y=0;y<h;++y)
-	{
-		const bool flip = y & 1;
+	rasta::DitherParams params;
+	params.type = cfg.dither;
+	params.strength = cfg.dither_strength;
+	params.randomness = cfg.dither_randomness;
 
-		for (int i=0;i<w;++i)
+	// The quantized result lands in a scratch buffer; the row callback mirrors
+	// it into destination_bitmap and keeps the window responsive, exactly as
+	// the previous inline loop did.
+	std::vector<screen_line> quantized(h);
+	for (int y = 0; y < h; ++y)
+		quantized[y].Resize(w);
+
+	bool cancelled_by_user = false;
+	auto on_row = [&](int y) -> bool {
+		for (int x = 0; x < w; ++x)
 		{
-			int x = flip ? w1 - i : i;
-
-			rgb out_pixel=m_picture[y][x];
-
-			if (cfg.dither!=E_DITHER_NONE)
-			{
-				rgb_error p=error_map[y][x];
-				p.r+=out_pixel.r;
-				p.g+=out_pixel.g;
-				p.b+=out_pixel.b;
-
-				if (p.r>255)
-					p.r=255;
-				else if (p.r<0)
-					p.r=0;
-
-				if (p.g>255)
-					p.g=255;
-				else if (p.g<0)
-					p.g=0;
-
-				if (p.b>255)
-					p.b=255;
-				else if (p.b<0)
-					p.b=0;
-
-				out_pixel.r=(unsigned char)(p.r + 0.5);
-				out_pixel.g=(unsigned char)(p.g + 0.5);
-				out_pixel.b=(unsigned char)(p.b + 0.5);
-
-				out_pixel=atari_palette[FindAtariColorIndex(out_pixel)];
-
-				rgb in_pixel = m_picture[y][x];
-				rgb_error qe;
-				qe.r=(int)in_pixel.r-(int)out_pixel.r;
-				qe.g=(int)in_pixel.g-(int)out_pixel.g;
-				qe.b=(int)in_pixel.b-(int)out_pixel.b;
-
-				if (cfg.dither==E_DITHER_FLOYD)
-				{
-					/* Standard Floyd-Steinberg uses 4 pixels to diffuse */
-					DiffuseError( x-1, y,   7.0/16.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+1, y+1, 3.0/16.0, qe.r,qe.g,qe.b);
-					DiffuseError( x  , y+1, 5.0/16.0, qe.r,qe.g,qe.b);
-					DiffuseError( x-1, y+1, 1.0/16.0, qe.r,qe.g,qe.b);
-				}
-				else if (cfg.dither==E_DITHER_LINE)
-				{
-					// line dithering that reduces number of colors in line
-					if (y%2==0)
-					{
-						DiffuseError( x, y+1, 0.5, qe.r,qe.g,qe.b);
-					}
-				}
-				else if (cfg.dither==E_DITHER_LINE2)
-				{
-					// line dithering
-					DiffuseError( x, y+1, 0.5, qe.r,qe.g,qe.b);
-				}
-				else if (cfg.dither==E_DITHER_CHESS)
-				{
-					// Chessboard dithering
-					if ((x+y)%2==0)
-					{
-						DiffuseError( x+1, y,   0.5, qe.r,qe.g,qe.b);
-						DiffuseError( x  , y+1, 0.5, qe.r,qe.g,qe.b);
-					}
-				}
-				else if (cfg.dither==E_DITHER_SIMPLE)
-				{
-					DiffuseError( x+1, y,   1.0/3.0, qe.r,qe.g,qe.b);
-					DiffuseError( x  , y+1, 1.0/3.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+1, y+1, 1.0/3.0, qe.r,qe.g,qe.b);
-				}
-				else if (cfg.dither==E_DITHER_2D)
-				{
-					DiffuseError( x+1, y,   2.0/4.0, qe.r,qe.g,qe.b);
-					DiffuseError( x  , y+1, 1.0/4.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+1, y+1, 1.0/4.0, qe.r,qe.g,qe.b);
-				}
-				else if (cfg.dither==E_DITHER_JARVIS)
-				{
-					DiffuseError( x+1, y,   7.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+2, y,   5.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x-1, y+1, 3.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x-2, y+1, 5.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x  , y+1, 7.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+1, y+1, 5.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+2, y+1, 3.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x-1, y+2, 1.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x-2, y+2, 3.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x  , y+2, 5.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+1, y+2, 3.0/48.0, qe.r,qe.g,qe.b);
-					DiffuseError( x+2, y+2, 1.0/48.0, qe.r,qe.g,qe.b);
-				}
-			}
-			unsigned char color_index=FindAtariColorIndex(out_pixel);
-			color_indexes_on_dst_picture.insert(color_index);
-			out_pixel = atari_palette[color_index];
-			RGBQUAD color=RGB2PIXEL(out_pixel);
-			FreeImage_SetPixelColor(destination_bitmap,x,y,&color);
+			RGBQUAD color = RGB2PIXEL(quantized[y][x]);
+			FreeImage_SetPixelColor(destination_bitmap, x, y, &color);
 		}
 		ShowDestinationLine(y);
 		// Keep UI responsive: pump events and present per line
@@ -699,11 +658,18 @@ bool RastaConverter::OtherDithering()
 		case GUI_command::SHOW_MIX:
 			break;
 		case GUI_command::STOP:
-			return true; // Exit dithering when user requests to quit
+			cancelled_by_user = true;
+			return false; // Exit dithering when user requests to quit
 		}
 		gui.Present();
-	}
-	return false; // Completed successfully
+		return true;
+	};
+
+	const bool cancelled = rasta::BuildQuantizedTarget(m_picture, w, h, params,
+		quantized, color_indexes_on_dst_picture, on_row,
+		[](double value) { return random_plus_minus(value); });
+
+	return cancelled && cancelled_by_user;
 }
 
 void RastaConverter::ShowInputBitmap()
@@ -711,6 +677,7 @@ void RastaConverter::ShowInputBitmap()
 	unsigned int width = FreeImage_GetWidth(input_bitmap);
 	unsigned int height = FreeImage_GetHeight(input_bitmap);
 	gui.DisplayBitmap(0, 0, input_bitmap);
+	gui.PublishImage(GuiImageSlot::Source, input_bitmap);
 	if (cfg.dual_mode)
 	{
 		// In dual mode, input_bitmap shows original source (unchanged)
@@ -754,6 +721,7 @@ void RastaConverter::ShowDestinationLine(int y)
 void RastaConverter::ShowDestinationBitmap()
 {
 	gui.DisplayBitmap(FreeImage_GetWidth(destination_bitmap)*2, 0, destination_bitmap);
+	gui.PublishImage(GuiImageSlot::Target, destination_bitmap);
 }
 
 
@@ -761,6 +729,7 @@ void RastaConverter::ShowDestinationBitmap()
 bool RastaConverter::PrepareDestinationPicture()
 {
 	Message("Preparing Destination Picture");
+	PublishLiveStats(/*preprocessing*/ true, /*finished*/ false);
 
 	int width = FreeImage_GetWidth(input_bitmap);
 	int height = FreeImage_GetHeight(input_bitmap);
@@ -800,7 +769,6 @@ bool RastaConverter::PrepareDestinationPicture()
 			cancelled = KnollDithering();
 		else
 		{
-			ClearErrorMap();
 			cancelled = OtherDithering();
 		}
 		if (cancelled)
@@ -936,7 +904,11 @@ void RastaConverter::LoadOnOffFile(const char *filename)
 bool RastaConverter::ProcessInit()
 {
 	DBG_PRINT("[RASTA] ProcessInit start (dual=%d quiet=%d)", (int)cfg.dual_mode, (int)quiet);
+#ifdef NO_GUI
 	gui.Init(cfg.command_line);
+#else
+	gui.Init(cfg.command_line, cfg.live_gui);
+#endif
 
 	DBG_PRINT("[RASTA] LoadAtariPalette");
 	LoadAtariPalette();
@@ -984,7 +956,15 @@ bool RastaConverter::ProcessInit()
 		SavePicture(cfg.output_file+"-dst.png",destination_bitmap);
 
 	if (cfg.preprocess_only)
-		exit(1);
+	{
+		// Preprocessing has produced everything it was asked for. This used to
+		// call exit(1), which both reported a successful operation as a failure
+		// and killed the process outright - so with the live UI it would end the
+		// session instead of returning to the setup screen. ProcessInit's
+		// contract already covers this: false means "nothing to optimize".
+		Message("Preprocessing finished");
+		return false;
+	}
 
 	if (!cfg.on_off_file.empty())
 		LoadOnOffFile(cfg.on_off_file.c_str());
@@ -995,6 +975,13 @@ bool RastaConverter::ProcessInit()
 
 	DBG_PRINT("[RASTA] GeneratePictureErrorMap");
 	GeneratePictureErrorMap();
+	if (cfg.details_allocate)
+	{
+		if (details_mask.Empty()) Error("/details_allocate requires /details=FILE");
+		details_line_priorities = details_mask.LinePriorities(cfg.details_strength);
+	}
+	else
+		details_line_priorities.clear();
 
 	m_eval_gstate.m_max_evals = cfg.max_evals;
 	m_eval_gstate.m_save_period = cfg.save_period;
@@ -1013,7 +1000,17 @@ bool RastaConverter::ProcessInit()
 		if (!randseed)
 			++randseed;
 
-		m_evaluators[i].Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, solutions, randseed, cfg.cache_size);
+		m_evaluators[i].Init(m_width, m_height, m_picture_all_errors_array,
+			m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off,
+			&m_eval_gstate, solutions, randseed, cfg.cache_size, 0,
+			m_picture_original.data(),
+			cfg.visual_objective == E_OBJECTIVE_SOURCE_SPATIAL ? 0.0 : 1.0,
+			cfg.visual_objective == E_OBJECTIVE_SOURCE_SPATIAL ? 1.0 :
+				(cfg.visual_objective == E_OBJECTIVE_SOURCE_COMPOSITE ? cfg.spatial_weight : 0.0),
+			cfg.visual_objective == E_OBJECTIVE_SOURCE_EDGE ? cfg.edge_weight : 0.0,
+			cfg.visual_objective == E_OBJECTIVE_SOURCE_REGION ? cfg.region_weight : 0.0,
+			cfg.details_allocate ? &details_line_priorities : nullptr,
+			cfg.details_global_period);
 
 		randseed += 187927 * i;
 	}
@@ -1042,10 +1039,29 @@ bool RastaConverter::ProcessInit()
 
 		m_evaluators[i].Init(m_width, m_height, m_picture_all_errors_array,
 			m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off,
-			&m_eval_gstate, solutions, randseed, cfg.cache_size, i);
+			&m_eval_gstate, solutions, randseed, cfg.cache_size, i,
+			m_picture_original.data(),
+			cfg.visual_objective == E_OBJECTIVE_SOURCE_SPATIAL ? 0.0 : 1.0,
+			cfg.visual_objective == E_OBJECTIVE_SOURCE_SPATIAL ? 1.0 :
+				(cfg.visual_objective == E_OBJECTIVE_SOURCE_COMPOSITE ? cfg.spatial_weight : 0.0),
+			cfg.visual_objective == E_OBJECTIVE_SOURCE_EDGE ? cfg.edge_weight : 0.0,
+			cfg.visual_objective == E_OBJECTIVE_SOURCE_REGION ? cfg.region_weight : 0.0,
+			cfg.details_allocate ? &details_line_priorities : nullptr,
+			cfg.details_global_period);
 
 		randseed += 187927 * i;
 	}
+
+	// Reporting is deliberately not one of the worker evaluators. Save can run
+	// while worker 0 is evaluating and clearing its line/instruction allocators;
+	// sharing that evaluator would leave EvaluateUnweightedSource() holding
+	// borrowed row pointers into concurrently reclaimed storage.
+	m_reporting_evaluator = std::make_unique<Evaluator>();
+	m_reporting_evaluator->Init(m_width, m_height, m_picture_all_errors_array,
+		m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off,
+		&m_reporting_eval_gstate, 1, 1, cfg.cache_size,
+		static_cast<int>(m_evaluators.size()), m_picture_original.data(),
+		1.0, 0.0, 0.0, 0.0, nullptr, cfg.details_global_period);
 
 	if (cfg.continue_processing && m_needs_history_reconfigure && !cfg.dual_mode) {
 		reconfigureAcceptanceHistory();
@@ -1120,25 +1136,6 @@ void RastaConverter::SetConfig(Configuration &a_c)
 	cfg=a_c;
 }
 
-/* 8x8 threshold map */
-static const unsigned char threshold_map[8*8] = {
-	0,48,12,60, 3,51,15,63,
-	32,16,44,28,35,19,47,31,
-	8,56, 4,52,11,59, 7,55,
-	40,24,36,20,43,27,39,23,
-	2,50,14,62, 1,49,13,61,
-	34,18,46,30,33,17,45,29,
-	10,58, 6,54, 9,57, 5,53,
-	42,26,38,22,41,25,37,21 };
-
-/* Luminance for each palette entry, to be initialized as soon as the program begins */
-static unsigned luma[128];
-
-bool PaletteCompareLuma(unsigned index1, unsigned index2)
-{
-	return luma[index1] < luma[index2];
-}
-
 double ColorCompare(int r1,int g1,int b1, int r2,int g2,int b2)
 {
 	double luma1 = (r1*299 + g1*587 + b1*114) / (255.0*1000);
@@ -1167,49 +1164,14 @@ double random_plus_minus(double val)
 
 MixingPlan RastaConverter::DeviseBestMixingPlan(rgb color)
 {
+	rasta::DitherParams params;
+	params.type = cfg.dither;
+	params.strength = cfg.dither_strength;
+	params.randomness = cfg.dither_randomness;
+	const rasta::MixingPlan shared = rasta::DeviseBestMixingPlan(color, params,
+		[](double value) { return random_plus_minus(value); });
 	MixingPlan result = { {0} };
-	const double X = cfg.dither_strength/100; // Error multiplier
-	rgb src=color;
-	rgb_error e;
-	e.zero(); // Error accumulator
-	for(unsigned c=0; c<64; ++c)
-	{
-		// Current temporary value
-		rgb_error temp;
-		temp.r = src.r + e.r * X *(1+random_plus_minus(cfg.dither_randomness));
-		temp.g = src.g + e.g * X *(1+random_plus_minus(cfg.dither_randomness));
-		temp.b = src.b + e.b * X *(1+random_plus_minus(cfg.dither_randomness));
-
-		// Clamp it in the allowed RGB range
-		if(temp.r<0) temp.r=0; else if(temp.r>255) temp.r=255;
-		if(temp.g<0) temp.g=0; else if(temp.g>255) temp.g=255;
-		if(temp.b<0) temp.b=0; else if(temp.b>255) temp.b=255;
-		// Find the closest color from the palette
-		double least_penalty = 1e99;
-		unsigned chosen = c%128;
-		for(unsigned index=0; index<128; ++index)
-		{
-			rgb color2;
-			color2.r=temp.r;
-			color2.g=temp.g;
-			color2.b=temp.b;
-
-			double penalty = distance_function(atari_palette[index], color2);
-			if(penalty < least_penalty)
-			{ 
-				least_penalty = penalty; 
-				chosen=index; 
-			}
-		}
-		// Add it to candidates and update the error
-		result.colors[c] = chosen;
-		rgb color = atari_palette[chosen];
-		e.r += src.r-color.r;
-		e.g += src.g-color.g;
-		e.b += src.b-color.b;
-	}
-	// Sort the colors according to luminance
-	std::sort(result.colors, result.colors+64, PaletteCompareLuma);
+	std::copy(shared.colors, shared.colors + 64, result.colors);
 	return result;
 }
 
@@ -1265,7 +1227,7 @@ void RastaConverter::KnollDitheringParallel(int from, int to)
 		for(unsigned x=0; x<(unsigned)m_width; ++x)
 		{
 			rgb r_color = m_picture[y][x];
-			unsigned map_value = threshold_map[(x & 7) + ((y & 7) << 3)];
+			unsigned map_value = rasta::KnollThresholdMap()[(x & 7) + ((y & 7) << 3)];
 			MixingPlan plan = DeviseBestMixingPlan(r_color);
 			unsigned char color_index=plan.colors[ map_value ];
 			local_line[x] = color_index;
@@ -1289,10 +1251,6 @@ void RastaConverter::KnollDitheringParallel(int from, int to)
 bool RastaConverter::KnollDithering()
 {
 	Message("Knoll Dithering             ");
-	for(unsigned c=0; c<128; ++c)
-	{
-		luma[c] = atari_palette[c].r*299 + atari_palette[c].g*587 + atari_palette[c].b*114;
-	}
 	// Initialize progress flags for multi-threaded readiness
 	m_knoll_should_stop.store(false, std::memory_order_relaxed);
 	m_knoll_line_ready.reset(new std::atomic<unsigned char>[(size_t)m_height]);
@@ -1391,27 +1349,6 @@ bool RastaConverter::KnollDithering()
 		threads[t].join();
 	}
 	return should_stop; // Return true if cancelled, false if completed
-}
-
-void RastaConverter::ClearErrorMap()
-{
-	// set proper size if empty
-	if (error_map.empty())
-	{
-		error_map.resize(m_height);
-		for (int y=0;y<m_height;++y)
-		{
-			error_map[y].resize(m_width+1);
-		}
-	}
-	// clear the map
-	for (int y=0;y<m_height;++y)
-	{
-		for (int x=0;x<m_width;++x)
-		{
-			error_map[y][x].zero();	
-		}
-	}
 }
 
 // Generate Bayer matrix recursively (supports 2x2, 4x4, 8x8)
@@ -1747,7 +1684,7 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 			r->raster_lines[y].instructions.push_back(i);
 			r->raster_lines[y].cycles+=4;	
 
-			assert(r->raster_lines[y].cycles<free_cycles);
+			assert(r->raster_lines[y].cycles <= raster_program_cycle_limit);
 		}
 
 		r->raster_lines[y].rehash();
@@ -1839,32 +1776,8 @@ void RastaConverter::CreateRandomRasterPicture(raster_picture *r)
 		i.loose.target=E_COLBAK;
 		r->raster_lines[y].instructions.push_back(i);
 
-		assert(r->raster_lines[y].cycles<free_cycles);
+		assert(r->raster_lines[y].cycles <= raster_program_cycle_limit);
 	}
-}
-
-void RastaConverter::DiffuseError( int x, int y, double quant_error, double e_r,double e_g,double e_b)
-{
-	if (! (x>=0 && x<m_width && y>=0 && y<m_height) )
-		return;
-
-	rgb_error p = error_map[y][x];
-	p.r += e_r * quant_error*cfg.dither_strength*(1+random_plus_minus(cfg.dither_randomness));
-	p.g += e_g * quant_error*cfg.dither_strength*(1+random_plus_minus(cfg.dither_randomness));
-	p.b += e_b * quant_error*cfg.dither_strength*(1+random_plus_minus(cfg.dither_randomness));
-	if (p.r>255)
-		p.r=255;
-	else if (p.r<0)
-		p.r=0;
-	if (p.g>255)
-		p.g=255;
-	else if (p.g<0)
-		p.g=0;
-	if (p.b>255)
-		p.g=255;
-	else if (p.g<0)
-		p.g=0;
-	error_map[y][x]=p;
 }
 
 void RastaConverter::OptimizeRasterProgram(raster_picture *pic)
@@ -1953,6 +1866,111 @@ void RastaConverter::Init()
 	init_finished=true;
 }
 
+void RastaConverter::ApplyInternalStructuredInitializer()
+{
+	const char* profile = std::getenv("RASTA_STRUCTURED_INITIALIZER");
+	ApplyInternalStructuredPass(profile, "initializer", false);
+}
+
+void RastaConverter::ApplyInternalStructuredFinalizer()
+{
+	const char* profile = std::getenv("RASTA_STRUCTURED_FINALIZER");
+	ApplyInternalStructuredPass(profile, "finalizer", true);
+}
+
+void RastaConverter::ApplyInternalStructuredPass(
+	const char* profile, const char* label, bool publishResult)
+{
+	if (profile == nullptr || profile[0] == '\0')
+		return;
+	const std::string profileName(profile);
+	if (profileName != "ntsc")
+	{
+		Message(std::string("Structured ") + label
+			+ " disabled for profile: " + profile);
+		return;
+	}
+	if (cfg.dual_mode || m_evaluators.empty()
+		|| m_eval_gstate.m_best_pic.raster_lines.size()
+			!= static_cast<std::size_t>(m_height))
+		return;
+	if (publishResult)
+	{
+		const auto current = std::atomic_load_explicit(
+			&m_eval_gstate.m_best_snapshot, std::memory_order_acquire);
+		if (current)
+		{
+			m_eval_gstate.m_best_pic = current->picture;
+			m_eval_gstate.m_best_pic.uncache_insns();
+		}
+	}
+
+	StructuredBeamOptions options;
+	options.width = 16;
+	options.diversity_per_state = 1;
+	options.repair_cost_per_pixel = 0.0;
+	std::size_t feasible = 0;
+	std::size_t accepted = 0;
+	distance_accum_t totalImprovement = 0;
+	distance_accum_t totalSourceOklabImprovement = 0;
+	Evaluator& evaluator = m_evaluators.front();
+	for (std::size_t line = 0; line < static_cast<std::size_t>(m_height); ++line)
+	{
+		const Evaluator::StructuredWindowComparison comparison =
+			evaluator.ApplyStructuredSourceWindowIfBetter(
+				m_eval_gstate.m_best_pic, line, 1, 1, options, publishResult);
+		if (!comparison.feasible)
+			continue;
+		++feasible;
+		if (comparison.accepted)
+		{
+			++accepted;
+			totalImprovement += comparison.baseline_score
+				- comparison.structured_score;
+			totalSourceOklabImprovement += comparison.baseline_source_oklab
+				- comparison.structured_source_oklab;
+		}
+	}
+	if (publishResult)
+	{
+		std::vector<const line_cache_result*> results(m_height, nullptr);
+		const distance_accum_t finalScore = evaluator.EvaluateSingle(
+			&m_eval_gstate.m_best_pic, results.data());
+		m_eval_gstate.m_best_result.store(finalScore, std::memory_order_relaxed);
+		m_eval_gstate.m_created_picture.resize(m_height);
+		m_eval_gstate.m_created_picture_targets.resize(m_height);
+		for (int y = 0; y < m_height; ++y)
+		{
+			const line_cache_result& result = *results[y];
+			m_eval_gstate.m_created_picture[y].assign(
+				result.color_row, result.color_row + m_width);
+			m_eval_gstate.m_created_picture_targets[y].resize(m_width);
+			result.copy_target_row(
+				m_eval_gstate.m_created_picture_targets[y].data(), m_width);
+		}
+		memcpy(&m_eval_gstate.m_sprites_memory, &evaluator.GetSpritesMemory(),
+			sizeof m_eval_gstate.m_sprites_memory);
+		auto snapshot = std::make_shared<EvalGlobalState::PublishedBestSnapshot>();
+		snapshot->picture = m_eval_gstate.m_best_pic;
+		snapshot->picture.uncache_insns();
+		snapshot->cost = finalScore;
+		const auto previous = std::atomic_load_explicit(
+			&m_eval_gstate.m_best_snapshot, std::memory_order_acquire);
+		snapshot->version = previous ? previous->version + 1 : 1;
+		m_eval_gstate.m_best_state_version.store(
+			snapshot->version, std::memory_order_release);
+		std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot> published = snapshot;
+		std::atomic_store_explicit(&m_eval_gstate.m_best_snapshot,
+			std::move(published), std::memory_order_release);
+	}
+	Message(std::string("Structured ") + profileName + ' ' + label
+		+ ": feasible=" + Value2String(feasible)
+		+ " accepted=" + Value2String(accepted)
+		+ " raw_improvement=" + Value2String(totalImprovement)
+		+ " source_oklab_improvement="
+		+ Value2String(totalSourceOklabImprovement));
+}
+
 void RastaConverter::TestRasterProgram(raster_picture *pic)
 {
 	int x,y;
@@ -1986,20 +2004,151 @@ void RastaConverter::TestRasterProgram(raster_picture *pic)
 	}
 }
 
+std::string RastaConverter::BuildConfigRecap() const
+{
+	// The restart-only recap of design §9.4: what produced the picture in
+	// front of you, in one readable line.
+	static const char* const kDistance[] = {"euclid", "yuv", "ciede", "cie94", "oklab", "rasta"};
+	static const char* const kDither[] = {"none", "floyd", "rfloyd", "line", "line2",
+		"chess", "simple", "2d", "jarvis", "knoll"};
+	static const char* const kOptimizer[] = {"dlas", "lahc", "legacy"};
+	static const char* const kInit[] = {"random", "smart", "empty", "less"};
+	static const char* const kObjective[] = {"legacy", "source", "source-spatial",
+		"source-composite", "source-edge", "source-region"};
+
+	std::ostringstream out;
+	out << "palette " << cfg.palette_file
+		<< "  |  distance " << kDistance[cfg.dstf]
+		<< "  |  target " << kDistance[cfg.pre_dstf]
+		<< "  |  dither " << kDither[cfg.dither]
+		<< "\n" << "objective " << kObjective[cfg.visual_objective]
+		<< "  |  optimizer " << kOptimizer[cfg.optimizer]
+		<< "  |  history " << solutions
+		<< "  |  init " << kInit[cfg.init_type];
+	if (cfg.dual_mode)
+		out << "\n" << "dual frame on, blending " << cfg.dual_blending;
+	if (!cfg.details_file.empty())
+		out << "\n" << "details mask " << cfg.details_file << " (" << cfg.details_mode << ")";
+	return out.str();
+}
+
+void RastaConverter::PublishLiveStats(bool preprocessing, bool finished)
+{
+	if (!gui.LiveUiActive())
+		return;
+
+	LiveStats stats;
+	stats.evaluations = m_eval_gstate.m_evaluations.load(std::memory_order_relaxed);
+	stats.last_best_evaluation =
+		m_eval_gstate.m_last_best_evaluation.load(std::memory_order_relaxed);
+	// The parser's "no limit" default is a huge sentinel; report it as no limit
+	// so the dashboard shows "runs until stopped" rather than a fake progress bar.
+	stats.max_evals = cfg.max_evals >= 1000000000000000000ULL ? 0 : cfg.max_evals;
+	stats.rate = m_rate;
+	// Before the first evaluation the best result is unset; normalizing it
+	// produces a meaningless number, so leave it at zero and let the dashboard
+	// say it has nothing yet.
+	stats.normalized_distance =
+		m_eval_gstate.m_evaluations.load(std::memory_order_relaxed) > 0
+			? NormalizeScore(m_eval_gstate.m_best_result) : 0.0;
+	stats.normalized_drift = m_eval_gstate.m_current_norm_drift;
+	stats.unstuck_after = cfg.unstuck_after;
+	stats.elapsed_seconds = std::chrono::duration<double>(
+		std::chrono::steady_clock::now() - m_run_started).count();
+
+	for (int i = 0; i < E_MUTATION_MAX; ++i) {
+		if (!cfg.dual_mode && i == E_MUTATION_COMPLEMENT_VALUE_DUAL)
+			continue;
+		LiveStats::MutationStat stat;
+		stat.name = mutation_names[i];
+		stat.count = m_eval_gstate.m_mutation_stats[i];
+		stats.mutations.push_back(stat);
+	}
+
+	stats.accepted = m_eval_gstate.m_single_accepted.load(std::memory_order_relaxed);
+	stats.global_improvements =
+		m_eval_gstate.m_single_global_improvements.load(std::memory_order_relaxed);
+	stats.migrations = m_eval_gstate.m_single_migrations.load(std::memory_order_relaxed);
+	stats.cache_hits = m_eval_gstate.m_cache_hits.load(std::memory_order_relaxed);
+	stats.cache_lookups = m_eval_gstate.m_cache_lookups.load(std::memory_order_relaxed);
+
+	stats.dual_mode = cfg.dual_mode;
+	if (cfg.dual_mode) {
+		const EvalGlobalState::DualPhase phase =
+			m_eval_gstate.m_dual_phase.load(std::memory_order_relaxed);
+		switch (phase) {
+		case EvalGlobalState::DUAL_PHASE_BOOTSTRAP_A:
+			stats.dual_phase = "Bootstrap A";
+			stats.dual_block_steps = cfg.first_dual_steps;
+			stats.dual_block_progress = std::min(stats.evaluations, cfg.first_dual_steps);
+			break;
+		case EvalGlobalState::DUAL_PHASE_BOOTSTRAP_B:
+			stats.dual_phase =
+				m_eval_gstate.m_dual_bootstrap_b_copied.load(std::memory_order_relaxed)
+					? "Bootstrap B (copied from A)" : "Bootstrap B (generated)";
+			stats.dual_block_steps = cfg.first_dual_steps;
+			break;
+		case EvalGlobalState::DUAL_PHASE_ALTERNATING:
+			stats.dual_phase = "Alternating";
+			stats.dual_block_steps = cfg.altering_dual_steps;
+			if (cfg.altering_dual_steps > 0)
+				stats.dual_block_progress = stats.evaluations % cfg.altering_dual_steps;
+			break;
+		default:
+			stats.dual_phase = "-";
+			break;
+		}
+		stats.dual_focus_b = m_eval_gstate.m_dual_stage_focus_B.load(std::memory_order_relaxed);
+		stats.dual_display = (m_dual_display == DualDisplayMode::A) ? 'A'
+			: (m_dual_display == DualDisplayMode::B) ? 'B' : 'M';
+	}
+
+	stats.input_file = cfg.input_file;
+	stats.output_file = cfg.output_file;
+	stats.command_line = cfg.command_line;
+	stats.config_recap = BuildConfigRecap();
+	stats.threads = cfg.threads;
+	stats.cache_mb = cfg.cache_size / (1024 * 1024);
+	stats.preprocessing = preprocessing;
+	stats.finished = finished;
+	stats.message = m_last_message;
+	if (m_ever_saved) {
+		stats.last_save_seconds_ago = std::chrono::duration<double>(
+			std::chrono::steady_clock::now() - m_last_save_time).count();
+	}
+
+	gui.PublishStats(stats);
+}
+
 void RastaConverter::ShowMutationStats()
 {
+	// Image captions may be as low as y=250 for a 240-line source. Keep the
+	// status block below that caption row while leaving the final mutation line
+	// clear of the persistent message row at y=450.
+	constexpr int status_top = 270;
+	constexpr int status_line_height = 20;
+	constexpr int mutation_line_height = 18;
 	int row = 0;
 	for (int i=0;i<E_MUTATION_MAX;++i)
 	{
 		// Show dual-only mutation stat only in dual mode
 		if (!cfg.dual_mode && i == E_MUTATION_COMPLEMENT_VALUE_DUAL) continue;
-		gui.DisplayText(0, 230 + 20 * row, string(mutation_names[i]) + string("  ") + format_with_commas(m_eval_gstate.m_mutation_stats[i]));
+		gui.DisplayText(0, status_top + mutation_line_height * row,
+			string(mutation_names[i]) + string("  ")
+			+ format_with_commas(m_eval_gstate.m_mutation_stats[i]));
 		++row;
 	}
 
-	gui.DisplayText(320, 250, string("Evaluations: ") + format_with_commas(m_eval_gstate.m_evaluations));
-	gui.DisplayText(320, 270, string("LastBest: ") + format_with_commas(m_eval_gstate.m_last_best_evaluation) + string("                "));
-	gui.DisplayText(320, 290, string("Rate: ") + format_with_commas((unsigned long long)m_rate) + string("                "));
+	gui.DisplayText(320, status_top + status_line_height,
+		string("Evaluations: ") + format_with_commas(
+			m_eval_gstate.m_evaluations.load(std::memory_order_relaxed)));
+	gui.DisplayText(320, status_top + 2 * status_line_height,
+		string("LastBest: ") + format_with_commas(
+			m_eval_gstate.m_last_best_evaluation.load(std::memory_order_relaxed))
+		+ string("                "));
+	gui.DisplayText(320, status_top + 3 * status_line_height,
+		string("Rate: ") + format_with_commas((unsigned long long)m_rate)
+		+ string("                "));
 	{
 		double norm = NormalizeScore(m_eval_gstate.m_best_result);
 		std::string line = std::string("Norm. Dist: ") + format_with_commas(norm);
@@ -2011,7 +2160,7 @@ void RastaConverter::ShowMutationStats()
 			}
 		}
 		line += std::string("                ");
-		gui.DisplayText(320, 310, line);
+		gui.DisplayText(320, status_top + 4 * status_line_height, line);
 	}
 
 	// Additional dual-mode status lines
@@ -2030,9 +2179,11 @@ void RastaConverter::ShowMutationStats()
 			case EvalGlobalState::DUAL_PHASE_ALTERNATING: phaseText = std::string("Phase: Alternating, optimizing ") + (focusB ? "B" : "A"); break;
 			default: phaseText = "Phase: -"; break;
 		}
-		gui.DisplayText(320, 330, phaseText);
-		gui.DisplayText(320, 350, std::string("Showing: ") + showing);
-		gui.DisplayText(320, 370, "Press [A] [B] [M]ix");
+		gui.DisplayText(320, status_top + 5 * status_line_height, phaseText);
+		gui.DisplayText(320, status_top + 6 * status_line_height,
+			std::string("Showing: ") + showing);
+		gui.DisplayText(320, status_top + 7 * status_line_height,
+			"Press [A] [B] [M]ix");
 	}
 }
 
@@ -2044,7 +2195,9 @@ void RastaConverter::SaveBestSolution()
 	// Note that we are assuming that we have exclusive access to global state.
 
 	if (!cfg.dual_mode) {
-		raster_picture pic = m_eval_gstate.m_best_pic;
+		const std::shared_ptr<const EvalGlobalState::PublishedBestSnapshot> snapshot =
+			std::atomic_load_explicit(&m_eval_gstate.m_best_snapshot, std::memory_order_acquire);
+		raster_picture pic = snapshot ? snapshot->picture : m_eval_gstate.m_best_pic;
 
 		ShowLastCreatedPicture();
 		SaveRasterProgram(string(cfg.output_file+".rp"), &pic);
@@ -2120,6 +2273,7 @@ void RastaConverter::MainLoop()
 	FindPossibleColors();
 
 	Init();
+	ApplyInternalStructuredInitializer();
 
 	// Mark optimization start time for statistics (seconds since start)
 	m_eval_gstate.m_time_start = time(NULL);
@@ -2134,12 +2288,24 @@ void RastaConverter::MainLoop()
 	// Do not hold the lock across UI work; acquire on demand
 	std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex, std::defer_lock };
 	lock.lock();
-	if (!cfg.dual_mode) {
+	if (!cfg.dual_mode)
 		m_evaluators[0].Start();
-	}
 
 	unsigned long long last_eval = 0;
 	bool eval_inited = false;
+	bool remaining_workers_started = m_evaluators.size() <= 1;
+	auto startRemainingWorkers = [&]()
+	{
+		if (remaining_workers_started || !eval_inited)
+			return;
+
+		// Start delayed workers outside the global lock.
+		lock.unlock();
+		for (size_t i = 1; i < m_evaluators.size(); ++i)
+			m_evaluators[i].Start();
+		lock.lock();
+		remaining_workers_started = true;
+	};
 
 	if (cfg.dual_mode) {
 		lock.unlock();
@@ -2174,11 +2340,14 @@ void RastaConverter::MainLoop()
 				}
 
 				ShowMutationStats();
+				PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
 
 				switch (gui.NextFrame())
 				{
 				case GUI_command::SAVE:
 					SaveBestSolution();
+					m_last_save_time = std::chrono::steady_clock::now();
+					m_ever_saved = true;
 					Message("Saved.");
 					break;
 				case GUI_command::STOP:
@@ -2191,6 +2360,7 @@ void RastaConverter::MainLoop()
 					if (destination_bitmap) ShowDestinationBitmap();
 					if (cfg.dual_mode) ShowLastCreatedPictureDual(); else ShowLastCreatedPicture();
 					ShowMutationStats();
+					PublishLiveStats(/*preprocessing*/ false, /*finished*/ false);
 					gui.Present();
 					break;
 				case GUI_command::SHOW_A:
@@ -2208,6 +2378,7 @@ void RastaConverter::MainLoop()
 
 		// Reacquire lock before waiting on condition/flags
 		if (!lock.owns_lock()) lock.lock();
+		startRemainingWorkers();
 
 		auto now = std::chrono::steady_clock::now();
 		auto deadline = now + std::chrono::nanoseconds( 250000000 );
@@ -2218,15 +2389,10 @@ void RastaConverter::MainLoop()
 		if (m_eval_gstate.m_update_initialized)
 		{
 			m_eval_gstate.m_update_initialized = false;
-			// Start remaining workers without holding the lock
-			lock.unlock();
-			for (size_t i = 1; i < m_evaluators.size(); ++i)
-				m_evaluators[i].Start();
-			lock.lock();
-
 			eval_inited = true;
 			pending_update = true;
 		}
+		startRemainingWorkers();
 
 		if (m_eval_gstate.m_update_improvement)
 		{
@@ -2261,6 +2427,7 @@ void RastaConverter::MainLoop()
 	}
 
 	m_eval_gstate.m_finished = true;
+	m_eval_gstate.m_condvar_update.notify_all();
 
 	while(m_eval_gstate.m_threads_active > 0)
 	{
@@ -2284,6 +2451,7 @@ void RastaConverter::ShowLastCreatedPicture()
 
 	int w = FreeImage_GetWidth(output_bitmap);
 	gui.DisplayBitmap(w, 0, output_bitmap);
+	gui.PublishImage(GuiImageSlot::Output, output_bitmap);
 }
 
 void RastaConverter::SavePMG(string name)
@@ -2501,6 +2669,10 @@ void RastaConverter::LoadRasterProgram(string name)
 		if (pos!=string::npos)
 			cfg.command_line=(line.substr(pos+11));
 
+		pos=line.find("; Details Effective Hash:");
+		if (pos!=string::npos)
+			m_saved_details_effective_hash=line.substr(pos+26);
+
 		if (line.compare(0, 4, "line", 4) == 0)
 		{
 			line_started = true;
@@ -2532,10 +2704,11 @@ void RastaConverter::LoadRasterProgram(string name)
 
 bool RastaConverter::LoadRasterProgramInto(raster_picture& dst, const std::string& rp_path, const std::string& ini_path)
 {
-	// Reset target
-	dst = raster_picture();
-	dst.raster_lines.clear();
-	// Temporarily load into global best, then copy to dst; reuse existing parsing logic
+	// The legacy parsers write into m_best_pic and LoadRasterProgram appends
+	// scanlines. Clear that scratch destination before every frame so loading B
+	// cannot retain A's instructions or register state.
+	m_eval_gstate.m_best_pic = raster_picture();
+	m_eval_gstate.m_best_pic.raster_lines.clear();
 	LoadRegInits(ini_path);
 	LoadRasterProgram(rp_path);
 	dst = m_eval_gstate.m_best_pic;
@@ -2581,6 +2754,8 @@ bool RastaConverter::Resume()
 			Error(std::string("Error loading dual resume A: ") + df_a_rp);
 		if (!LoadRasterProgramInto(picB, df_b_rp, df_b_ini))
 			Error(std::string("Error loading dual resume B: ") + df_b_rp);
+		if (picA.raster_lines.size() != picB.raster_lines.size())
+			Error("Error loading dual resume: A/B raster line counts differ");
 		m_eval_gstate.m_best_pic = picA;
 		m_best_pic_B = picB;
 	}
@@ -2603,17 +2778,243 @@ bool RastaConverter::Resume()
 	// Re-parse saved command line to restore other options, but keep current CLI /output if set
 	std::string cli_out = cfg.output_file;
 	bool keep_cli_out = !cli_out.empty();
+	// Which interface we are running is a property of this launch, not of the
+	// saved settings: re-parsing decides live_gui by looking for /livegui in the
+	// stored tokens, so resuming from the live UI would drop to the old display.
+	const bool live_gui = cfg.live_gui;
 	cfg.ProcessCmdLine(cfg.resume_override_tokens);
-	m_needs_history_reconfigure = cfg.resume_optimizer_changed || cfg.resume_solutions_changed || cfg.resume_distance_changed || cfg.resume_predistance_changed || cfg.resume_dither_changed;
+	cfg.live_gui = live_gui;
+	m_needs_history_reconfigure = cfg.resume_optimizer_changed || cfg.resume_solutions_changed || cfg.resume_distance_changed || cfg.resume_predistance_changed || cfg.resume_dither_changed || cfg.resume_objective_changed;
 	if (keep_cli_out) cfg.output_file = cli_out;
 	return true;
+}
+
+bool RastaConverter::RunStructuredFixtureScreen(
+	const std::string& csv_path, const std::string& profile_label)
+{
+	if (cfg.dual_mode || m_evaluators.empty()
+		|| m_eval_gstate.m_best_pic.raster_lines.size()
+			!= static_cast<std::size_t>(m_height))
+		return false;
+	std::ofstream csv(csv_path, std::ios::out | std::ios::trunc);
+	if (!csv)
+		return false;
+	csv << "profile,first_line,line_count,beam_width,diversity_per_state,"
+		"alternate_count,feasible,baseline_score,structured_score,delta,"
+		"replay_feasible,replay_score,source_vs_replay_delta\n";
+
+	const std::size_t height = static_cast<std::size_t>(m_height);
+	const std::size_t lineCounts[] = {1, 2, 4};
+	const std::size_t widths[] = {16, 64, 256};
+	const std::size_t diversities[] = {1, 2};
+	const std::size_t alternateCounts[] = {1, 3, 7};
+
+	Evaluator& evaluator = m_evaluators.front();
+	raster_picture baseline = m_eval_gstate.m_best_pic;
+	evaluator.RecachePicture(&baseline);
+	std::vector<std::pair<std::size_t, std::size_t>> fixtures;
+	StructuredBeamOptions discoveryOptions;
+	discoveryOptions.width = 256;
+	discoveryOptions.diversity_per_state = 2;
+	discoveryOptions.repair_cost_per_pixel = 0.0;
+	discoveryOptions.target_lifetime_spans = profile_label == "pal";
+	for (std::size_t lineCount : lineCounts)
+	{
+		std::vector<std::size_t> feasibleStarts;
+		for (std::size_t firstLine = 0; firstLine + lineCount <= height;
+			++firstLine)
+		{
+			StructuredWindowResult replay;
+			if (ExtractStructuredReplayWindow(baseline, firstLine, lineCount,
+				discoveryOptions, replay))
+				feasibleStarts.push_back(firstLine);
+		}
+		for (std::size_t sample = 1; sample <= 4 && !feasibleStarts.empty(); ++sample)
+		{
+			const std::size_t index = std::min(feasibleStarts.size() - 1,
+				feasibleStarts.size() * sample / 5);
+			const auto fixture = std::make_pair(feasibleStarts[index], lineCount);
+			if (std::find(fixtures.begin(), fixtures.end(), fixture) == fixtures.end())
+				fixtures.push_back(fixture);
+		}
+	}
+
+	for (const auto& fixture : fixtures)
+	{
+		const std::size_t firstLine = fixture.first;
+		const std::size_t lineCount = fixture.second;
+		for (std::size_t width : widths)
+		{
+			for (std::size_t diversity : diversities)
+			{
+				for (std::size_t alternateCount : alternateCounts)
+				{
+					StructuredBeamOptions options;
+					options.width = width;
+					options.diversity_per_state = diversity;
+					options.repair_cost_per_pixel = 0.0;
+					options.target_lifetime_spans = profile_label == "pal";
+					const Evaluator::StructuredWindowComparison comparison =
+						evaluator.CompareStructuredSourceWindow(baseline,
+							firstLine, lineCount, alternateCount, options);
+					StructuredWindowResult replay;
+					Evaluator::StructuredWindowComparison replayComparison;
+					if (ExtractStructuredReplayWindow(baseline, firstLine,
+						lineCount, options, replay))
+					{
+						replayComparison = evaluator.CompareStructuredWindow(
+							baseline, firstLine, replay.lines);
+					}
+					csv << profile_label << ',' << firstLine << ',' << lineCount
+						<< ',' << width << ',' << diversity << ','
+						<< alternateCount << ',' << (comparison.feasible ? 1 : 0)
+						<< ',' << comparison.baseline_score << ','
+						<< comparison.structured_score << ','
+						<< (comparison.feasible
+							? static_cast<double>(comparison.structured_score)
+								- static_cast<double>(comparison.baseline_score)
+							: 0.0) << ',' << (replayComparison.feasible ? 1 : 0)
+						<< ',' << replayComparison.structured_score << ','
+						<< (comparison.feasible && replayComparison.feasible
+							? static_cast<double>(comparison.structured_score)
+								- static_cast<double>(replayComparison.structured_score)
+							: 0.0) << '\n';
+				}
+			}
+		}
+	}
+	return static_cast<bool>(csv);
+}
+
+bool RastaConverter::RunPhase7RetainedWindowScreen(
+	const std::string& csvPath, const std::string& profileLabel)
+{
+	if (!cfg.dual_mode || m_evaluators.empty()
+		|| m_eval_gstate.m_best_pic.raster_lines.size() != static_cast<size_t>(m_height)
+		|| m_best_pic_B.raster_lines.size() != static_cast<size_t>(m_height))
+		return false;
+	std::ofstream csv(csvPath, std::ios::out | std::ios::trunc);
+	if (!csv) return false;
+	csv << "profile,first_line,line_count,slots,choices,joint_feasible,"
+		"alternating_feasible,joint_legal_a,joint_legal_b,alternating_legal_a,"
+		"alternating_legal_b,baseline_visual,baseline_flicker,baseline_total,"
+		"joint_visual,joint_flicker,joint_total,alternating_visual,"
+		"alternating_flicker,alternating_total,joint_minus_alternating\n";
+
+	Evaluator& evaluator = m_evaluators.front();
+	raster_picture baselineA = m_eval_gstate.m_best_pic;
+	raster_picture baselineB = m_best_pic_B;
+	StructuredBeamOptions options;
+	options.width = 64;
+	options.diversity_per_state = 2;
+	options.repair_cost_per_pixel = 0.0;
+	const size_t lineCounts[] = {1, 2, 4};
+	size_t emitted = 0;
+	for (size_t lineCount : lineCounts)
+	{
+		size_t emittedForCount = 0;
+		for (size_t firstLine = 0;
+			firstLine + lineCount <= static_cast<size_t>(m_height); ++firstLine)
+		{
+			if (emittedForCount >= 2) break;
+			StructuredPairedWindowProblem problem;
+			if (!ExtractStructuredPairedWindowProblem(baselineA, baselineB,
+					firstLine, lineCount, 1, options, problem)
+				|| !evaluator.PopulateDualStructuredWindowCosts(baselineA, baselineB,
+					firstLine, problem, options))
+				continue;
+			const StructuredPairedWindowResult joint =
+				SearchStructuredPairedWindowBeam(problem.incoming_a,
+					problem.incoming_b, problem.lines, options,
+					&problem.required_outgoing_a, &problem.required_outgoing_b);
+			Evaluator::DualStructuredWindowComparison jointComparison;
+			if (joint.feasible)
+				jointComparison = evaluator.CompareDualStructuredWindow(
+					baselineA, baselineB, firstLine, joint);
+
+			auto selected = problem.lines;
+			for (auto& line : selected)
+				for (auto& segment : line)
+					segment.values = {segment.values.front()};
+			StructuredPairedWindowResult alternating;
+			for (int iteration = 0; iteration < 4; ++iteration)
+				for (int focus = 0; focus < 2; ++focus)
+				{
+					auto coordinate = problem.lines;
+					for (size_t line = 0; line < coordinate.size(); ++line)
+						for (size_t slot = 0; slot < coordinate[line].size(); ++slot)
+						{
+							const auto fixed = selected[line][slot].values.front();
+							auto& values = coordinate[line][slot].values;
+							values.erase(std::remove_if(values.begin(), values.end(),
+								[focus, fixed](const StructuredPairedSegmentValue& value) {
+									return focus == 0 ? value.value_b != fixed.value_b
+										: value.value_a != fixed.value_a;
+								}), values.end());
+						}
+					alternating = SearchStructuredPairedWindowBeam(problem.incoming_a,
+						problem.incoming_b, coordinate, options,
+						&problem.required_outgoing_a, &problem.required_outgoing_b);
+					if (!alternating.feasible) break;
+					for (size_t line = 0; line < selected.size(); ++line)
+					{
+						size_t cursorA = 0;
+						size_t cursorB = 0;
+						for (size_t slot = 0; slot < selected[line].size(); ++slot)
+						{
+							const auto& segment = problem.lines[line][slot];
+							const unsigned char valueA = segment.write_a
+								? alternating.frame_a.transitions[line][cursorA++].value
+								: segment.values.front().value_a;
+							const unsigned char valueB = segment.write_b
+								? alternating.frame_b.transitions[line][cursorB++].value
+								: segment.values.front().value_b;
+							for (const auto& value : problem.lines[line][slot].values)
+								if (value.value_a == valueA && value.value_b == valueB)
+									selected[line][slot].values = {value};
+						}
+					}
+				}
+			Evaluator::DualStructuredWindowComparison alternatingComparison;
+			if (alternating.feasible)
+				alternatingComparison = evaluator.CompareDualStructuredWindow(
+					baselineA, baselineB, firstLine, alternating);
+			size_t slots = 0;
+			size_t choices = 1;
+			for (const auto& line : problem.lines)
+				for (const auto& segment : line)
+				{
+					++slots;
+					choices *= segment.values.size();
+				}
+			const DualFrameScore baseline = jointComparison.feasible
+				? jointComparison.baseline : alternatingComparison.baseline;
+			csv << profileLabel << ',' << firstLine << ',' << lineCount << ','
+				<< slots << ',' << choices << ',' << jointComparison.feasible << ','
+				<< alternatingComparison.feasible << ',' << jointComparison.legal_a << ','
+				<< jointComparison.legal_b << ',' << alternatingComparison.legal_a << ','
+				<< alternatingComparison.legal_b << ',' << baseline.visual << ','
+				<< baseline.flicker << ',' << baseline.total << ','
+				<< jointComparison.structured.visual << ','
+				<< jointComparison.structured.flicker << ','
+				<< jointComparison.structured.total << ','
+				<< alternatingComparison.structured.visual << ','
+				<< alternatingComparison.structured.flicker << ','
+				<< alternatingComparison.structured.total << ','
+				<< (jointComparison.structured.total
+					- alternatingComparison.structured.total) << '\n';
+			++emitted;
+			++emittedForCount;
+		}
+	}
+	return emitted > 0 && static_cast<bool>(csv);
 }
 
 
 void RastaConverter::reconfigureAcceptanceHistory()
 {
 	bool optimizer_changed = cfg.resume_optimizer_changed;
-	bool metric_changed = cfg.resume_distance_changed || cfg.resume_predistance_changed || cfg.resume_dither_changed;
+	bool metric_changed = cfg.resume_distance_changed || cfg.resume_predistance_changed || cfg.resume_dither_changed || cfg.resume_objective_changed;
 	bool solutions_changed = cfg.resume_solutions_changed;
 	if (!optimizer_changed && !solutions_changed && !metric_changed) {
 		m_needs_history_reconfigure = false;
@@ -2626,6 +3027,7 @@ void RastaConverter::reconfigureAcceptanceHistory()
 		cfg.resume_distance_changed = false;
 		cfg.resume_predistance_changed = false;
 		cfg.resume_dither_changed = false;
+		cfg.resume_objective_changed = false;
 		m_needs_history_reconfigure = false;
 		return;
 	}
@@ -2634,14 +3036,14 @@ void RastaConverter::reconfigureAcceptanceHistory()
 	if (history.empty()) history.push_back(m_eval_gstate.m_best_result);
 
 	size_t target_len = static_cast<size_t>(std::max(1, solutions));
-	double previous_max = history.empty() ? m_eval_gstate.m_best_result : *std::max_element(history.begin(), history.end());
+	double previous_max = history.empty() ? m_eval_gstate.m_best_result.load(std::memory_order_relaxed) : *std::max_element(history.begin(), history.end());
 
 	auto recompute_single_cost = [this]() -> double {
 		Evaluator& ev = m_evaluators.front();
 		raster_picture pic = m_eval_gstate.m_best_pic;
 		std::vector<const line_cache_result*> res(m_height, nullptr);
 		ev.RecachePicture(&pic);
-		double cost = (double)ev.ExecuteRasterProgram(&pic, res.data());
+		double cost = (double)ev.EvaluateSingle(&pic, res.data());
 		return cost;
 	};
 
@@ -2684,6 +3086,7 @@ void RastaConverter::reconfigureAcceptanceHistory()
 	cfg.resume_distance_changed = false;
 	cfg.resume_predistance_changed = false;
 	cfg.resume_dither_changed = false;
+	cfg.resume_objective_changed = false;
 	m_needs_history_reconfigure = false;
 }
 
@@ -2738,8 +3141,140 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
     asmOut << "; RastaConverter by Ilmenit v." << program_version << '\n';
     asmOut << "; InputName: " << cfg.input_file << '\n';
     asmOut << "; CmdLine: " << cfg.command_line << '\n';
+	if (!details_mask.Empty())
+	{
+		asmOut << "; Details Source Hash: " << details_mask.SourceHash() << '\n';
+		asmOut << "; Details Effective Hash: " << details_mask.EffectiveHash() << '\n';
+		asmOut << "; Details Mode: " << cfg.details_mode << '\n';
+		asmOut << "; Details Score: " << (cfg.details_score ? "on" : "off") << '\n';
+		asmOut << "; Details Allocation: " << (cfg.details_allocate ? "on" : "off") << '\n';
+		asmOut << "; Details Global Period: " << cfg.details_global_period << '\n';
+	}
     asmOut << "; Evaluations: " << static_cast<unsigned long long>(m_eval_gstate.m_evaluations) << '\n';
     asmOut << "; Score: " << NormalizeScore(m_eval_gstate.m_best_result) << '\n';
+	if (!cfg.dual_mode && !m_evaluators.empty())
+	{
+		const std::streamsize scorePrecision = asmOut.precision();
+		asmOut << std::setprecision(17)
+			<< "; Unweighted Source OKLab Mean: "
+			<< UnweightedSourceOklabMean(pic) << '\n'
+			<< std::setprecision(scorePrecision);
+	}
+    const unsigned long long lockSamples = m_eval_gstate.m_single_state_lock_samples.load(std::memory_order_relaxed);
+    const unsigned long long copySamples = m_eval_gstate.m_single_copy_samples.load(std::memory_order_relaxed);
+	asmOut << "; Optimizer Accepted: " << m_eval_gstate.m_single_accepted.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Optimizer Global Improvements: " << m_eval_gstate.m_single_global_improvements.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Optimizer Migrations: " << m_eval_gstate.m_single_migrations.load(std::memory_order_relaxed) << '\n';
+    asmOut << "; State Lock Samples: " << lockSamples << '\n';
+    asmOut << "; State Lock Mean Wait Ns: " << (lockSamples ? m_eval_gstate.m_single_state_lock_wait_ns.load(std::memory_order_relaxed) / lockSamples : 0ULL) << '\n';
+    asmOut << "; State Lock Mean Hold Ns: " << (lockSamples ? m_eval_gstate.m_single_state_lock_hold_ns.load(std::memory_order_relaxed) / lockSamples : 0ULL) << '\n';
+    asmOut << "; Accepted Copy Samples: " << copySamples << '\n';
+    asmOut << "; Accepted Copy Mean Ns: " << (copySamples ? m_eval_gstate.m_single_copy_ns.load(std::memory_order_relaxed) / copySamples : 0ULL) << '\n';
+	const unsigned long long publicationCopyEvents = m_eval_gstate.m_publication_copy_events.load(std::memory_order_relaxed);
+	const unsigned long long publicationCopyNs = m_eval_gstate.m_publication_copy_ns.load(std::memory_order_relaxed);
+	const unsigned long long migrationCopyEvents = m_eval_gstate.m_migration_copy_events.load(std::memory_order_relaxed);
+	const unsigned long long migrationCopyNs = m_eval_gstate.m_migration_copy_ns.load(std::memory_order_relaxed);
+	asmOut << "; Publication Copy Events: " << publicationCopyEvents << '\n';
+	asmOut << "; Publication Copy Total Ns: " << publicationCopyNs << '\n';
+	asmOut << "; Publication Copy Mean Ns: " << (publicationCopyEvents ? publicationCopyNs / publicationCopyEvents : 0ULL) << '\n';
+	asmOut << "; Migration Copy Events: " << migrationCopyEvents << '\n';
+	asmOut << "; Migration Copy Total Ns: " << migrationCopyNs << '\n';
+	asmOut << "; Migration Copy Mean Ns: " << (migrationCopyEvents ? migrationCopyNs / migrationCopyEvents : 0ULL) << '\n';
+	asmOut << "; Migration Lines Copied: " << m_eval_gstate.m_migration_lines_copied.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Migration Lines Reused: " << m_eval_gstate.m_migration_lines_reused.load(std::memory_order_relaxed) << '\n';
+	const unsigned long long improvementEvents = m_eval_gstate.m_improvement_events.load(std::memory_order_relaxed);
+	const double improvementTotal = m_eval_gstate.m_improvement_total.load(std::memory_order_relaxed);
+	const std::streamsize metadataPrecision = asmOut.precision();
+	asmOut << std::setprecision(17);
+	asmOut << "; Improvement Events: " << improvementEvents << '\n';
+	asmOut << "; Improvement Total: " << improvementTotal << '\n';
+	asmOut << "; Improvement Mean: " << (improvementEvents ?
+		improvementTotal / static_cast<double>(improvementEvents) : 0.0) << '\n';
+	asmOut << "; Improvement Max: " << m_eval_gstate.m_improvement_max.load(std::memory_order_relaxed) << '\n';
+	asmOut << std::setprecision(metadataPrecision);
+    asmOut << "; Cache Partial Clears: " << m_eval_gstate.m_single_cache_partial_clears.load(std::memory_order_relaxed) << '\n';
+    asmOut << "; Cache Full Clears: " << m_eval_gstate.m_single_cache_full_clears.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Candidate Full Copies: " << m_eval_gstate.m_single_candidate_full_copies.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Undo Candidates: " << m_eval_gstate.m_single_undo_candidates.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Undo Line Snapshots: " << m_eval_gstate.m_single_undo_line_snapshots.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Undo Restores: " << m_eval_gstate.m_single_undo_restores.load(std::memory_order_relaxed) << '\n';
+	const unsigned long long cacheLookups = m_eval_gstate.m_cache_lookups.load(std::memory_order_relaxed);
+	const unsigned long long cacheEvaluations = m_eval_gstate.m_cache_evaluations.load(std::memory_order_relaxed);
+	const unsigned long long lruUpdates = m_eval_gstate.m_lru_updates.load(std::memory_order_relaxed);
+	asmOut << "; Cache Lookups: " << cacheLookups << '\n';
+	asmOut << "; Cache Hits: " << m_eval_gstate.m_cache_hits.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Misses: " << m_eval_gstate.m_cache_misses.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Lookup Probes: " << m_eval_gstate.m_cache_lookup_probes.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Mean Lookup Probes: " << (cacheLookups ?
+		static_cast<double>(m_eval_gstate.m_cache_lookup_probes.load(std::memory_order_relaxed)) / cacheLookups : 0.0) << '\n';
+	asmOut << "; Cache Max Lookup Probes: " << m_eval_gstate.m_cache_max_lookup_probes.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Inserts: " << m_eval_gstate.m_cache_inserts.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Hash Blocks: " << m_eval_gstate.m_cache_hash_blocks.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Entry Bytes: " << m_eval_gstate.m_cache_entry_bytes.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Hash Block Bytes: " << m_eval_gstate.m_cache_hash_block_bytes.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Color Row Bytes: " << m_eval_gstate.m_cache_color_row_bytes.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Target Row Bytes: " << m_eval_gstate.m_cache_target_row_bytes.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Insn Cache Hash Block Bytes: " << m_eval_gstate.m_insn_cache_hash_block_bytes.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Insn Cache Data Bytes: " << m_eval_gstate.m_insn_cache_data_bytes.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Evaluations: " << cacheEvaluations << '\n';
+	asmOut << "; Cache Recomputed Lines: " << m_eval_gstate.m_cache_recomputed_lines.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Mean Recomputed Lines: " << (cacheEvaluations ?
+		static_cast<double>(m_eval_gstate.m_cache_recomputed_lines.load(std::memory_order_relaxed)) / cacheEvaluations : 0.0) << '\n';
+	asmOut << "; Cache Max Recomputed Lines: " << m_eval_gstate.m_cache_max_recomputed_lines.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Propagation Span: " << m_eval_gstate.m_cache_propagation_span.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache Mean Propagation Span: " << (cacheEvaluations ?
+		static_cast<double>(m_eval_gstate.m_cache_propagation_span.load(std::memory_order_relaxed)) / cacheEvaluations : 0.0) << '\n';
+	asmOut << "; Cache Max Propagation Span: " << m_eval_gstate.m_cache_max_propagation_span.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; Cache PMG Restarts: " << m_eval_gstate.m_cache_pmg_restarts.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; LRU Updates: " << lruUpdates << '\n';
+	asmOut << "; LRU Search Steps: " << m_eval_gstate.m_lru_search_steps.load(std::memory_order_relaxed) << '\n';
+	asmOut << "; LRU Mean Search Steps: " << (lruUpdates ?
+		static_cast<double>(m_eval_gstate.m_lru_search_steps.load(std::memory_order_relaxed)) / lruUpdates : 0.0) << '\n';
+	unsigned long long timingProgramCycles = 0;
+	unsigned timingMaxProgramCycles = 0;
+	unsigned timingLinesAtLimit = 0;
+	for (const raster_line& line : pic->raster_lines)
+	{
+		assert(line.cycles >= 0 && line.cycles <= raster_program_cycle_limit);
+		assert((line.cycles & 1) == 0);
+		timingProgramCycles += static_cast<unsigned>(line.cycles);
+		timingMaxProgramCycles = std::max(timingMaxProgramCycles, static_cast<unsigned>(line.cycles));
+		if (line.cycles == raster_program_cycle_limit)
+			++timingLinesAtLimit;
+	}
+	asmOut << "; Timing CPU Slots: " << raster_cpu_slots << '\n';
+	asmOut << "; Timing Program Cycle Limit: " << raster_program_cycle_limit << '\n';
+	asmOut << "; Timing Tail Cycles: " << raster_tail_cycles << '\n';
+	asmOut << "; Timing Mean Program Cycles: " << (pic->raster_lines.empty() ? 0.0 :
+		static_cast<double>(timingProgramCycles) / pic->raster_lines.size()) << '\n';
+	asmOut << "; Timing Max Program Cycles: " << timingMaxProgramCycles << '\n';
+	asmOut << "; Timing Lines At Limit: " << timingLinesAtLimit << '\n';
+	for (unsigned y = 0; y < m_eval_gstate.m_cache_hits_by_line.size(); ++y)
+	{
+		asmOut << "; Cache Line " << y << " Hits: " << m_eval_gstate.m_cache_hits_by_line[y]
+			<< " Misses: " << m_eval_gstate.m_cache_misses_by_line[y] << '\n';
+	}
+	const std::streamsize mutationPrecision = asmOut.precision();
+	asmOut << std::setprecision(17);
+	for (int i = 0; i < E_MUTATION_MAX; ++i)
+	{
+		const unsigned long long improving =
+			m_eval_gstate.m_mutation_improving[i].load(std::memory_order_relaxed);
+		const double improvementCredit =
+			m_eval_gstate.m_mutation_improvement_credit_total[i].load(std::memory_order_relaxed);
+		asmOut << "; Mutation " << mutation_names[i]
+			<< " Attempted: " << m_eval_gstate.m_mutation_attempted[i].load(std::memory_order_relaxed)
+			<< " Applied: " << m_eval_gstate.m_mutation_applied[i].load(std::memory_order_relaxed)
+			<< " Accepted: " << m_eval_gstate.m_mutation_accepted[i].load(std::memory_order_relaxed)
+			<< " Improving: " << improving
+			<< " Improvement Credit Total: " << improvementCredit
+			<< " Improvement Credit Mean: " << (improving ?
+				improvementCredit / static_cast<double>(improving) : 0.0)
+			<< " Improvement Credit Max: "
+			<< m_eval_gstate.m_mutation_improvement_credit_max[i].load(std::memory_order_relaxed)
+			<< '\n';
+	}
+	asmOut << std::setprecision(mutationPrecision);
     asmOut << "; ---------------------------------- \n";
 
     asmOut << "; Proper offset \n";
@@ -2806,7 +3341,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
             asmOut << '\n';
         }
         asmOut << std::dec;
-        for (int cycle = pic->raster_lines[y].cycles; cycle < free_cycles; cycle += 2)
+        for (int cycle = pic->raster_lines[y].cycles; cycle < raster_program_cycle_limit; cycle += 2)
         {
             asmOut << "\tnop ; filler\n";
         }
@@ -2825,4 +3360,13 @@ double RastaConverter::NormalizeScore(double raw_score)
 	return raw_score / (((double)m_width*(double)m_height)*(MAX_COLOR_DISTANCE/10000));
 }
 
-
+double RastaConverter::UnweightedSourceOklabMean(raster_picture* pic)
+{
+	if (pic == nullptr || !m_reporting_evaluator || m_width <= 0 || m_height <= 0)
+		return 0.0;
+	constexpr double kOklabEnergyScale = 200000.0;
+	const distance_accum_t total =
+		m_reporting_evaluator->EvaluateUnweightedSource(pic);
+	return static_cast<double>(total)
+		/ (static_cast<double>(m_width) * m_height * kOklabEnergyScale);
+}

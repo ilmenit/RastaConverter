@@ -2,6 +2,7 @@ Param(
 	[string]$Preset,
 	[string]$Config = "Release",
 	[switch]$NoGui,
+	[switch]$NoLiveUi,
 	[switch]$Clean,
 	[switch]$CleanOnly,
 	[string]$Compiler,
@@ -40,8 +41,17 @@ if ($Compiler -and ($Compiler.ToLower() -ne "msvc")) {
 }
 
 $binaryDir = Join-Path $PSScriptRoot "build/$Preset"
-$cfgArgs = @("--preset", $Preset)
-if ($NoGui) { $cfgArgs += "-DBUILD_NO_GUI=ON" }
+if ($NoGui) { $binaryDir = "$binaryDir-nogui" }
+$cfgArgs = @("--preset", $Preset, "-B", $binaryDir)
+$liveUi = -not $NoGui -and -not $NoLiveUi
+$cfgArgs += "-DBUILD_NO_GUI=$(if ($NoGui) { 'ON' } else { 'OFF' })"
+$cfgArgs += "-DENABLE_LIVE_UI=$(if ($liveUi) { 'ON' } else { 'OFF' })"
+if ($env:VCPKG_ROOT) {
+	$toolchain = Join-Path $env:VCPKG_ROOT "scripts/buildsystems/vcpkg.cmake"
+	if (Test-Path $toolchain) {
+		$cfgArgs += @("-DCMAKE_TOOLCHAIN_FILE=$toolchain", "-DVCPKG_FEATURE_FLAGS=manifests")
+	}
+}
 if ($Compiler) {
     switch ($Compiler.ToLower()) {
         "clang"     { $cfgArgs += @("-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++") }
@@ -54,14 +64,19 @@ if ($Compiler) {
 }
 if ($Extra) { $cfgArgs += $Extra }
 
-if ($Clean) {
+if ($Clean -or $CleanOnly) {
 	if (Test-Path $binaryDir) {
 		Write-Host "[info] CLEAN: removing $binaryDir"
 		Remove-Item -Recurse -Force $binaryDir
 	}
 }
 
-Write-Host "[info] Configuring (preset=$Preset, config=$Config, nogui=$($NoGui.IsPresent)$(if($Compiler){", compiler=$Compiler"})) ..."
+if ($CleanOnly) {
+	Write-Host "[success] CLEANONLY: $binaryDir has been removed."
+	exit 0
+}
+
+Write-Host "[info] Configuring (preset=$Preset, config=$Config, nogui=$($NoGui.IsPresent), liveui=$liveUi$(if($Compiler){", compiler=$Compiler"})) ..."
 if ($Compiler) {
     Write-Host "[info] Compiler: $Compiler"
 } else {
@@ -70,27 +85,19 @@ if ($Compiler) {
 if ($Extra) {
     Write-Host "[info] Extra CMake args: $($Extra -join ' ')"
 }
-& cmake -S . @cfgArgs
+& cmake -S $PSScriptRoot @cfgArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[error] Configuration failed." -ForegroundColor Red
     Write-Host "[hint] Try one of the following:" -ForegroundColor Yellow
-    Write-Host "  - Provide paths in config.env: FREEIMAGE_DIR, SDL2_DIR, SDL2_TTF_DIR"
+    Write-Host "  - Provide paths in config.env: FREEIMAGE_DIR, SDL3_DIR, SDL3_TTF_DIR"
     Write-Host "  - OR install system packages:"
-    Write-Host "      Ubuntu:   sudo apt install libfreeimage-dev libsdl2-dev libsdl2-ttf-dev"
-    Write-Host "      macOS:    brew install freeimage sdl2 sdl2_ttf"
+    Write-Host "      Ubuntu:   install FreeImage, SDL3, and SDL3_ttf development packages"
+    Write-Host "      macOS:    brew install freeimage sdl3 sdl3_ttf"
     Write-Host "      Windows:  use vcpkg or vendor SDKs"
     Write-Host "  - With vcpkg: set VCPKG_ROOT then pass toolchain, e.g.:"
     Write-Host "      cmake --preset $Preset -DCMAKE_TOOLCHAIN_FILE=\"$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake\""
     Write-Host "  - You can run: cmake -P check_dependencies.cmake   to see discovery hints"
     exit 1
-}
-
-if ($CleanOnly) {
-	Write-Host "[info] CLEANONLY requested, exiting after configure."
-	Write-Host "[info] Detected compiler information:"
-	$compilerInfo = & cmake -LA -N $binaryDir 2>$null | Select-String -Pattern "CMAKE_C_COMPILER|CMAKE_CXX_COMPILER|CMAKE_BUILD_TYPE|ENABLE_" | Select-Object -First 10
-	if ($compilerInfo) { $compilerInfo | ForEach-Object { Write-Host "[info] $_" } }
-	exit 0
 }
 
 Write-Host "[info] Detected compiler information:"
@@ -99,11 +106,13 @@ if ($compilerInfo) { $compilerInfo | ForEach-Object { Write-Host "[info] $_" } }
 
 Write-Host "[info] Building ..."
 & cmake --build $binaryDir --config $Config
+if ($LASTEXITCODE -ne 0) {
+	Write-Error "Build failed. See errors above."
+	exit $LASTEXITCODE
+}
 
 if (Test-Path (Join-Path $binaryDir $Config)) {
 	Write-Host "[success] Artifacts: $(Join-Path $binaryDir $Config)"
 } else {
 	Write-Host "[success] Artifacts: $binaryDir"
 }
-
-

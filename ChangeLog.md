@@ -2,10 +2,93 @@ ChangeLog
 =========
 
 RastaConverterBeta21      2025-11-?? [AI RELEASE]
+* New interactive Live UI (built with /livegui, or by launching with no command line):
+  - Setup screen with the image picker on top, one continuous grouped form covering
+    every conversion option beside a large live preview, native system file pickers,
+    option search, an "Only changed" audit view, and "Copy command line" for exact
+    GUI/CLI parity.
+  - Live target preview: source, colour-corrected, quantized and dithered views with
+    split-wipe and blink comparison, plus a palette-utilization readout showing how
+    many of the 128 colours the target actually reaches.
+  - Run dashboard replacing the plain stats text: convergence chart, plateau readout,
+    mutation-operator breakdown, island diagnostics, dual-frame phase and schedule,
+    a configuration recap, and explicit Save / Stop and save / Abort actions.
+  - Every conversion writes into its own folder beside the source image,
+    rc-<image>-NNN (rc-photo-001, rc-photo-002, ...), instead of scattering a
+    dozen artifacts across the image's folder. The counter steps up when a name
+    is taken, so a re-run never disturbs an earlier one.
+  - "Recent" browser listing previous conversions with their picture, score and
+    evaluation count, offering Continue (resume that run in place) or Reuse
+    (same settings, fresh folder). It reads the header the .opt file already
+    writes, so runs from earlier versions are listed too, and it appears by
+    itself in the empty preview column before an image is chosen.
+  - Finishing a conversion returns to the setup screen with the settings still
+    in place, opening on the history so the run just completed is the first
+    card, instead of quitting the program.
+  - GUI-only conveniences: a warning before overwriting an existing run's
+    artifacts, and palette lookup relative to the executable so launching from a
+    shortcut works.
+  - A run started from the GUI now records its own settings in the "; CmdLine:"
+    header of the .opt file. They were never written there before, because the
+    form's values never passed through the command-line parser - so a GUI run's
+    header described the launch arguments, which is nothing at all for a
+    double-clicked program. Everything that reads that header was affected:
+    Reuse in the Recent browser restored only the input image, and resuming a
+    GUI run came back with default settings rather than the ones it was started
+    with, mask and all. Job paths are also made absolute when the run starts, so
+    a recipe still resolves from a different working directory.
+  - Reuse and resume no longer drop back to the old three-blit display:
+    re-parsing the stored settings decided which interface to use by looking for
+    /livegui among them, which a recorded recipe never contains.
+  - Hovering a card in the Recent browser shows the full command line that
+    produced it, and the Reuse button says plainly when a run recorded no
+    settings to restore.
+  - Correct handling of scaled (HiDPI) displays: without it the interface was drawn
+    undersized while mouse hit-testing used unscaled coordinates, so hovering one
+    control highlighted a different one and clipping cut through text.
+  - Searching the option list filters the live form, so a match is the actual
+    control ready to edit. An option that exists but is gated by the current
+    configuration explains itself instead of reporting no match.
+  - Knoll dithering can now be previewed exactly on request, not just approximated:
+    its ordered-dither core is shared with the converter (verified byte-identical).
+  - The details mask is visible at last, in both the setup preview and during the
+    conversion: Off / Overlay (with an opacity slider) / Only. It shows the
+    *effective* weight map produced by DetailsMask for the selected mode, not a
+    redraw of the source file - in normalized and refined modes those differ a lot.
+  - The details strength slider reaches 15 instead of stopping at 1. Legacy mode
+    weights white areas by 1 + strength, so the classic heavy-emphasis settings
+    (3 for 4x, 15 for 16x) were unreachable from the GUI; the engine never had an
+    upper limit. The form now states the resulting multiplier for the active mode.
+* /saturation and /vibrance were implemented but undocumented; they now have help.txt
+  entries explaining when to reach for each.
+* Fixed a crash on starting a conversion: input_bitmap, output_bitmap and
+  destination_bitmap had no initializers and were only ever zeroed because the
+  single RastaConverter happened to be a global with static storage. Once the live
+  UI began creating one per run, those pointers held heap garbage, and
+  ShowInputBitmap's "if (destination_bitmap)" guard passed it straight to FreeImage.
+* /preprocess now exits with status 0 instead of 1: it reported a successful
+  preprocessing run as a failure, and terminated the process outright, which would
+  have ended a live-UI session rather than returning to the setup screen.
+* Removed the unused global Evaluator and documented which conversion globals need
+  resetting between runs, which is what allowed several conversions to run in one
+  process safely (only color_indexes_on_dst_picture accumulates).
+* Fixed /continue ignoring an output path chosen through the GUI: main.cpp re-read
+  /output from the parsed command line, which sent a resume started from the live UI
+  to "output.png" instead of the run's own folder.
+* Fixed a colour corruption in dithering: the blue channel of the diffused error was
+  clamped by testing and writing the green channel, leaving blue unbounded and
+  corrupting green whenever blue saturated. All error-diffusion dither modes
+  (floyd, line, line2, chess, simple, 2d, jarvis) produce slightly different, more
+  correct output as a result. /dither=none and /dither=rfloyd are unaffected.
+* Quantization and dithering of the target picture moved into a shared implementation
+  (TargetBuilder.h) so the Setup preview and the real conversion cannot diverge.
+  Verified byte-identical to the previous implementation across every dither mode.
 * Improved Dual Mode to use Input image as Target image - should improve output quality in dual mode
 * During dithering phase user can now quit the app (useful for slow knoll dithering)
 * Dithering preview is shown on the right side of screen.
 * Added input dithering for Dual Mode (/dual_dither=knoll|random|chess|line|line2) - adds noise to guide color distribution and remove banding
+* Removed the experimental alternating-scanline coarse search, its command switches, environment gates, GUI status, and optimizer lifecycle after broader evidence failed to establish a dependable advantage; preserved its implementation and results in benchmark documentation.
+* Moved GUI optimizer status lines below the source/destination captions so the labels are no longer overwritten.
 
 
 RastaConverterBeta20      2025-10-29 [AI RELEASE]
@@ -27,11 +110,11 @@ RastaConverterBeta18      2025-09-23 [AI RELEASE]
 * /opt=legacy mode adjusted to reflect Beta10 algorithm
 
 RastaConverterBeta17      2025-09-19 [AI RELEASE]
-* SDL2 version on Linux and flickering of input/destination images fixed
+* SDL GUI version on Linux and flickering of input/destination images fixed
 * Showing conversion rate fixed on Linux
 * Fixed /continue - shouldn't crash anymore
 * Fix to saving numbers to be more than 32bit (like number of evaluations for long run)
-* check NO_GUI build on Linux - shouldn't open SDL2 window.
+* check NO_GUI build on Linux - shouldn't open an SDL window.
 * Fixed knoll dithering
 * add to Linux build process copying ttf font to output directory so GUI version can work
 * Added /opt=legacy option - legacy LAHC behavior
@@ -46,7 +129,7 @@ RastaConverterBeta16      2025-08-24 [AI RELEASE]
 
 RastaConverterBeta15      2025-08-23 [AI RELEASE]
 * Dual mode - first official version, check documentation
-* Fixing SDL2 window handling on Linux
+* Fixing SDL window handling on Linux
 * Improved performance with Intel C++ compiler                                     
 
 RastaConverterBeta14      2025-08-20 [AI RELEASE]
@@ -94,7 +177,7 @@ RastaConverterBeta10
 
 RastaConverterBeta9      2024-04-17 
 * fixed sprite repositioning bug (sheddy, phaeron)
-* removed dependency on Allegro 4 library, replaced by SDL2
+* removed dependency on Allegro 4 library, replaced by an SDL-based GUI
 * 64bit version released
 * removed threads limit for /threads param
 * by default auto-save enabled (each 100K iterations)
@@ -102,12 +185,12 @@ RastaConverterBeta9      2024-04-17
 * improved help file (snicklin99)
 * LLVM compiler used for extra speed (sheddy)
 * removed --help parameter that was pointing to help.txt file
-* Conditional compilation with NO_GUI directive that removes dependency on SDL2 (for developers who want to run RC on GUI-less devices)
+* Conditional compilation with NO_GUI directive that removes the SDL GUI dependency (for developers who want to run RC on GUI-less devices)
 
 
 RastaConverterBeta9      2024-04-17 
 * fixed sprite repositioning bug (sheddy, phaeron)
-* removed dependency on Allegro 4 library, replaced by SDL2
+* removed dependency on Allegro 4 library, replaced by an SDL-based GUI
 * 64bit version released
 * removed threads limit for /threads param
 * by default auto-save enabled (each 100K iterations)
@@ -115,7 +198,7 @@ RastaConverterBeta9      2024-04-17
 * improved help file (snicklin99)
 * LLVM compiler used for extra speed (sheddy)
 * removed --help parameter that was pointing to help.txt file
-* Conditional compilation with NO_GUI directive that removes dependency on SDL2 (for developers who want to run RC on GUI-less devices)
+* Conditional compilation with NO_GUI directive that removes the SDL GUI dependency (for developers who want to run RC on GUI-less devices)
 
 RastaConverterBeta7      2013-06-01 Ilmenit & Phaeron
 ----------------------------------------------
@@ -396,6 +479,3 @@ RastaConverter-0.9  2012-04-18  ilmenit
 ---------------------------------------
 
 * http://atarionline.pl/forum/comments.php?DiscussionID=1611&page=7#Item_28
-
-
-

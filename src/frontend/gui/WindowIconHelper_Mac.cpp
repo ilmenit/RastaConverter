@@ -8,7 +8,7 @@
 
 #if defined(__APPLE__) && TARGET_OS_OSX
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include <CoreGraphics/CoreGraphics.h>
 #include <objc/objc.h>
@@ -79,5 +79,4 @@ bool WindowIconMac_SetDockIcon(SDL_Surface* surface)
 #endif // defined(__APPLE__) && TARGET_OS_OSX
 
 #endif // NO_GUI
-
 

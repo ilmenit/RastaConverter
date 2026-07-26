@@ -13,6 +13,15 @@ extern OnOffMap on_off;
 extern int solutions;
 extern bool quiet;
 
+namespace
+{
+#if defined(RASTA_DUAL_FULL_CANDIDATE_COPY)
+constexpr bool k_dual_transactional_mutation = false;
+#else
+constexpr bool k_dual_transactional_mutation = true;
+#endif
+}
+
 void RastaConverter::MainLoopDual()
 {
 	Message("Dual-mode optimization started.");
@@ -24,7 +33,7 @@ void RastaConverter::MainLoopDual()
 	// Critical initialization that was missing!
 	FindPossibleColors();
 	Init();
-	
+
 	PrecomputeDualTables();
 	DBG_PRINT("[RASTA] MainLoopDual: tables ready");
 
@@ -33,7 +42,7 @@ void RastaConverter::MainLoopDual()
 
 	// Dedicated evaluator for preview/initial calculations during bootstrap
 	m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_BOOTSTRAP_A, std::memory_order_relaxed);
-	
+
 	// Force solutions=1 during bootstrap phase for effective optimization even with short bootstrap
 	// If bootstrap is shorter than /s, the history never fills up and optimization doesn't work properly
 	// NOTE: With /continue, if user changed /s, ProcessCmdLine already updated global solutions before MainLoopDual()
@@ -41,7 +50,7 @@ void RastaConverter::MainLoopDual()
 	const int original_solutions = solutions;
 	const int bootstrap_solutions = 1;
 	solutions = bootstrap_solutions;
-	
+
 	// CRITICAL: Initialize optimizer history to size 1 before any evaluations
 	// If history is empty, the first evaluation would use evaluators' m_solutions (original value)
 	// which could be wrong. Initialize it explicitly to bootstrap_solutions=1.
@@ -51,7 +60,8 @@ void RastaConverter::MainLoopDual()
 		if (m_eval_gstate.m_previous_results.empty() || m_eval_gstate.m_previous_results.size() != (size_t)bootstrap_solutions) {
 			// History is empty or wrong size - resize to bootstrap size
 			// Use current best_result if available, otherwise will be reseeded after first evaluation
-			double seed_cost = (m_eval_gstate.m_best_result != DBL_MAX) ? m_eval_gstate.m_best_result : 0.0;
+			const double savedBest = m_eval_gstate.m_best_result.load(std::memory_order_relaxed);
+			double seed_cost = (savedBest != DBL_MAX) ? savedBest : 0.0;
 			m_eval_gstate.m_previous_results.resize(bootstrap_solutions, seed_cost);
 			m_eval_gstate.m_previous_results_index = 0;
 			if (m_eval_gstate.m_current_cost == DBL_MAX) {
@@ -61,7 +71,7 @@ void RastaConverter::MainLoopDual()
 			m_eval_gstate.m_N = bootstrap_solutions;
 		}
 	}
-	
+
 	Evaluator bootstrapEval; bootstrapEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed+101, cfg.cache_size);
 
 	// Prepare common UI rate tracking variables (used in both paths)
@@ -166,7 +176,7 @@ void RastaConverter::MainLoopDual()
 				m_eval_gstate.m_current_cost = C;
 				m_eval_gstate.m_cost_max = C;
 				m_eval_gstate.m_N = (int)hist_size;
-				m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+				m_eval_gstate.m_last_best_evaluation.store(m_eval_gstate.m_evaluations.load(std::memory_order_relaxed), std::memory_order_relaxed);
 				m_eval_gstate.m_current_norm_drift = 0.0;
 				m_eval_gstate.m_initialized = true;
 				m_needs_history_reconfigure = false;
@@ -227,7 +237,7 @@ void RastaConverter::MainLoopDual()
 			m_eval_gstate.m_cost_max = (double)bestCostA;
 			m_eval_gstate.m_N = bootstrap_solutions;
 			if (m_eval_gstate.m_last_best_evaluation == 0ULL)
-				m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+				m_eval_gstate.m_last_best_evaluation.store(m_eval_gstate.m_evaluations.load(std::memory_order_relaxed), std::memory_order_relaxed);
 		UpdateCreatedFromResults(resultsA, m_eval_gstate.m_created_picture);
 		UpdateTargetsFromResults(resultsA, m_eval_gstate.m_created_picture_targets);
 		memcpy(&m_eval_gstate.m_sprites_memory, &bootstrapEval.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
@@ -270,12 +280,13 @@ void RastaConverter::MainLoopDual()
 					if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_A) break;
 					++m_eval_gstate.m_evaluations;
 					Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost, false);
+					ev.RecordMutationOutcome(out, (double)cost);
 					// Progress local baseline even if not a global improvement
 					if (out.accepted && !out.improved) {
 						localBest = cand;
 					}
 					if (out.improved) {
-						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+						m_eval_gstate.m_last_best_evaluation.store(m_eval_gstate.m_evaluations.load(std::memory_order_relaxed), std::memory_order_relaxed);
 						m_eval_gstate.m_best_result = (double)cost;
 						m_eval_gstate.m_best_pic = cand; m_eval_gstate.m_best_pic.uncache_insns();
 						UpdateCreatedFromResults(line_results, m_eval_gstate.m_created_picture);
@@ -432,11 +443,12 @@ void RastaConverter::MainLoopDual()
 						if (m_eval_gstate.m_finished || m_eval_gstate.m_evaluations >= targetE_B) break;
 						++m_eval_gstate.m_evaluations;
 						Evaluator::AcceptanceOutcome out = ev.ApplyAcceptanceCore((double)cost, false);
+						ev.RecordMutationOutcome(out, (double)cost);
 						if (out.accepted && !out.improved) {
 							localB = cand;
 						}
 						if (out.improved) {
-							m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+							m_eval_gstate.m_last_best_evaluation.store(m_eval_gstate.m_evaluations.load(std::memory_order_relaxed), std::memory_order_relaxed);
 							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
 							UpdateCreatedFromResults(line_results, m_created_picture_B);
 							UpdateTargetsFromResults(line_results, m_created_picture_targets_B);
@@ -578,7 +590,7 @@ void RastaConverter::MainLoopDual()
 				a.uncache_insns();
 				m_eval_gstate.m_best_pic = a;
 				// CRITICAL: Reset m_best_result to dual baseline cost C measured against input-based target.
-				// Bootstrap phase accumulated m_best_result using single-frame evaluation against 
+				// Bootstrap phase accumulated m_best_result using single-frame evaluation against
 				// palette-quantized target (m_picture), which is INCOMPATIBLE with alternating phase
 				// that uses dual evaluation against original high-color input (m_input_target_*).
 				// These metrics have different scales and cannot be compared, so we must reset.
@@ -588,7 +600,7 @@ void RastaConverter::MainLoopDual()
 				m_eval_gstate.m_current_cost = C;
 				m_eval_gstate.m_cost_max = C;
 				m_eval_gstate.m_N = (int)hist_size;
-				m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+				m_eval_gstate.m_last_best_evaluation.store(m_eval_gstate.m_evaluations.load(std::memory_order_relaxed), std::memory_order_relaxed);
 				m_eval_gstate.m_current_norm_drift = 0.0;
 				m_eval_gstate.m_initialized = true;
 				m_needs_history_reconfigure = false;
@@ -620,69 +632,68 @@ void RastaConverter::MainLoopDual()
 		}
 
 		// Immediately show initial frame to ensure output is visible in dual mode (only if we didn't already)
-		if (!skip_bootstrap && !quiet) { 
-			m_dual_display = DualDisplayMode::MIX; 
-			ShowLastCreatedPictureDual(); 
-		} 
+		if (!skip_bootstrap && !quiet) {
+			m_dual_display = DualDisplayMode::MIX;
+			ShowLastCreatedPictureDual();
 		}
+	}
 
-		// CRITICAL: Restore original solutions value before alternating phase
-		// Bootstrap used solutions=1 for effective optimization even with short bootstrap
-		// Now restore the user's configured /s value for alternating phase
-		// Must restore BEFORE reconfigureAcceptanceHistory() since it uses the global solutions variable
-		solutions = original_solutions;
+	// CRITICAL: Restore original solutions value before alternating phase
+	// Bootstrap used solutions=1 for effective optimization even with short bootstrap
+	// Now restore the user's configured /s value for alternating phase
+	// Must restore BEFORE reconfigureAcceptanceHistory() since it uses the global solutions variable
+	solutions = original_solutions;
 
-		// If resuming with changed optimizer/solutions/distance, reconfigure history now
-		// (after restoring solutions so it uses the correct value)
-		bool history_was_reconfigured = false;
-		if (cfg.continue_processing && m_needs_history_reconfigure) {
-			reconfigureAcceptanceHistory();
-			// Check if reconfigureAcceptanceHistory() actually reseeded (it can return early without reseeding)
-			// It sets m_needs_history_reconfigure = false when done, and reseeds to target_len based on solutions
-			size_t expected_size = (solutions > 0) ? (size_t)solutions : 1ULL;
-			{
-				std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
-				history_was_reconfigured = (m_eval_gstate.m_previous_results.size() == expected_size && !m_needs_history_reconfigure);
-			}
-		}
-		DBG_PRINT("[RASTA] Restored solutions=%d for alternating phase (was %d during bootstrap)", solutions, bootstrap_solutions);
-		
-		// Reseed optimizer history with restored solutions size
-		// History was size 1 during bootstrap, now expand to user's configured /s value
-		// Skip if reconfigureAcceptanceHistory() already did this (it resizes to target_len based on solutions)
-		if (!history_was_reconfigured) {
-			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
-			double current_baseline = m_eval_gstate.m_best_result;
-			size_t new_hist_size = (solutions > 0) ? (size_t)solutions : 1ULL;
-			m_eval_gstate.m_previous_results.assign(new_hist_size, current_baseline);
-			m_eval_gstate.m_previous_results_index = 0;
-			m_eval_gstate.m_N = (int)new_hist_size;
-			// Update cost_max to match baseline (history is all filled with baseline)
-			m_eval_gstate.m_cost_max = current_baseline;
-		}
-		
-		// CRITICAL: Clear all caches before alternating phase
-		// Bootstrap phase used single-frame evaluation against palette-quantized target (m_picture)
-		// Alternating phase uses dual evaluation against original high-color input (m_input_target_*)
-		// These are incompatible metrics, so all caches must be cleared to avoid stale results
-		DBG_PRINT("[RASTA] Clearing all caches before alternating phase (target metric changed)");
-		int num_workers = std::max(1, cfg.threads);
+	// If resuming with changed optimizer/solutions/distance, reconfigure history now
+	// (after restoring solutions so it uses the correct value)
+	bool history_was_reconfigured = false;
+	if (cfg.continue_processing && m_needs_history_reconfigure) {
+		reconfigureAcceptanceHistory();
+		// Check if reconfigureAcceptanceHistory() actually reseeded (it can return early without reseeding)
+		// It sets m_needs_history_reconfigure = false when done, and reseeds to target_len based on solutions
+		size_t expected_size = (solutions > 0) ? (size_t)solutions : 1ULL;
 		{
 			std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
-			// Clear all evaluator caches
-			for (int tid = 0; tid < num_workers; ++tid) {
-				m_evaluators[tid].ClearAllCaches();
-			}
-			// Invalidate cache_key pointers in global raster_picture objects
-			// (cache_key points into evaluator's m_insn_seq_cache which we just cleared)
-			m_eval_gstate.m_best_pic.uncache_insns();
-			m_best_pic_B.uncache_insns();
+			history_was_reconfigured = (m_eval_gstate.m_previous_results.size() == expected_size && !m_needs_history_reconfigure);
 		}
+	}
+	DBG_PRINT("[RASTA] Restored solutions=%d for alternating phase (was %d during bootstrap)", solutions, bootstrap_solutions);
 
-		// Loop until finished/max_evals using worker threads and snapshots
-		const unsigned long long E0 = m_eval_gstate.m_evaluations;
-		std::vector<std::thread> workers;
-		workers.reserve(num_workers);
+	// Reseed optimizer history with restored solutions size
+	// History was size 1 during bootstrap, now expand to user's configured /s value
+	// Skip if reconfigureAcceptanceHistory() already did this (it resizes to target_len based on solutions)
+	if (!history_was_reconfigured) {
+		std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+		double current_baseline = m_eval_gstate.m_best_result;
+		size_t new_hist_size = (solutions > 0) ? (size_t)solutions : 1ULL;
+		m_eval_gstate.m_previous_results.assign(new_hist_size, current_baseline);
+		m_eval_gstate.m_previous_results_index = 0;
+		m_eval_gstate.m_N = (int)new_hist_size;
+		// Update cost_max to match baseline (history is all filled with baseline)
+		m_eval_gstate.m_cost_max = current_baseline;
+	}
+
+	// CRITICAL: Clear all caches before alternating phase
+	// Bootstrap phase used single-frame evaluation against palette-quantized target (m_picture)
+	// Alternating phase uses dual evaluation against original high-color input (m_input_target_*)
+	// These are incompatible metrics, so all caches must be cleared to avoid stale results
+	DBG_PRINT("[RASTA] Clearing all caches before alternating phase (target metric changed)");
+	int num_workers = std::max(1, cfg.threads);
+	{
+		std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
+		// Clear all evaluator caches
+		for (int tid = 0; tid < num_workers; ++tid) {
+			m_evaluators[tid].ClearAllCaches();
+		}
+		// Invalidate cache_key pointers in global raster_picture objects
+		// (cache_key points into evaluator's m_insn_seq_cache which we just cleared)
+		m_eval_gstate.m_best_pic.uncache_insns();
+		m_best_pic_B.uncache_insns();
+	}
+
+	// Loop until finished/max_evals using worker threads and snapshots
+	std::vector<std::thread> workers;
+	workers.reserve(num_workers);
 
 	// Sync each worker evaluator's local best to global best after reseed to prevent legacy mode acceptance guard mismatch
 	// NOTE: m_best_result was already reset to dual baseline cost C (line 537) measured against input-based target
@@ -700,7 +711,7 @@ void RastaConverter::MainLoopDual()
 	m_eval_gstate.m_dual_phase.store(EvalGlobalState::DUAL_PHASE_ALTERNATING, std::memory_order_relaxed);
 
 	for (int tid = 0; tid < num_workers; ++tid) {
-		workers.emplace_back([this, E0, tid]() {
+		workers.emplace_back([this, tid]() {
 			// Use long-lived evaluator to preserve legacy acceptance state
 			Evaluator& ev = m_evaluators[tid];
 			// Configure dual input-based targets for alternating phase
@@ -714,179 +725,349 @@ void RastaConverter::MainLoopDual()
 				m_input_target_y8.data(), m_input_target_u8.data(), m_input_target_v8.data());
 			ev.SetDualTemporalWeights((float)cfg.dual_luma, (float)cfg.dual_chroma);
 
+			const bool islandMode = m_eval_gstate.m_optimizer != EvalGlobalState::OPT_LEGACY;
+
 			// Local working state for this thread (NO sharing between threads)
 			std::vector<const line_cache_result*> line_results(m_height, nullptr);
-			
-			// Local copies of current best programs (avoid lock contention)
-			raster_picture currentA = m_eval_gstate.m_best_pic;
-			raster_picture currentB = m_best_pic_B.raster_lines.empty() ? m_eval_gstate.m_best_pic : m_best_pic_B;
+			DualOptimizerState<raster_picture> islandState;
+			raster_picture currentA;
+			raster_picture currentB;
+			std::vector<color_index_line> currentRowsA;
+			std::vector<color_index_line> currentRowsB;
+			std::vector<line_target> currentTargetsA;
+			std::vector<line_target> currentTargetsB;
+			std::vector<const unsigned char*> rowPointersA((size_t)m_height, nullptr);
+			std::vector<const unsigned char*> rowPointersB((size_t)m_height, nullptr);
+			sprites_memory_t currentSpritesA{};
+			sprites_memory_t currentSpritesB{};
+			double localAcceptedCost = DBL_MAX;
+			unsigned long long observedBestVersion = 0;
+			unsigned long long localIterations = 0;
+			unsigned long long localCandidateFullCopies = 0;
+			unsigned long long localUndoCandidates = 0;
+			unsigned long long localUndoLineSnapshots = 0;
+			unsigned long long localUndoRestores = 0;
+			unsigned long long localPublicationCopyEvents = 0;
+			unsigned long long localPublicationCopyNs = 0;
+			unsigned long long localMigrationCopyEvents = 0;
+			unsigned long long localMigrationCopyNs = 0;
+			RasterMutationTransaction mutationTransaction;
+			constexpr unsigned long long migrationCheckInterval = 256;
+			{
+				std::unique_lock<std::mutex> stateLock{m_eval_gstate.m_mutex};
+				currentA = m_eval_gstate.m_best_pic;
+				currentB = m_best_pic_B.raster_lines.empty() ? m_eval_gstate.m_best_pic : m_best_pic_B;
+				currentRowsA = m_eval_gstate.m_created_picture;
+				currentRowsB = m_created_picture_B;
+				currentTargetsA = m_eval_gstate.m_created_picture_targets;
+				currentTargetsB = m_created_picture_targets_B;
+				memcpy(&currentSpritesA, &m_eval_gstate.m_sprites_memory, sizeof currentSpritesA);
+				memcpy(&currentSpritesB, &m_sprites_memory_B, sizeof currentSpritesB);
+				localAcceptedCost = m_eval_gstate.m_best_result.load(std::memory_order_relaxed);
+				observedBestVersion = m_eval_gstate.m_best_state_version.load(std::memory_order_relaxed);
+			}
+			islandState.Initialize(currentA, currentB, localAcceptedCost,
+				static_cast<std::size_t>(std::max(solutions, 1)));
+			auto rebuildRowPointers = [this](const std::vector<color_index_line>& rows,
+				std::vector<const unsigned char*>& pointers) {
+				pointers.resize((size_t)m_height);
+				for (int y = 0; y < m_height; ++y)
+					pointers[y] = y < (int)rows.size() && !rows[y].empty() ? rows[y].data() : nullptr;
+			};
+			rebuildRowPointers(currentRowsA, rowPointersA);
+			rebuildRowPointers(currentRowsB, rowPointersB);
 
-			// Track local accepted cost for proper acceptance logic (like fork)
-			double localAcceptedCost = m_eval_gstate.m_best_result;
-			
 			// Track current phase to detect switches for simple fixed frame snapshots
 			bool local_mutateB = m_eval_gstate.m_dual_stage_focus_B.load(std::memory_order_relaxed);
 
 			while (true) {
-				// STAGE 1: Simple atomic stage coordination 
+				if (m_eval_gstate.m_finished.load(std::memory_order_acquire)
+					|| (cfg.max_evals > 0
+						&& m_eval_gstate.m_evaluations.load(std::memory_order_relaxed)
+							>= m_eval_gstate.m_max_evals))
+					break;
+				++localIterations;
+				// STAGE 1: Simple atomic stage coordination
 				bool mutateB = m_eval_gstate.m_dual_stage_focus_B.load(std::memory_order_relaxed);
 				unsigned long long stage_counter = m_eval_gstate.m_dual_stage_counter.fetch_add(1, std::memory_order_relaxed) + 1;
-				
+
 				// Detect phase switch and update fixed frame snapshots
 				if (stage_counter >= (unsigned long long)cfg.altering_dual_steps) {
 					// Phase switch triggered - coordinate globally using exchange so only one flips
-				if (m_eval_gstate.m_dual_stage_counter.exchange(0, std::memory_order_relaxed) 
-					>= (unsigned long long)cfg.altering_dual_steps) {
-					bool newFocusB = !mutateB;
-					m_eval_gstate.m_dual_stage_focus_B.store(newFocusB, std::memory_order_relaxed);
-					// Bump the 'other' frame generation to force dual cache invalidation on identity flip
-					if (newFocusB) {
-						// Now focusing on B (mutateB=true), so A becomes the fixed 'other' frame
-						m_eval_gstate.m_dual_generation_A.fetch_add(1, std::memory_order_acq_rel);
-					} else {
-						// Now focusing on A (mutateB=false), so B becomes the fixed 'other' frame
-						m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
+					if (m_eval_gstate.m_dual_stage_counter.exchange(0, std::memory_order_relaxed)
+						>= (unsigned long long)cfg.altering_dual_steps) {
+						const bool newFocusB = !mutateB;
+						m_eval_gstate.m_dual_stage_focus_B.store(newFocusB, std::memory_order_relaxed);
+						// Bump the 'other' frame generation to force dual cache invalidation on identity flip
+						if (newFocusB) {
+							// Now focusing on B (mutateB=true), so A becomes the fixed 'other' frame
+							m_eval_gstate.m_dual_generation_A.fetch_add(1, std::memory_order_acq_rel);
+						} else {
+							// Now focusing on A (mutateB=false), so B becomes the fixed 'other' frame
+							m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
+						}
 					}
-				}
 				}
 
 				// Quick re-read after potential update
 				mutateB = m_eval_gstate.m_dual_stage_focus_B.load(std::memory_order_relaxed);
 
-				// If phase switched, update local state and fixed frame snapshot
-				if (local_mutateB != mutateB) {
-					std::unique_lock<std::mutex> sync_lock{ m_eval_gstate.m_mutex };
-					
-					// Sync local copies with shared state
-					if (m_eval_gstate.m_best_result < localAcceptedCost) {
-						currentA = m_eval_gstate.m_best_pic;
-						currentB = m_best_pic_B;
-						localAcceptedCost = m_eval_gstate.m_best_result;
-					}
-					
-					// SIMPLE: Update the pointer array for the fixed frame using double buffering
-					std::unique_lock<std::mutex> fixed_lock{ m_eval_gstate.m_dual_fixed_frame_mutex };
-					m_eval_gstate.m_dual_fixed_frame_is_A.store(mutateB, std::memory_order_relaxed); // If mutating B, A is fixed
-
-					int next_idx = 1 - m_eval_gstate.m_dual_fixed_rows_active_index.load(std::memory_order_acquire);
-					if ((int)m_eval_gstate.m_dual_fixed_rows_buf[next_idx].size() != m_height) {
-						m_eval_gstate.m_dual_fixed_rows_buf[next_idx].assign((size_t)m_height, (const unsigned char*)nullptr);
-					}
-					if (mutateB) {
-						// B will be mutated, so A is fixed - wire pointers to current A rows
-						if ((int)m_eval_gstate.m_dual_fixed_frame_A.size() != m_height) {
-							m_eval_gstate.m_dual_fixed_frame_A.resize(m_height);
-						}
-						for (int y = 0; y < m_height; ++y) {
-							if (y < (int)m_eval_gstate.m_created_picture.size() && !m_eval_gstate.m_created_picture[y].empty()) {
-								m_eval_gstate.m_dual_fixed_rows_buf[next_idx][y] = m_eval_gstate.m_created_picture[y].data();
-							} else {
-								m_eval_gstate.m_dual_fixed_frame_A[y].assign(m_width, 0);
-								m_eval_gstate.m_dual_fixed_rows_buf[next_idx][y] = m_eval_gstate.m_dual_fixed_frame_A[y].data();
-							}
+				const bool focusChanged = local_mutateB != mutateB;
+				// A focus switch changes only which member of the worker's accepted
+				// pair is mutated. Legacy mode retains its shared fixed-frame wiring.
+				if (focusChanged) {
+					if (islandMode) {
+						// Materialize the frame just optimized once at the stage boundary.
+						// Its rendered rows then remain fixed while the opposite program is
+						// mutated; accepted hot-path moves need only replace the program.
+						const auto& fixedRows = local_mutateB ? rowPointersA : rowPointersB;
+						raster_picture& completedProgram = islandState.Current(local_mutateB);
+						(void)ev.ExecuteRasterProgramDual(&completedProgram, line_results.data(),
+							fixedRows, local_mutateB);
+						if (local_mutateB) {
+							UpdateCreatedFromResults(line_results, currentRowsB);
+							UpdateTargetsFromResults(line_results, currentTargetsB);
+							memcpy(&currentSpritesB, &ev.GetSpritesMemory(), sizeof currentSpritesB);
+							rebuildRowPointers(currentRowsB, rowPointersB);
+						} else {
+							UpdateCreatedFromResults(line_results, currentRowsA);
+							UpdateTargetsFromResults(line_results, currentTargetsA);
+							memcpy(&currentSpritesA, &ev.GetSpritesMemory(), sizeof currentSpritesA);
+							rebuildRowPointers(currentRowsA, rowPointersA);
 						}
 					} else {
-						// A will be mutated, so B is fixed - wire pointers to current B rows
-						if ((int)m_eval_gstate.m_dual_fixed_frame_B.size() != m_height) {
-							m_eval_gstate.m_dual_fixed_frame_B.resize(m_height);
+						std::unique_lock<std::mutex> syncLock{m_eval_gstate.m_mutex};
+						if (m_eval_gstate.m_best_result < localAcceptedCost) {
+							currentA = m_eval_gstate.m_best_pic;
+							currentB = m_best_pic_B;
+							localAcceptedCost = m_eval_gstate.m_best_result;
 						}
-						for (int y = 0; y < m_height; ++y) {
-							if (y < (int)m_created_picture_B.size() && !m_created_picture_B[y].empty()) {
-								m_eval_gstate.m_dual_fixed_rows_buf[next_idx][y] = m_created_picture_B[y].data();
-							} else {
-								m_eval_gstate.m_dual_fixed_frame_B[y].assign(m_width, 0);
-								m_eval_gstate.m_dual_fixed_rows_buf[next_idx][y] = m_eval_gstate.m_dual_fixed_frame_B[y].data();
-							}
-						}
+						std::unique_lock<std::mutex> fixedLock{m_eval_gstate.m_dual_fixed_frame_mutex};
+						const int nextIndex = 1 - m_eval_gstate.m_dual_fixed_rows_active_index.load(std::memory_order_acquire);
+						auto& fixedRows = m_eval_gstate.m_dual_fixed_rows_buf[nextIndex];
+						fixedRows.resize((size_t)m_height);
+						const auto& rows = mutateB ? m_eval_gstate.m_created_picture : m_created_picture_B;
+						for (int y = 0; y < m_height; ++y)
+							fixedRows[y] = y < (int)rows.size() && !rows[y].empty() ? rows[y].data() : nullptr;
+						m_eval_gstate.m_dual_fixed_frame_is_A.store(mutateB, std::memory_order_relaxed);
+						m_eval_gstate.m_dual_fixed_rows_active_index.store(nextIndex, std::memory_order_release);
 					}
-					m_eval_gstate.m_dual_fixed_rows_active_index.store(next_idx, std::memory_order_release);
-					
 					local_mutateB = mutateB;
 				}
 
-				// STAGE 2: Lock-free quick sync using a version check to avoid per-iteration lock
-				if (m_eval_gstate.m_best_result < localAcceptedCost) {
-					std::unique_lock<std::mutex> sync_lock{ m_eval_gstate.m_mutex };
+				const bool migrationCheckDue = focusChanged
+					|| localIterations % migrationCheckInterval == 0;
+				if (islandMode && migrationCheckDue) {
+					const unsigned long long publishedVersion =
+						m_eval_gstate.m_best_state_version.load(std::memory_order_acquire);
+					if (publishedVersion != observedBestVersion) {
+						bool migrated = false;
+						std::unique_lock<std::mutex> stateLock{m_eval_gstate.m_mutex};
+						const double publishedCost = m_eval_gstate.m_best_result.load(std::memory_order_relaxed);
+						if (publishedCost < islandState.optimizer.currentCost) {
+							const auto copyStart = std::chrono::steady_clock::now();
+							currentA = m_eval_gstate.m_best_pic;
+							currentB = m_best_pic_B;
+							currentRowsA = m_eval_gstate.m_created_picture;
+							currentRowsB = m_created_picture_B;
+							currentTargetsA = m_eval_gstate.m_created_picture_targets;
+							currentTargetsB = m_created_picture_targets_B;
+							memcpy(&currentSpritesA, &m_eval_gstate.m_sprites_memory, sizeof currentSpritesA);
+							memcpy(&currentSpritesB, &m_sprites_memory_B, sizeof currentSpritesB);
+							localMigrationCopyNs += static_cast<unsigned long long>(
+								std::chrono::duration_cast<std::chrono::nanoseconds>(
+									std::chrono::steady_clock::now() - copyStart).count());
+							++localMigrationCopyEvents;
+							localAcceptedCost = publishedCost;
+							migrated = true;
+						}
+						observedBestVersion = m_eval_gstate.m_best_state_version.load(std::memory_order_relaxed);
+						stateLock.unlock();
+						if (migrated) {
+							islandState.Initialize(std::move(currentA), std::move(currentB), localAcceptedCost,
+								static_cast<std::size_t>(std::max(solutions, 1)));
+							rebuildRowPointers(currentRowsA, rowPointersA);
+							rebuildRowPointers(currentRowsB, rowPointersB);
+							ev.InvalidateDualCache();
+							m_eval_gstate.m_single_migrations.fetch_add(1, std::memory_order_relaxed);
+						}
+					}
+				} else if (!islandMode && m_eval_gstate.m_best_result < localAcceptedCost) {
+					std::unique_lock<std::mutex> syncLock{m_eval_gstate.m_mutex};
 					if (m_eval_gstate.m_best_result < localAcceptedCost) {
 						currentA = m_eval_gstate.m_best_pic;
 						currentB = m_best_pic_B;
 						localAcceptedCost = m_eval_gstate.m_best_result;
 					}
 				}
-				
-				raster_picture cand = mutateB ? currentB : currentA;
 
-				// STAGE 3: ZERO-COPY access to fixed frame - lock-free pointer array snapshot
-				int read_idx = m_eval_gstate.m_dual_fixed_rows_active_index.load(std::memory_order_acquire);
-				const auto& other_rows_ref = m_eval_gstate.m_dual_fixed_rows_buf[read_idx];
-
-				// If the buffer isn't yet sized (e.g., transient during phase switch), use a local fallback
-				distance_accum_t cost;
-				if ((int)other_rows_ref.size() != m_height) {
-					std::vector<const unsigned char*> fallback_rows((size_t)m_height, (const unsigned char*)nullptr);
-					// STAGE 4: Heavy computation outside locks
-					// Provide other frame rows for dual-aware mutations during this mutation call
-					ev.SetDualMutationOtherRows(fallback_rows);
-					ev.MutateRasterProgram(&cand);
-					cost = ev.ExecuteRasterProgramDual(&cand, line_results.data(), fallback_rows, mutateB);
+				raster_picture cand;
+				raster_picture* evaluatedCandidate = nullptr;
+				bool transactionalCandidate = false;
+				if (islandMode && k_dual_transactional_mutation) {
+					evaluatedCandidate = &islandState.Current(mutateB);
+					ev.BeginMutationTransaction(*evaluatedCandidate, mutationTransaction);
+					transactionalCandidate = true;
+					++localUndoCandidates;
 				} else {
-					// STAGE 4: Heavy computation outside locks
-					// Provide other frame rows for dual-aware mutations during this mutation call
-					ev.SetDualMutationOtherRows(other_rows_ref);
-					ev.MutateRasterProgram(&cand);
-					cost = ev.ExecuteRasterProgramDual(&cand, line_results.data(), other_rows_ref, mutateB);
+					cand = islandMode ? islandState.Current(mutateB)
+						: (mutateB ? currentB : currentA);
+					evaluatedCandidate = &cand;
+					++localCandidateFullCopies;
 				}
+				const std::vector<const unsigned char*>* otherRows = nullptr;
+				if (islandMode) {
+					otherRows = mutateB ? &rowPointersA : &rowPointersB;
+				} else {
+					const int readIndex = m_eval_gstate.m_dual_fixed_rows_active_index.load(std::memory_order_acquire);
+					otherRows = &m_eval_gstate.m_dual_fixed_rows_buf[readIndex];
+				}
+				std::vector<const unsigned char*> fallbackRows;
+				if ((int)otherRows->size() != m_height) {
+					fallbackRows.assign((size_t)m_height, nullptr);
+					otherRows = &fallbackRows;
+				}
+				ev.SetDualMutationOtherRows(*otherRows);
+				ev.MutateRasterProgram(evaluatedCandidate,
+					transactionalCandidate ? &mutationTransaction : nullptr);
+				if (transactionalCandidate)
+					localUndoLineSnapshots += mutationTransaction.SavedLineCount();
+				const distance_accum_t cost = ev.ExecuteRasterProgramDual(
+					evaluatedCandidate, line_results.data(), *otherRows, mutateB);
 
-				// STAGE 5: Shared acceptance core (under lock)
-				Evaluator::AcceptanceOutcome out;
-				{
-					std::unique_lock<std::mutex> lock{ m_eval_gstate.m_mutex };
-					if (m_eval_gstate.m_finished || (cfg.max_evals > 0 && m_eval_gstate.m_evaluations >= m_eval_gstate.m_max_evals)) {
+				Evaluator::AcceptanceOutcome out{false, false, localAcceptedCost};
+				if (islandMode) {
+					if (m_eval_gstate.m_finished.load(std::memory_order_acquire)) {
+						if (transactionalCandidate) {
+							ev.RestoreMutationTransaction(mutationTransaction);
+							++localUndoRestores;
+						}
 						break;
 					}
+					const unsigned long long evaluationNumber =
+						m_eval_gstate.m_evaluations.fetch_add(1, std::memory_order_relaxed) + 1ULL;
+					const OptimizerKind kind = m_eval_gstate.m_optimizer == EvalGlobalState::OPT_LAHC
+						? OptimizerKind::LAHC : OptimizerKind::DLAS;
+					const double previousCost = islandState.optimizer.currentCost;
+					const double drift = ev.CalculateAcceptanceDrift();
+					out.accepted = transactionalCandidate
+						? islandState.ApplyInPlace(kind, (double)cost, drift)
+						: islandState.Apply(kind, (double)cost, mutateB, std::move(cand), drift);
+					out.previousCost = previousCost;
+					if (out.accepted) {
+						m_eval_gstate.m_single_accepted.fetch_add(1, std::memory_order_relaxed);
+						localAcceptedCost = (double)cost;
+					}
+
+					if (out.accepted && (double)cost < m_eval_gstate.m_best_result.load(std::memory_order_acquire)) {
+						std::unique_lock<std::mutex> publishLock{m_eval_gstate.m_mutex};
+					if ((double)cost < m_eval_gstate.m_best_result.load(std::memory_order_relaxed)) {
+						out.improved = true;
+						const auto copyStart = std::chrono::steady_clock::now();
+							// The active candidate's line results are still live here. Pair
+							// them with the already materialized opposite frame before
+							// publishing the complete A/B state.
+							if (mutateB) {
+								UpdateCreatedFromResults(line_results, currentRowsB);
+								UpdateTargetsFromResults(line_results, currentTargetsB);
+								memcpy(&currentSpritesB, &ev.GetSpritesMemory(), sizeof currentSpritesB);
+								rebuildRowPointers(currentRowsB, rowPointersB);
+							} else {
+								UpdateCreatedFromResults(line_results, currentRowsA);
+								UpdateTargetsFromResults(line_results, currentTargetsA);
+								memcpy(&currentSpritesA, &ev.GetSpritesMemory(), sizeof currentSpritesA);
+								rebuildRowPointers(currentRowsA, rowPointersA);
+							}
+							m_eval_gstate.m_single_global_improvements.fetch_add(1, std::memory_order_relaxed);
+							m_eval_gstate.m_last_best_evaluation.store(evaluationNumber, std::memory_order_relaxed);
+							m_eval_gstate.m_best_pic = islandState.currentA;
+							m_best_pic_B = islandState.currentB;
+							m_eval_gstate.m_best_pic.uncache_insns();
+							m_best_pic_B.uncache_insns();
+							m_eval_gstate.m_created_picture = currentRowsA;
+							m_created_picture_B = currentRowsB;
+							m_eval_gstate.m_created_picture_targets = currentTargetsA;
+							m_created_picture_targets_B = currentTargetsB;
+							memcpy(&m_eval_gstate.m_sprites_memory, &currentSpritesA, sizeof currentSpritesA);
+							memcpy(&m_sprites_memory_B, &currentSpritesB, sizeof currentSpritesB);
+							m_eval_gstate.m_best_result.store((double)cost, std::memory_order_release);
+							m_eval_gstate.m_previous_results = islandState.optimizer.history;
+							m_eval_gstate.m_previous_results_index = islandState.optimizer.historyIndex;
+						m_eval_gstate.m_current_cost = islandState.optimizer.currentCost;
+						m_eval_gstate.m_cost_max = islandState.optimizer.costMax;
+						m_eval_gstate.m_N = islandState.optimizer.maxCount;
+						localPublicationCopyNs += static_cast<unsigned long long>(
+							std::chrono::duration_cast<std::chrono::nanoseconds>(
+								std::chrono::steady_clock::now() - copyStart).count());
+						++localPublicationCopyEvents;
+						observedBestVersion = m_eval_gstate.m_best_state_version.fetch_add(1, std::memory_order_acq_rel) + 1ULL;
+							m_eval_gstate.m_update_improvement = true;
+							m_eval_gstate.m_condvar_update.notify_one();
+						}
+					}
+					ev.RecordMutationOutcome(out, (double)cost);
+					if (transactionalCandidate && !out.accepted) {
+						ev.RestoreMutationTransaction(mutationTransaction);
+						++localUndoRestores;
+					}
+					if (m_eval_gstate.m_save_period > 0 && evaluationNumber % (unsigned long long)m_eval_gstate.m_save_period == 0ULL) {
+						std::unique_lock<std::mutex> eventLock{m_eval_gstate.m_mutex};
+						m_eval_gstate.m_update_autosave = true;
+						m_eval_gstate.m_condvar_update.notify_one();
+					}
+					if (cfg.max_evals > 0 && evaluationNumber >= m_eval_gstate.m_max_evals)
+						m_eval_gstate.m_finished.store(true, std::memory_order_release);
+				} else {
+					std::unique_lock<std::mutex> lock{m_eval_gstate.m_mutex};
+					if (m_eval_gstate.m_finished || (cfg.max_evals > 0 && m_eval_gstate.m_evaluations >= m_eval_gstate.m_max_evals))
+						break;
 					++m_eval_gstate.m_evaluations;
 					out = ev.ApplyAcceptanceCore((double)cost, false);
-					// Adopt accepted candidate as new local baseline even if not a global improvement
+					ev.RecordMutationOutcome(out, (double)cost);
 					if (out.accepted && !out.improved) {
-						if (mutateB) {
-							currentB = cand;
-						} else {
-							currentA = cand;
-						}
+						if (mutateB) currentB = cand; else currentA = cand;
 						localAcceptedCost = (double)cost;
 					}
 					if (out.improved) {
-						m_eval_gstate.m_last_best_evaluation = m_eval_gstate.m_evaluations;
+						m_eval_gstate.m_last_best_evaluation.store(m_eval_gstate.m_evaluations.load(std::memory_order_relaxed), std::memory_order_relaxed);
 						m_eval_gstate.m_best_result = (double)cost;
 						if (mutateB) {
 							m_best_pic_B = cand; m_best_pic_B.uncache_insns();
 							UpdateCreatedFromResults(line_results, m_created_picture_B);
 							UpdateTargetsFromResults(line_results, m_created_picture_targets_B);
 							memcpy(&m_sprites_memory_B, &ev.GetSpritesMemory(), sizeof m_sprites_memory_B);
-							m_eval_gstate.m_dual_generation_B.fetch_add(1, std::memory_order_acq_rel);
 							currentB = m_best_pic_B;
 						} else {
 							m_eval_gstate.m_best_pic = cand; m_eval_gstate.m_best_pic.uncache_insns();
 							UpdateCreatedFromResults(line_results, m_eval_gstate.m_created_picture);
 							UpdateTargetsFromResults(line_results, m_eval_gstate.m_created_picture_targets);
 							memcpy(&m_eval_gstate.m_sprites_memory, &ev.GetSpritesMemory(), sizeof m_eval_gstate.m_sprites_memory);
-							m_eval_gstate.m_dual_generation_A.fetch_add(1, std::memory_order_acq_rel);
 							currentA = m_eval_gstate.m_best_pic;
 						}
 						m_eval_gstate.m_update_improvement = true;
 						m_eval_gstate.m_condvar_update.notify_one();
 						localAcceptedCost = (double)cost;
 					}
-					if (m_eval_gstate.m_save_period > 0 && (m_eval_gstate.m_evaluations % (unsigned long long)m_eval_gstate.m_save_period) == 0ULL) {
-						m_eval_gstate.m_update_autosave = true;
-						m_eval_gstate.m_condvar_update.notify_one();
-					}
 				}
-				// Flush mutation stats after improvement (outside lock to avoid deadlock)
-				if (out.improved) {
+				if (out.improved)
 					ev.FlushMutationStatsToGlobal();
-				}
 			}
+			m_eval_gstate.m_single_candidate_full_copies.fetch_add(
+				localCandidateFullCopies, std::memory_order_relaxed);
+			m_eval_gstate.m_single_undo_candidates.fetch_add(
+				localUndoCandidates, std::memory_order_relaxed);
+			m_eval_gstate.m_single_undo_line_snapshots.fetch_add(
+				localUndoLineSnapshots, std::memory_order_relaxed);
+			m_eval_gstate.m_single_undo_restores.fetch_add(
+				localUndoRestores, std::memory_order_relaxed);
+			m_eval_gstate.m_publication_copy_events.fetch_add(
+				localPublicationCopyEvents, std::memory_order_relaxed);
+			m_eval_gstate.m_publication_copy_ns.fetch_add(
+				localPublicationCopyNs, std::memory_order_relaxed);
+			m_eval_gstate.m_migration_copy_events.fetch_add(
+				localMigrationCopyEvents, std::memory_order_relaxed);
+			m_eval_gstate.m_migration_copy_ns.fetch_add(
+				localMigrationCopyNs, std::memory_order_relaxed);
 		});
 	}
 
@@ -927,4 +1108,9 @@ void RastaConverter::MainLoopDual()
 	}
 
 	for (auto &t : workers) { if (t.joinable()) t.join(); }
+	for (Evaluator& evaluator : m_evaluators)
+	{
+		evaluator.FlushMutationDiagnosticsToGlobal();
+		evaluator.FlushCacheDiagnosticsToGlobal();
+	}
 }

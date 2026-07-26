@@ -7,6 +7,10 @@ To save the output during the optimization process, press the 's' key.
 
 Copy created output files to the directory Generator or GeneratorDual (for dual mode) and run 'build.bat' to create executable file.
 
+Started with no arguments (or with /livegui), the application opens the
+interactive setup screen and live dashboard instead; the display described below
+is what a command-line conversion shows.
+
 The application displays three images:
 - the left one is the original picture resized to Atari width.
 - the right one is the original picture mapped to chosen Atari palette. This is our goal to reach.
@@ -42,7 +46,8 @@ General options:
   Aliases: -o, --output
 
 /threads=number of threads
-  Set number of processing threads running in parallel (1 to your number of cores).
+  Set the number of processing threads. Values above the machine's reported
+  hardware-thread count are clamped when that count is available.
   Aliases: /t, --threads
 
 /max_evals=Maximum number of evaluations
@@ -64,6 +69,8 @@ General options:
   - Respects the current /output value. If you used /o=custom.png earlier, resume will look for
     custom.png.rp[.ini]/.optstate (single) or out_dual_A/B.rp[.ini] in the same directory (dual).
   - In dual mode, resume automatically loads A and B if present; otherwise falls back to single-frame.
+  - Single-frame saved scores reconstruct exactly. Dual scores are re-materialized against the loaded
+    opposite frame and may shift slightly before new search work; record that baseline separately.
 
 /preprocess
   If this switch exists then RastaConverter generates and saves only destination picture.
@@ -72,6 +79,14 @@ General options:
 /quiet
   Headless/quiet mode (no GUI).
   Aliases: -q, --quiet
+
+/livegui
+  Open the interactive setup screen and live conversion dashboard. This is also
+  what starting RastaConverter with no arguments does. Options given on the
+  command line become the starting settings of the form, and the conversion
+  writes into its own rc-<image>-NNN folder beside the input image rather than
+  into the current directory.
+  Aliases: --livegui
 
 /seed = seed for the random number generator
   Aliases: --seed
@@ -119,15 +134,62 @@ Input:
   Set /dither_rand to 0.5 or 1.0 to make output more random.
   Aliases: --dither_rand
 
+  Note: the legacy /dither=rfloyd path currently performs per-pixel
+  quantization without Floyd error diffusion and does not use /dither_val or
+  /dither_rand.
+
 /details=Details picture
-  To help the optimization algorithm you can set the details mask. 
-  The brighter the color on the mask is, the higher is distance of the color difference between input and output file on the masked region.
-  This way you can make some objects like faces, eyes or other small objects more detailed.
+  Set an image mask to prioritize selected regions during optimization. The mask is
+  box-resized to the 160-pixel target. In compatibility mode, brightness is the
+  integer arithmetic mean of encoded sRGB red, green, and blue; alpha is ignored.
+  Black keeps normal error weight and white uses up to 1 + /details_val. The mask
+  affects direct single-frame pixel error; spatial, edge, region, and dual temporal
+  terms are currently unchanged.
   Aliases: --details
 
 /details_val=Details influence strength
-  Default: 1
+  Default: 0.5. Values at or below zero leave direct error unchanged. Very large
+  weighted errors saturate instead of wrapping.
   Aliases: --details_val
+
+/details_mode=legacy|normalized|refined
+  Default: legacy. Legacy preserves arithmetic encoded-sRGB brightness and its
+  historical objective scale. Normalized uses linear-light luminance, exact area
+  coverage resizing, a bounded target-space feather, and weights normalized to
+  image-wide mean 1. It saves OUTPUT-details-effective.png and reports stable
+  decoded-source and effective-map hashes. All modes ignore alpha.
+  refined treats the supplied mask as authoritative ROI coverage and derives a
+  deterministic bounded importance map inside it from multi-scale source
+  luminance/chroma contrast, edges, texture, and boundary distance. It never
+  adds source-derived priority outside the supplied ROI.
+
+/details_floor=FLOAT
+  Normalized-mode background priority floor, clamped to [0.01,1]. Default: 0.25.
+
+/details_feather=PIXELS
+  Normalized-mode target-space box-feather radius, clamped to [0,8]. Default: 1.
+
+  Single-frame `.rp`/`.opt` metadata reports `Unweighted Source OKLab Mean` at
+  the converter's native target resolution. The benchmark summary copies this
+  field alongside its independent saved-PNG metrics; it never affects search.
+
+/details_refine_mix=FLOAT
+  Refined-mode blend between uniform ROI priority (0) and full derived source
+  importance (1), clamped to [0,1]. Default: 0.5. This does not change the ROI's
+  total salience allocation.
+
+/details_score=on|off
+  Default: on. Set off to load a mask for search allocation and reporting without
+  multiplying direct pixel error. This permits allocation-only experiments.
+
+/details_allocate
+  Bias non-legacy single-frame primary scanline mutation selection using the
+  effective mask's mean scanline priority. This is opt-in and independent of
+  /details_score.
+
+/details_global_period=N
+  With /details_allocate, force one uniform global scanline selection every N
+  primary mutations. Clamped to [2,100]; default 5 (20% scheduled exploration).
 
 /filter=Resize filter
   Default: box
@@ -150,6 +212,22 @@ Input:
   Gamma color correction.
   Aliases: --gamma
 
+/saturation=[-100,100]
+  Default: 0
+  Uniform color saturation adjustment, applied after brightness, contrast and gamma.
+  Raising it pushes already-saturated pixels past what the Atari palette can represent,
+  so they quantize into the same few entries: saturation goes up while the number of
+  distinct colors goes down. Prefer /vibrance when the output looks too gray.
+  Aliases: --saturation
+
+/vibrance=[-100,100]
+  Default: 0
+  Selective saturation adjustment, weighted inversely to each pixel's existing chroma,
+  so dull regions gain the most and already-saturated ones are protected. This targets
+  the palette's usable midrange, which is normally the better answer to a gray-looking
+  result than /dither_val=2.
+  Aliases: --vibrance
+
 /init=Initial optimization state
    Default: random
    The optimization search space is large and the final results depends a lot on the initial values.
@@ -164,7 +242,8 @@ Input:
   History length used by the optimizer (DLAS or LAHC).
   With /s=1 (default) the optimization algorithm is simple hill climbing.
   With larger values, acceptance uses a history window which significantly improves exploration.
-  For DLAS, small values like /s=3..5 often work very well.
+  There is no universal best history length; it depends on optimizer, input, run budget, and seed.
+  Treat example values as syntax demonstrations until benchmarked quality presets are published.
   Aliases: /s, --solutions
  
  /opt or --optimizer=lahc|dlas|legacy
@@ -175,17 +254,17 @@ Input:
   Aliases: --opt, --optimizer
   
 /unstuck_after=<N>
-  Default: 1000
+  Default: 0 (disabled)
   Escalate exploration only after N evaluations without improvement (0=never). 
   When triggered, the search uses larger mutation batches and more exploratory edits
   to escape local minima, especially useful in dual mode with anti-flicker. Aliases: /ua, --unstuck_after
   
 /unstuck_drift=<FLOAT>
-  Default: 0.1
+  Default: 0 (disabled)
   When stuck (as per /unstuck_after), slowly relax acceptance by adding FLOAT to the normalized
-  distance threshold per evaluation (0=off). Typical small value: 0.1. This allows accepting
+  distance threshold per evaluation (0=off). This allows accepting
   slightly worse, but different, solutions to escape deep local minima. Aliases: /ud, --unstuck_drift, --unstuck_drift_norm
-  
+
 /distance=Color distance function
   Default: rasta, other options: yuv, euclid, ciede, cie94, oklab
  
@@ -197,6 +276,32 @@ Input:
   cie94 - legacy CIE94 distance (faster than CIEDE2000, less accurate).
   oklab - modern perceptual distance with good balance of accuracy and speed.
   Aliases: --distance
+
+/objective=legacy|source|source-spatial|source-composite|source-edge|source-region
+  Experimental single-frame scoring reference. Default: legacy.
+  legacy scores the processed quantized/dithered target, preserving historical behavior.
+  source keeps that processed image as an initialization/mutation guide but scores the full-color source.
+  source-spatial replaces direct error with filtered linear-light OKLab error.
+  source-composite adds that filtered term to direct source error; tune it with /spatial_weight (default 0.1).
+  source-edge adds adjacent-pixel linear-light luminance-gradient error to direct source error; tune it with /edge_weight (default 0.1).
+  source-region adds the mean squared OKLab error of the worst 1% of non-overlapping 8x8 regions to direct source error; tune it with /region_weight (default 0.1).
+  Direct source/Floyd is the recommended general maximum-quality policy. For long runs where sustained local-error reduction justifies about 18x evaluation cost, the validated optional local-quality preset is /objective=source-region /region_weight=0.025 /dither=floyd /dither_val=1 /dither_rand=0. Composite and edge additions remain experimental. Dual mode retains its joint objective.
+  Aliases: --objective
+
+/spatial_weight=FLOAT
+  Spatial-term weight for /objective=source-composite. Range 0-10; default 0.1.
+  The option does not alter legacy, source, or source-spatial behavior.
+  Alias: --spatial_weight
+
+/edge_weight=FLOAT
+  Adjacent-gradient weight for /objective=source-edge. Range 0-10; default 0.1.
+  The option does not alter legacy, source, source-spatial, or source-composite behavior.
+  Alias: --edge_weight
+
+/region_weight=FLOAT
+  Weight of the bounded worst-region term used by /objective=source-region.
+  Range: 0 to 10. Default: 0.1.
+  Alias: --region_weight
 
 /predistance=Color distance function for preprocess
   Default: rasta, other options: ciede, yuv, euclid, cie94, oklab
@@ -296,7 +401,5 @@ Dual-frame mode:
   - Values in between: Blend of pattern and random noise
   Aliases: /ddr, --dual_dither_rand
 
-Example:
+Syntax example (not a best-quality parameter recommendation):
 RastaConverter.exe c64.png /threads=8 /s=5 /opt=lahc
-
-

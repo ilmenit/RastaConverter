@@ -3,8 +3,7 @@
   "version": "0.0.1",
   "dependencies": [
     "freeimage",
-    "sdl2",
-    "sdl2-ttf"
+    "sdl3",
+    "sdl3-ttf"
   ]
 }
-

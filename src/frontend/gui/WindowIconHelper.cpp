@@ -7,7 +7,7 @@
 #include <memory>
 #include <string>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include <FreeImage.h>
 
@@ -45,7 +45,7 @@ struct FreeImageBitmapDeleter {
 
 struct SDLSurfaceDeleter {
     void operator()(SDL_Surface* surface) const {
-        if (surface) SDL_FreeSurface(surface);
+        if (surface) SDL_DestroySurface(surface);
     }
 };
 
@@ -81,16 +81,14 @@ static std::unique_ptr<SDL_Surface, SDLSurfaceDeleter> ConvertToSDLSurface(FIBIT
         return nullptr;
     }
 
-    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, static_cast<int>(width), static_cast<int>(height), 32, SDL_PIXELFORMAT_RGBA8888);
+    SDL_Surface* surface = SDL_CreateSurface(static_cast<int>(width), static_cast<int>(height), SDL_PIXELFORMAT_RGBA8888);
     if (!surface)
     {
-        DBG_PRINT("[ICON] SDL_CreateRGBSurfaceWithFormat failed: %s", SDL_GetError());
+        DBG_PRINT("[ICON] SDL_CreateSurface failed: %s", SDL_GetError());
         return nullptr;
     }
 
     Uint8* dstPixels = static_cast<Uint8*>(surface->pixels);
-    SDL_PixelFormat* fmt = surface->format;
-
     for (unsigned y = 0; y < height; ++y)
     {
         const BYTE* srcLine = FreeImage_GetScanLine(converted, y);
@@ -103,7 +101,7 @@ static std::unique_ptr<SDL_Surface, SDLSurfaceDeleter> ConvertToSDLSurface(FIBIT
             BYTE g = srcPixel[FI_RGBA_GREEN];
             BYTE b = srcPixel[FI_RGBA_BLUE];
             BYTE a = had_alpha ? srcPixel[FI_RGBA_ALPHA] : 0xFF;
-            dstLine[x] = SDL_MapRGBA(fmt, r, g, b, a);
+            dstLine[x] = SDL_MapSurfaceRGBA(surface, r, g, b, a);
         }
     }
 
@@ -175,7 +173,7 @@ bool WindowIconHelper::SetWindowIconFromBitmap(SDL_Window* window, FIBITMAP* bit
 #if defined(_DEBUG) || !defined(NDEBUG)
     {
         DBG_PRINT("[ICON] Saving icon to icon.bmp");
-        if (SDL_SaveBMP(surface.get(), "icon.bmp") != 0)
+        if (!SDL_SaveBMP(surface.get(), "icon.bmp"))
         {
             DBG_PRINT("[ICON] SDL_SaveBMP failed: %s", SDL_GetError());
         }
@@ -198,5 +196,4 @@ bool WindowIconHelper::SetWindowIconFromBitmap(SDL_Window* window, FIBITMAP* bit
 }
 
 #endif // NO_GUI
-
 

@@ -407,6 +407,9 @@ std::string CommandLineParser::formatHelp(const std::string &appName) const
 
 	std::ostringstream out;
 	out << "Usage:\n  " << appName << " <InputFile> [options]\n\n";
+	out << "Example (recommended single-frame starting point):\n";
+	out << "  " << appName << " input.png --output output.png --palette yourpalette.pal --objective source --dither floyd --dither_val 1 --dither_rand 0 --threads 8 --max_evals 1000000\n";
+	out << "  Adjust the input, output, palette, thread count, and evaluation limit for your system and intended run.\n\n";
 	out << "Notes:\n";
 	out << "  - Options accept '/' or '-'/'--' prefixes. Examples: /threads=4, -threads 4, --threads 4\n";
 	out << "  - Input file can be positional or provided via -i/--input\n";
@@ -472,5 +475,4 @@ std::vector<std::string> CommandLineParser::allOptionNames() const
     for (const auto &s : optionSpecs) out.push_back(s.canonicalName);
     return out;
 }
-
 

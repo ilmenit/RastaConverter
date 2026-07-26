@@ -57,6 +57,15 @@ enum e_distance_function {
 	E_DISTANCE_RASTA,
 };
 
+enum e_visual_objective {
+	E_OBJECTIVE_LEGACY_TARGET,
+	E_OBJECTIVE_SOURCE,
+	E_OBJECTIVE_SOURCE_SPATIAL,
+	E_OBJECTIVE_SOURCE_COMPOSITE,
+	E_OBJECTIVE_SOURCE_EDGE,
+	E_OBJECTIVE_SOURCE_REGION,
+};
+
 struct Configuration {
 	std::string input_file;
 	std::string output_file;
@@ -67,16 +76,29 @@ struct Configuration {
 
 	e_distance_function dstf;
 	e_distance_function pre_dstf;
+	e_visual_objective visual_objective = E_OBJECTIVE_LEGACY_TARGET;
+	double spatial_weight = 0.1;
+	double edge_weight = 0.1;
+	double region_weight = 0.1;
 	bool continue_processing;
 
 	e_dither_type dither;
 	double dither_randomness; // 0-1
 	double dither_strength;
 	double details_strength;
+	std::string details_mode = "legacy";
+	double details_floor = 0.25;
+	unsigned details_feather = 1;
+	double details_refine_mix = 0.5;
+	bool details_score = true;
+	bool details_allocate = false;
+	unsigned details_global_period = 5;
 
 	int brightness;
 	int contrast;
 	double gamma;
+	int saturation = 0;
+	int vibrance = 0;
 	int save_period;
 	unsigned long initial_seed;
 	int cache_size;
@@ -89,6 +111,7 @@ struct Configuration {
 	FREE_IMAGE_FILTER rescale_filter;
 	e_init_type init_type;
 	bool quiet;
+	bool live_gui = false;
 	// CLI handling flags
 	bool show_help = false;
 	bool show_version = false;
@@ -116,11 +139,11 @@ struct Configuration {
 
 	// Aggressive search trigger: escalate exploration after this many
 	// evaluations without improvement (0 = never escalate)
-	unsigned long long unstuck_after = 1000ULL;
+	unsigned long long unstuck_after = 0ULL;
 
 	// When stuck, add this normalized drift to acceptance thresholds per evaluation
 	// Units: normalized distance (same scale as Norm. Dist). 0 = disabled.
-	double unstuck_drift_norm = 0.1;
+	double unstuck_drift_norm = 0.0;
 
 
 	CommandLineParser parser; 
@@ -136,11 +159,23 @@ struct Configuration {
 	e_distance_function resume_saved_distance = E_DISTANCE_RASTA;
 	e_distance_function resume_saved_predistance = E_DISTANCE_CIEDE;
 	e_dither_type resume_saved_dither = E_DITHER_NONE;
+	e_visual_objective resume_saved_objective = E_OBJECTIVE_LEGACY_TARGET;
+	double resume_saved_spatial_weight = 0.1;
+	double resume_saved_edge_weight = 0.1;
+	double resume_saved_region_weight = 0.1;
+	std::string resume_saved_details_file;
+	std::string resume_saved_details_mode = "legacy";
+	double resume_saved_details_strength = 0.5;
+	double resume_saved_details_floor = 0.25;
+	unsigned resume_saved_details_feather = 1;
+	double resume_saved_details_refine_mix = 0.5;
+	bool resume_saved_details_score = true;
+	bool resume_saved_details_allocate = false;
+	unsigned resume_saved_details_global_period = 5;
+	bool resume_objective_changed = false;
 
 	void ProcessCmdLine(const std::vector<std::string>& extraTokens = {});
 	void Process(int argc, char *argv[], bool captureOverrides = true);
 };
 
 #endif
-
-

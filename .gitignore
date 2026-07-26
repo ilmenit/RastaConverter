@@ -13,6 +13,7 @@
 [Dd]ebug-NO_GUI/
 x64/
 build/
+benchmark/results/
 [Bb]in/
 [Oo]bj/
 [Oo]ut/

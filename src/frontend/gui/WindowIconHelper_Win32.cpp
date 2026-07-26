@@ -17,10 +17,7 @@
 #include <propidl.h>
 #include <psapi.h>
 
-#include <SDL.h>
-#if SDL_VERSION_ATLEAST(2,0,2)
-#include <SDL_syswm.h>
-#endif
+#include <SDL3/SDL.h>
 
 #include <memory>
 #include <vector>
@@ -39,7 +36,7 @@ namespace
 
 struct SDLSurfaceDeleter {
     void operator()(SDL_Surface* surface) const {
-        if (surface) SDL_FreeSurface(surface);
+        if (surface) SDL_DestroySurface(surface);
     }
 };
 
@@ -59,7 +56,7 @@ static SDL_Surface* ScaleSurface(SDL_Surface* src, int targetWidth, int targetHe
 {
     if (!src || targetWidth <= 0 || targetHeight <= 0) return nullptr;
 
-    SDL_Surface* scaled = SDL_CreateRGBSurfaceWithFormat(0, targetWidth, targetHeight, 32, SDL_PIXELFORMAT_RGBA8888);
+    SDL_Surface* scaled = SDL_CreateSurface(targetWidth, targetHeight, SDL_PIXELFORMAT_RGBA8888);
     if (!scaled) return nullptr;
 
     const float xRatio = static_cast<float>(src->w) / targetWidth;
@@ -82,9 +79,9 @@ static SDL_Surface* ScaleSurface(SDL_Surface* src, int targetWidth, int targetHe
             const Uint32 srcPixel = srcPixels[(srcY * src->w) + srcX];
 
             Uint8 r, g, b, a;
-            SDL_GetRGBA(srcPixel, src->format, &r, &g, &b, &a);
+            SDL_GetRGBA(srcPixel, SDL_GetPixelFormatDetails(src->format), SDL_GetSurfacePalette(src), &r, &g, &b, &a);
 
-            dstPixels[(y * targetWidth) + x] = SDL_MapRGBA(scaled->format, r, g, b, a);
+            dstPixels[(y * targetWidth) + x] = SDL_MapSurfaceRGBA(scaled, r, g, b, a);
         }
     }
 
@@ -151,7 +148,7 @@ static HICON CreateWin32Icon(SDL_Surface* surface, int targetSize)
         for (int x = 0; x < workingSurface->w; ++x)
         {
             Uint8 r, g, b, a;
-            SDL_GetRGBA(srcRow[x], workingSurface->format, &r, &g, &b, &a);
+            SDL_GetRGBA(srcRow[x], SDL_GetPixelFormatDetails(workingSurface->format), SDL_GetSurfacePalette(workingSurface), &r, &g, &b, &a);
 
             if (a < 255)
             {
@@ -356,7 +353,7 @@ static ResourceIconData SurfaceToResourceIcon(SDL_Surface* surface)
         for (int x = 0; x < surface->w; ++x)
         {
             Uint8 r, g, b, a;
-            SDL_GetRGBA(srcRow[x], surface->format, &r, &g, &b, &a);
+            SDL_GetRGBA(srcRow[x], SDL_GetPixelFormatDetails(surface->format), SDL_GetSurfacePalette(surface), &r, &g, &b, &a);
 
             if (a < 255)
             {
@@ -403,7 +400,7 @@ static bool WriteIconFile(SDL_Surface* sourceSurface, const std::wstring& path)
         }
 
         ResourceIconData data = SurfaceToResourceIcon(resized);
-        SDL_FreeSurface(resized);
+        SDL_DestroySurface(resized);
         images.push_back(std::move(data));
     }
 
@@ -595,38 +592,21 @@ static bool SetAppUserModelProperties(HWND hwnd, const std::wstring& appId, cons
 
 bool WindowIconWin32_SetTaskbarIcon(SDL_Window* window, SDL_Surface* surface)
 {
-#if SDL_VERSION_ATLEAST(2,0,2)
     if (!window || !surface) return false;
-
-    SDL_SysWMinfo wmInfo;
-    SDL_VERSION(&wmInfo.version);
-    if (!SDL_GetWindowWMInfo(window, &wmInfo))
-        return false;
-
-    HWND hwnd = wmInfo.info.win.window;
+    HWND hwnd = static_cast<HWND>(SDL_GetPointerProperty(
+        SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
     if (!hwnd)
         return false;
 
     return SetWindowIcons(hwnd, surface);
-#else
-    (void)window;
-    (void)surface;
-    return false;
-#endif
 }
 
 bool WindowIconWin32_UpdateAppUserModel(SDL_Window* window, SDL_Surface* surface)
 {
     if (!window || !surface) return false;
 
-    SDL_SysWMinfo wmInfo;
-    SDL_VERSION(&wmInfo.version);
-    if (!SDL_GetWindowWMInfo(window, &wmInfo))
-    {
-        return false;
-    }
-
-    HWND hwnd = wmInfo.info.win.window;
+    HWND hwnd = static_cast<HWND>(SDL_GetPointerProperty(
+        SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
     if (!hwnd)
     {
         return false;
@@ -662,5 +642,4 @@ bool WindowIconWin32_UpdateAppUserModel(SDL_Window* window, SDL_Surface* surface
 #endif // defined(_WIN32)
 
 #endif // NO_GUI
-
 

@@ -9,6 +9,8 @@
 #include <unordered_set>
 #include <sstream>
 #include <cctype>
+#include <cmath>
+#include <thread>
 
 using namespace std;
 
@@ -91,6 +93,19 @@ void Configuration::ProcessCmdLine(const std::vector<std::string>& extraTokens)
 			resume_saved_distance = dstf;
 			resume_saved_predistance = pre_dstf;
 			resume_saved_dither = dither;
+			resume_saved_objective = visual_objective;
+			resume_saved_spatial_weight = spatial_weight;
+			resume_saved_edge_weight = edge_weight;
+			resume_saved_region_weight = region_weight;
+			resume_saved_details_file = details_file;
+			resume_saved_details_mode = details_mode;
+			resume_saved_details_strength = details_strength;
+			resume_saved_details_floor = details_floor;
+			resume_saved_details_feather = details_feather;
+			resume_saved_details_refine_mix = details_refine_mix;
+			resume_saved_details_score = details_score;
+			resume_saved_details_allocate = details_allocate;
+			resume_saved_details_global_period = details_global_period;
 			resume_have_baseline = true;
 		}
 	}
@@ -112,6 +127,28 @@ void Configuration::ProcessCmdLine(const std::vector<std::string>& extraTokens)
 	resume_distance_changed = (resume_saved_distance != dstf);
 	resume_predistance_changed = (resume_saved_predistance != pre_dstf);
 	resume_dither_changed = (resume_saved_dither != dither);
+	resume_objective_changed = (resume_saved_objective != visual_objective);
+	resume_objective_changed = resume_objective_changed ||
+		((resume_saved_objective == E_OBJECTIVE_SOURCE_COMPOSITE ||
+		  visual_objective == E_OBJECTIVE_SOURCE_COMPOSITE) &&
+		 (resume_saved_spatial_weight != spatial_weight));
+	resume_objective_changed = resume_objective_changed ||
+		((resume_saved_objective == E_OBJECTIVE_SOURCE_EDGE ||
+		  visual_objective == E_OBJECTIVE_SOURCE_EDGE) &&
+		 (resume_saved_edge_weight != edge_weight));
+	resume_objective_changed = resume_objective_changed ||
+		((resume_saved_objective == E_OBJECTIVE_SOURCE_REGION ||
+		  visual_objective == E_OBJECTIVE_SOURCE_REGION) &&
+		 (resume_saved_region_weight != region_weight));
+	const bool detailsMetricChanged = resume_saved_details_score != details_score
+		|| ((resume_saved_details_score || details_score)
+			&& (resume_saved_details_file != details_file
+				|| resume_saved_details_mode != details_mode
+				|| resume_saved_details_strength != details_strength
+				|| resume_saved_details_floor != details_floor
+				|| resume_saved_details_feather != details_feather
+				|| resume_saved_details_refine_mix != details_refine_mix));
+	resume_objective_changed = resume_objective_changed || detailsMetricChanged;
 }
 
 void Configuration::Process(int argc, char *argv[], bool captureOverrides)
@@ -140,6 +177,11 @@ void Configuration::Process(int argc, char *argv[], bool captureOverrides)
 	parser.addFlag("quiet", {"q"},
 		"Headless/quiet mode (no GUI).",
 		"General options");
+#if defined(RASTA_ENABLE_LIVE_UI)
+	parser.addFlag("livegui", {},
+		"Open the interactive setup screen and live conversion dashboard.",
+		"General options");
+#endif
 
 	// Input/output
 	parser.addOption("input", {"i"}, "FILE", "",
@@ -154,7 +196,7 @@ void Configuration::Process(int argc, char *argv[], bool captureOverrides)
 		"Input", /*optionalValue*/ true, /*implicitValue*/ "Palettes/laoo.act");
 
 	parser.addOption("threads", {"t"}, "N", "1",
-		"Number of worker threads.",
+		"Number of worker threads, clamped to the machine's reported hardware-thread count when available.",
 		"General options");
 	parser.addOption("max_evals", {"me"}, "N", "1000000000000000000",
 		"Stop after N evaluations (0 = unlimited).",
@@ -172,6 +214,18 @@ parser.addOption("distance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta",
 		"Image processing");
 parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede",
 		"Distance function used during preprocess (destination picture).",
+		"Image processing");
+	parser.addOption("objective", {}, "legacy|source|source-spatial|source-composite|source-edge|source-region", "legacy",
+		"Single-frame scoring reference or opt-in source/spatial composite.",
+		"Image processing");
+	parser.addOption("spatial_weight", {}, "FLOAT", "0.1",
+		"Weight of the filtered term for /objective=source-composite.",
+		"Image processing");
+	parser.addOption("edge_weight", {}, "FLOAT", "0.1",
+		"Weight of the luminance-gradient term for /objective=source-edge.",
+		"Image processing");
+	parser.addOption("region_weight", {}, "FLOAT", "0.1",
+		"Weight of worst-1%-of-8x8-regions OKLab term for /objective=source-region.",
 		"Image processing");
 	parser.addOption("dither", {}, "none|floyd|rfloyd|line|line2|chess|2d|jarvis|simple|knoll", "none",
 		"Dithering algorithm.",
@@ -195,10 +249,31 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 		"Line cache size per thread in MB.",
 		"Image processing");
 	parser.addOption("details", {}, "FILE", "",
-		"Save detailed stats to file.",
+		"Details-priority mask image (legacy arithmetic-sRGB mode).",
 		"Image processing");
 	parser.addOption("details_val", {}, "FLOAT", "0.5",
 		"Details influence strength.",
+		"Image processing");
+	parser.addOption("details_mode", {}, "legacy|normalized|refined", "legacy",
+		"Details-mask interpretation mode.",
+		"Image processing");
+	parser.addOption("details_floor", {}, "FLOAT", "0.25",
+		"Normalized-mode background priority floor [0.01..1].",
+		"Image processing");
+	parser.addOption("details_feather", {}, "PIXELS", "1",
+		"Normalized-mode target-space feather radius [0..8].",
+		"Image processing");
+	parser.addOption("details_refine_mix", {}, "FLOAT", "0.5",
+		"Refined-mode source-importance blend [0..1].",
+		"Image processing");
+	parser.addOption("details_score", {}, "on|off", "on",
+		"Apply the loaded details map to direct pixel scoring.",
+		"Image processing");
+	parser.addOption("details_global_period", {}, "N", "5",
+		"With /details_allocate, force uniform global selection every N mutations.",
+		"Image processing");
+	parser.addFlag("details_allocate", {},
+		"Bias scanline mutation selection using the loaded details map.",
 		"Image processing");
 	parser.addOption("brightness", {}, "INT", "0",
 		"Brightness [-100..100].",
@@ -208,6 +283,12 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 		"Image processing");
 	parser.addOption("gamma", {}, "FLOAT", "1.0",
 		"Gamma [0..8].",
+		"Image processing");
+	parser.addOption("saturation", {}, "INT", "0",
+		"Uniform colour saturation adjustment [-100..100].",
+		"Image processing");
+	parser.addOption("vibrance", {}, "INT", "0",
+		"Selective saturation adjustment that protects saturated colours [-100..100].",
 		"Image processing");
 	parser.addOption("onoff", {}, "FILE", "",
 		"OnOff file describing register enable/disable ranges.",
@@ -224,14 +305,14 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 		"General options");
 
     // Aggressive search threshold (0 = never escalate)
-    parser.addOption("unstuck_after", {"ua"}, "N", "1000",
+    parser.addOption("unstuck_after", {"ua"}, "N", "0",
 		"Escalate exploration after this many evaluations without improvement (0=never).",
 		"General options");
     // Drift: support both --unstuck_drift (primary) and --unstuck_drift_norm (alias)
-    parser.addOption("unstuck_drift", {"ud"}, "FLOAT", "0.1",
+    parser.addOption("unstuck_drift", {"ud"}, "FLOAT", "0",
         "When stuck, add this normalized drift per evaluation to acceptance thresholds (0=off).",
         "General options");
-    parser.addOption("unstuck_drift_norm", {}, "FLOAT", "0.1",
+    parser.addOption("unstuck_drift_norm", {}, "FLOAT", "0",
         "Alias for --unstuck_drift.",
         "General options");
 
@@ -333,6 +414,44 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 		dstf=E_DISTANCE_RASTA;
 	}
 
+	{
+		string objective_name = parser.getValue("objective", "legacy");
+		if (objective_name == "source")
+			visual_objective = E_OBJECTIVE_SOURCE;
+		else if (objective_name == "source-spatial")
+			visual_objective = E_OBJECTIVE_SOURCE_SPATIAL;
+		else if (objective_name == "source-composite")
+			visual_objective = E_OBJECTIVE_SOURCE_COMPOSITE;
+		else if (objective_name == "source-edge")
+			visual_objective = E_OBJECTIVE_SOURCE_EDGE;
+		else if (objective_name == "source-region")
+			visual_objective = E_OBJECTIVE_SOURCE_REGION;
+		else
+		{
+			if (objective_name != "legacy")
+				warning_messages.push_back("Unknown objective='" + objective_name + "', using 'legacy'.");
+			visual_objective = E_OBJECTIVE_LEGACY_TARGET;
+		}
+	}
+	{
+		string v = parser.getValue("spatial_weight", "0.1");
+		spatial_weight = String2Value<double>(v);
+		if (spatial_weight < 0.0) spatial_weight = 0.0;
+		if (spatial_weight > 10.0) spatial_weight = 10.0;
+	}
+	{
+		string v = parser.getValue("edge_weight", "0.1");
+		edge_weight = String2Value<double>(v);
+		if (edge_weight < 0.0) edge_weight = 0.0;
+		if (edge_weight > 10.0) edge_weight = 10.0;
+	}
+	{
+		string v = parser.getValue("region_weight", "0.1");
+		region_weight = String2Value<double>(v);
+		if (region_weight < 0.0) region_weight = 0.0;
+		if (region_weight > 10.0) region_weight = 10.0;
+	}
+
 	dst_name = parser.getValue("predistance","ciede");
 	if (dst_name=="euclid")
 		pre_dstf=E_DISTANCE_EUCLID;
@@ -406,8 +525,14 @@ else if (dst_name=="yuv")
 	threads = String2Value<int>(parser.getValue("threads", "1"));
 	if (threads < 1)
 		threads = 1;
-
-	// no more threads limit
+	const unsigned hardware_threads = std::thread::hardware_concurrency();
+	if (hardware_threads > 0 && static_cast<unsigned>(threads) > hardware_threads)
+	{
+		warning_messages.push_back("/threads exceeds the "
+			+ std::to_string(hardware_threads)
+			+ " hardware threads reported by this machine; clamping to that limit.");
+		threads = static_cast<int>(hardware_threads);
+	}
 
 	// auto-save is on by default
 	string save_val = parser.getValue("save","auto");
@@ -418,6 +543,36 @@ else if (dst_name=="yuv")
 
 	string details_val2 = parser.getValue("details_val","0.5");
 	details_strength=String2Value<double>(details_val2);
+	details_mode = parser.getValue("details_mode", "legacy");
+	std::transform(details_mode.begin(), details_mode.end(), details_mode.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	if (details_mode != "legacy" && details_mode != "normalized"
+		&& details_mode != "refined")
+	{
+		error_messages.push_back("/details_mode must be legacy, normalized, or refined.");
+		details_mode = "legacy";
+	}
+	details_floor = String2Value<double>(parser.getValue("details_floor", "0.25"));
+	if (details_floor < 0.01) details_floor = 0.01;
+	if (details_floor > 1.0) details_floor = 1.0;
+	int feather = String2Value<int>(parser.getValue("details_feather", "1"));
+	if (feather < 0) feather = 0;
+	if (feather > 8) feather = 8;
+	details_feather = static_cast<unsigned>(feather);
+	details_refine_mix = String2Value<double>(parser.getValue("details_refine_mix", "0.5"));
+	if (details_refine_mix < 0.0) details_refine_mix = 0.0;
+	if (details_refine_mix > 1.0) details_refine_mix = 1.0;
+	std::string detailsScore = parser.getValue("details_score", "on");
+	std::transform(detailsScore.begin(), detailsScore.end(), detailsScore.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	if (detailsScore != "on" && detailsScore != "off")
+		error_messages.push_back("/details_score must be on or off.");
+	details_score = detailsScore != "off";
+	details_allocate = parser.switchExists("details_allocate");
+	int globalPeriod = String2Value<int>(parser.getValue("details_global_period", "5"));
+	if (globalPeriod < 2) globalPeriod = 2;
+	if (globalPeriod > 100) globalPeriod = 100;
+	details_global_period = static_cast<unsigned>(globalPeriod);
 
 	string solutions_value = parser.getValue("s","1");
 	{
@@ -443,7 +598,7 @@ else if (dst_name=="yuv")
 
 	// Parse aggressive search threshold
 	{
-		std::string ua = parser.getValue("unstuck_after", "1000");
+		std::string ua = parser.getValue("unstuck_after", "0");
 		std::string ua2 = parser.getValue("ua", "");
 		if (!ua2.empty()) ua = ua2;
 		unstuck_after = String2Value<unsigned long long>(ua);
@@ -451,7 +606,7 @@ else if (dst_name=="yuv")
 
     // Parse normalized drift per evaluation when stuck (prefer primary name, accept alias)
     {
-        std::string ud = parser.getValue("unstuck_drift", "0.1");
+        std::string ud = parser.getValue("unstuck_drift", "0");
         std::string ud2 = parser.getValue("ud", "");
         if (!ud2.empty()) ud = ud2;
         std::string ud_alt = parser.getValue("unstuck_drift_norm", "");
@@ -467,6 +622,13 @@ else if (dst_name=="yuv")
 
 	// Quiet mode
 	quiet = parser.switchExists("quiet") || parser.switchExists("q");
+#if defined(RASTA_ENABLE_LIVE_UI)
+	// A live-UI build is directly launchable from a desktop shortcut: no
+	// command line means "open setup". CLI conversions still opt in explicitly.
+	live_gui = parser.switchExists("livegui") || argc <= 1;
+#else
+	live_gui = false;
+#endif
 
 	string brightness_value = parser.getValue("brightness","0");
 	brightness=String2Value<int>(brightness_value);
@@ -488,6 +650,11 @@ else if (dst_name=="yuv")
 		gamma=0;
 	if (gamma>8)
 		gamma=8;
+
+	saturation=String2Value<int>(parser.getValue("saturation","0"));
+	saturation=std::max(-100, std::min(100, saturation));
+	vibrance=String2Value<int>(parser.getValue("vibrance","0"));
+	vibrance=std::max(-100, std::min(100, vibrance));
 	
 	// Handle positional input file if not specified via -i or --input
 	if (input_file.empty())
@@ -508,7 +675,7 @@ else if (dst_name=="yuv")
 	}
 
 	// Validate that we have an input file
-	if (input_file.empty() && !show_help && !continue_processing)
+	if (input_file.empty() && !show_help && !continue_processing && !live_gui)
 	{
 		bad_arguments = true;
 	}
@@ -629,6 +796,12 @@ else if (dst_name=="yuv")
 		if (dual_dither_rand > 1.0) dual_dither_rand = 1.0;
 	}
 
+	if (dual_mode && visual_objective != E_OBJECTIVE_LEGACY_TARGET)
+	{
+		warning_messages.push_back("Source-referenced objectives are single-frame experiments; using legacy for dual mode.");
+		visual_objective = E_OBJECTIVE_LEGACY_TARGET;
+	}
+
 	if (!captureOverrides) {
 		if (!resume_have_baseline) {
 			resume_saved_optimizer = optimizer;
@@ -636,9 +809,11 @@ else if (dst_name=="yuv")
 			resume_saved_distance = dstf;
 			resume_saved_predistance = pre_dstf;
 			resume_saved_dither = dither;
+			resume_saved_objective = visual_objective;
+			resume_saved_spatial_weight = spatial_weight;
+			resume_saved_edge_weight = edge_weight;
+			resume_saved_region_weight = region_weight;
 			resume_have_baseline = true;
 		}
 	}
 }
-
-

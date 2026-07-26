@@ -5,6 +5,7 @@
 #include <string>
 #include "FreeImage.h"
 #include "gui.h"
+#include "LiveStats.h"
 
 class RastaConsole {
 private:
@@ -16,6 +17,14 @@ public:
     void DisplayBitmap(int x, int y, FIBITMAP* fiBitmap);
     void Present();
     GUI_command NextFrame();
+
+    // The console frontend has no live UI; these keep the converter's call
+    // sites uniform across frontends.
+    void PublishStats(const LiveStats&) {}
+    void PublishImage(GuiImageSlot, FIBITMAP*) {}
+    void PublishDetailsMask(const GuiDetailsMask&) {}
+    bool LiveUiActive() const { return false; }
+    bool AbortRequested() const { return false; }
 };
 
 #endif // NO_GUI

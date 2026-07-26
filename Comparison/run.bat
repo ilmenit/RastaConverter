@@ -1,1 +1,0 @@
-RastaConverter.exe test.jpg /threads=8 /max_evals=10000000 /h=182

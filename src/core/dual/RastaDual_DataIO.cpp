@@ -27,8 +27,9 @@ void RastaConverter::UpdateTargetsFromResults(const std::vector<const line_cache
 	out_targets.resize(m_height);
 	for (int y=0;y<m_height;++y) {
 		const line_cache_result* lr = results[y];
-		if (lr && lr->target_row) {
-			out_targets[y].assign(lr->target_row, lr->target_row + m_width);
+		if (lr && lr->packed_target_row) {
+			out_targets[y].resize(m_width);
+			lr->copy_target_row(out_targets[y].data(), m_width);
 		} else {
 			out_targets[y].assign(m_width, (unsigned char)E_COLBAK);
 		}
@@ -86,5 +87,3 @@ void RastaConverter::SavePMGWithSprites(std::string name, const sprites_memory_t
     if (!out)
         Error(std::string("Error writing PMG handler to ") + name);
 }
-
-

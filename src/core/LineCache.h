@@ -5,6 +5,7 @@
 #include <vector>
 #include <cassert>
 
+#include "Distance.h"
 #include "RegisterState.h"
 #include "InsnSequenceCache.h"
 
@@ -51,8 +52,32 @@ struct line_cache_result
 	distance_accum_t line_error;
 	register_state new_state;
 	unsigned char *color_row;
-	unsigned char *target_row;
+	// Pixel targets are color-register IDs 0..7. Keep two targets per byte;
+	// the row is only decoded when a selected picture is published or saved.
+	unsigned char *packed_target_row;
 	unsigned char sprite_data[4][8];
+
+	static size_t packed_target_bytes(size_t width)
+	{
+		return (width + 1) / 2;
+	}
+
+	static void pack_target_row(unsigned char *packed, const unsigned char *targets, size_t width)
+	{
+		for (size_t x = 0; x < width; x += 2)
+		{
+			assert(targets[x] < 16);
+			const unsigned char high = (x + 1 < width) ? targets[x + 1] : 0;
+			assert(high < 16);
+			packed[x / 2] = static_cast<unsigned char>(targets[x] | (high << 4));
+		}
+	}
+
+	void copy_target_row(unsigned char *targets, size_t width) const
+	{
+		for (size_t x = 0; x < width; ++x)
+			targets[x] = static_cast<unsigned char>((packed_target_row[x / 2] >> (4 * (x & 1))) & 0x0f);
+	}
 };
 
 class line_cache
@@ -98,8 +123,9 @@ public:
 		}
 	}
 
-	const line_cache_result *find(const line_cache_key& key, uint32_t hash) const
+	const line_cache_result *find(const line_cache_key& key, uint32_t hash, unsigned* probes = NULL) const
 	{
+		unsigned local_probes = 0;
 		const hash_chain& hc = hash_table[hash & (HTSIZE - 1)];
 		const hash_block *hb = hc.first;
 		int hbidx = hc.offset;
@@ -108,9 +134,11 @@ public:
 		{
 			for(int i=hbidx - 1; i>=0; --i)
 			{
+				++local_probes;
 				if (hb->nodes[i].hash == hash
 					&& key == hb->nodes[i].value->first)
 				{
+					if (probes) *probes = local_probes;
 					return &hb->nodes[i].value->second;
 				}
 			}
@@ -118,18 +146,22 @@ public:
 			hbidx = hash_block::N;
 		}
 
+		if (probes) *probes = local_probes;
 		return NULL;
 	}
 
-	line_cache_result& insert(const line_cache_key& key, uint32_t hash, linear_allocator& alloc)
+	line_cache_result& insert(const line_cache_key& key, uint32_t hash, linear_allocator& alloc,
+		bool* allocated_block = NULL)
 	{
+		if (allocated_block) *allocated_block = false;
 		hash_chain& hc = hash_table[hash & (HTSIZE - 1)];
 		hash_block *hb = hc.first;
 		int hbidx = hc.offset;
 
 		if (!hb || hbidx >= hash_block::N)
 		{
-			hash_block *hb2 = alloc.allocate<hash_block>();
+			if (allocated_block) *allocated_block = true;
+			hash_block *hb2 = alloc.allocate<hash_block>(linear_allocator::LINE_CACHE_HASH_BLOCK);
 			memset(hb2, 0, sizeof *hb2);
 			hb2->next = hb;
 			hc.first = hb2;
@@ -139,7 +171,7 @@ public:
 
 		hc.offset = hbidx+1;
 
-		value_type *value = alloc.allocate<value_type>();
+		value_type *value = alloc.allocate<value_type>(linear_allocator::LINE_CACHE_ENTRY);
 		value->first = key;
 
 		hash_node node = { hash, value };

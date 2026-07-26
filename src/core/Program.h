@@ -2,13 +2,23 @@
 #define PROGRAM_H
 
 #include <vector>
+#include <cstring>
 #include "rgb.h"
 #include "RasterInstruction.h"
 #include "InsnSequenceCache.h"
 
 const int sprite_screen_color_cycle_start=48;
 const int sprite_size=32;
-const int free_cycles=53; // must be set depending on the mode, PMG, LMS etc.
+
+// The emitted display uses ANTIC mode E, normal-width playfield DMA, LMS on
+// every line, and single-line player/missile DMA. That fixed profile leaves 57
+// CPU execution slots. Each raster line ends in a 3-cycle zero-page CMP, so
+// the optimized body may use all of the preceding 54 slots.
+constexpr int raster_cpu_slots = 57;
+constexpr int raster_tail_cycles = 3;
+constexpr int raster_program_cycle_limit = raster_cpu_slots - raster_tail_cycles;
+constexpr int antic_scanline_cycles = 114;
+constexpr int cycle_map_size = antic_scanline_cycles + 9;
 
 typedef unsigned char sprites_row_memory_t[4][8];
 typedef sprites_row_memory_t sprites_memory_t[240]; // we convert it to 240 bytes of PMG memory at the end of processing.
@@ -21,6 +31,7 @@ struct ScreenCycle {
 const int CYCLES_MAX = 114;
 
 extern ScreenCycle screen_cycles[CYCLES_MAX];
+extern int screen_cpu_slots;
 
 enum e_raster_instruction {
 	// DO NOT CHANGE ORDER OF THOSE. A LOT OF THINGS DEPEND ON THE ORDER. ADD STH AT THE END IF YOU NEED!
@@ -163,6 +174,15 @@ struct raster_picture {
 		}
 	}
 
+	void recache_missing_insns(insn_sequence_cache& cache, linear_allocator& alloc)
+	{
+		for (raster_line& line : raster_lines)
+		{
+			if (!line.cache_key)
+				line.recache_insns(cache, alloc);
+		}
+	}
+
 	void uncache_insns()
 	{
 		size_t n = raster_lines.size();
@@ -173,6 +193,45 @@ struct raster_picture {
 		}
 	}
 };
+
+struct raster_patch_stats
+{
+	unsigned copied_lines = 0;
+	unsigned reused_lines = 0;
+};
+
+inline raster_patch_stats patch_raster_picture(
+	raster_picture& destination, const raster_picture& source)
+{
+	raster_patch_stats stats;
+	memcpy(destination.mem_regs_init, source.mem_regs_init,
+		sizeof destination.mem_regs_init);
+	if (destination.raster_lines.size() != source.raster_lines.size())
+	{
+		destination.raster_lines = source.raster_lines;
+		stats.copied_lines = static_cast<unsigned>(source.raster_lines.size());
+		for (raster_line& line : destination.raster_lines)
+			line.cache_key = NULL;
+		return stats;
+	}
+
+	for (size_t index = 0; index < source.raster_lines.size(); ++index)
+	{
+		raster_line& destinationLine = destination.raster_lines[index];
+		const raster_line& sourceLine = source.raster_lines[index];
+		if (destinationLine.cycles == sourceLine.cycles
+			&& destinationLine.hash == sourceLine.hash
+			&& destinationLine.instructions == sourceLine.instructions)
+		{
+			++stats.reused_lines;
+			continue;
+		}
+		destinationLine = sourceLine;
+		destinationLine.cache_key = NULL;
+		++stats.copied_lines;
+	}
+	return stats;
+}
 
 inline int GetInstructionCycles(const SRasterInstruction &instr)
 {
@@ -185,6 +244,53 @@ inline int GetInstructionCycles(const SRasterInstruction &instr)
 		return 2;
 	}
 	return 4;
+}
+
+enum raster_program_validation_error
+{
+	E_RASTER_VALID = 0,
+	E_RASTER_INVALID_INSTRUCTION = 1 << 0,
+	E_RASTER_INVALID_TARGET = 1 << 1,
+	E_RASTER_CYCLE_MISMATCH = 1 << 2,
+	E_RASTER_CYCLE_LIMIT_EXCEEDED = 1 << 3,
+};
+
+inline unsigned ValidateRasterLine(const raster_line& line)
+{
+	unsigned errors = E_RASTER_VALID;
+	int calculatedCycles = 0;
+	for (const SRasterInstruction& instruction : line.instructions)
+	{
+		const unsigned opcode = static_cast<unsigned>(instruction.loose.instruction);
+		if (opcode >= static_cast<unsigned>(E_RASTER_MAX))
+		{
+			errors |= E_RASTER_INVALID_INSTRUCTION;
+			continue;
+		}
+		calculatedCycles += GetInstructionCycles(instruction);
+		if (instruction.loose.instruction >= E_RASTER_STA
+			&& static_cast<unsigned>(instruction.loose.target)
+				>= static_cast<unsigned>(E_TARGET_MAX))
+		{
+			errors |= E_RASTER_INVALID_TARGET;
+		}
+	}
+	if (line.cycles != calculatedCycles)
+		errors |= E_RASTER_CYCLE_MISMATCH;
+	if (line.cycles < 0 || line.cycles > raster_program_cycle_limit
+		|| calculatedCycles > raster_program_cycle_limit)
+	{
+		errors |= E_RASTER_CYCLE_LIMIT_EXCEEDED;
+	}
+	return errors;
+}
+
+inline unsigned ValidateRasterPicture(const raster_picture& picture)
+{
+	unsigned errors = E_RASTER_VALID;
+	for (const raster_line& line : picture.raster_lines)
+		errors |= ValidateRasterLine(line);
+	return errors;
 }
 
 #endif
