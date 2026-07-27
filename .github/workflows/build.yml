@@ -77,9 +77,12 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -C Release
 
-      # A binary that cannot convert a picture is not worth shipping. A GUI
-      # build always initialises SDL video, even under /quiet, so this needs a
-      # display - the offscreen driver provides one on Linux and macOS.
+      # A binary that cannot convert a picture is not worth shipping. Two
+      # belts: the offscreen video driver gives SDL something to open, and
+      # /quiet keeps the program from raising a dialog no one can answer.
+      # Without /quiet this step passed twice and hung once on the same
+      # command - an unattended runner and a program that may ask a question
+      # are a bad pairing, whatever the odds.
       - name: Smoke test (convert a picture)
         if: runner.os != 'Windows'
         timeout-minutes: 5
@@ -88,14 +91,13 @@ jobs:
           SDL_VIDEODRIVER: offscreen
         run: |
           cd build/Release
-          ./RastaConverter ../../test.jpg /h=40 /threads=2 /dither=none \
+          ./RastaConverter ../../test.jpg /h=40 /threads=2 /dither=none /quiet \
             /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png
           test -f smoke.png.opt
 
-      # Windows has no session to open a window in, offscreen or otherwise, and
-      # a blocked window creation hangs the job rather than failing it. --version
-      # returns before any of that, which still proves the executable loads with
-      # the DLLs beside it - the failure this step is really guarding against.
+      # Windows has no session to open a window in at all, and a GUI build
+      # initialises SDL video even under /quiet. --version returns before any
+      # of that, and still proves the executable loads with its DLLs.
       - name: Smoke test (executable loads)
         if: runner.os == 'Windows'
         timeout-minutes: 5
