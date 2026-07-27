@@ -10,6 +10,22 @@ arguments, or pass `/livegui` alongside other options. See
 to build only the traditional SDL interface; `NO_GUI` builds remain independent
 of Dear ImGui. See `BUILD.md`.
 
+Quick start
+-----------
+
+1. Build it (see [Building RastaConverter](#building-rastaconverter)) or unpack a release.
+2. Run the program with no arguments. The setup screen opens.
+3. Drop a picture onto the window, press **Convert**, and watch the dashboard.
+4. Press **Stop and save** when it looks good. Everything lands in a folder next
+   to your picture, and the **XEX** button in *Recent* turns it into an Atari
+   executable.
+
+From the command line, the equivalent is:
+
+```sh
+RastaConverter photo.jpg /h=240 /objective=source /threads=8
+```
+
 The conversion process is optimization of the [Kernel Program](http://www.atariarchives.org/dere/chapt05.php#H5_7).
 It uses most of the Atari graphics capabilities including sprites, midline color changes and sprite multiplication. 
 
@@ -18,15 +34,19 @@ Key capabilities
 - Extremely optimized emulator of subset of [6502 CPU](https://en.wikipedia.org/wiki/MOS_Technology_6502) and [ANTIC](https://en.wikipedia.org/wiki/ANTIC) to simulate execution on real machine.
 - Optimization: Late Acceptance Hill Climbing (LAHC) and Diversified Late Acceptance Search (DLAS), with support for reproducible runs, evaluation limits, auto-save and resume. Single-frame checkpoints reconstruct exact scores; dual checkpoints reconstruct the saved A/B programs and establish a fresh conditional baseline.
 - Dithering: chess, Floyd–Steinberg, line, line2, 2D, Jarvis, simple, and Knoll; tunable strength and randomness. The legacy `rfloyd` option currently selects a per-pixel quantization path rather than randomized Floyd–Steinberg and ignores the strength/randomness controls.
-- Color distance: YUV (default), RGB Euclidean, CIEDE2000, and CIE94; independently selectable for preprocessing and optimization.
+- Colour distance: Rasta, YUV, RGB Euclidean, CIEDE2000, CIE94 and OKLab, chosen independently for building the target picture (`/predistance`, default CIEDE2000) and for scoring candidates during the search (`/distance`, default Rasta).
+- Scoring reference: score against the quantized target picture or against the original source (`/objective=target|source`); the source objective costs no more per evaluation and usually lands closer to the original.
 - Dual-frame mode: two alternating frames (A/B) with YUV or RGB blending, optional temporal luma/chroma penalties to reduce flicker, and export of both per-frame and blended outputs.
 - Performance: multi-threaded execution with per-thread line caches and configurable cache size.
 - Image pipeline: resize filters (box, bilinear, bicubic, bspline, Catmull–Rom, Lanczos3) plus brightness, contrast, gamma, saturation and vibrance adjustments.
 - Hardware control: fine-grained control over Atari registers, including enabling/disabling hardware sprites (players/missiles) per scanline.
 - Details mask: provide a mask image to emphasize selected regions and bring out fine details in the result. Legacy, normalized and refined weighting modes, with strength reaching the classic 4x and 16x emphasis, and an overlay in the GUI showing the effective weight map.
-- Interfaces: interactive Live UI, the traditional SDL3 GUI, and headless console mode.
+- Interfaces: an interactive setup screen and live dashboard for every run, and a headless console mode for scripting. (The pre-2025 three-thumbnail display remains only in `-DENABLE_LIVE_UI=OFF` builds.)
 - Palette selection: choose target palette files via Adobe ACT to match different monitors and CRT settings.
 - Cross-platform: CMake-based builds for Windows, macOS and Linux, with scripted Profile Guided Optimization.
+- Live editing: pause a run to paint the details mask or repaint the destination picture with the hardware palette, then resume - the search picks up from the edited target without restarting.
+- Per-run output: each conversion writes into its own `rc-<image>-NNN` folder by default (`/subfolder=off` to write beside the source image), and the Recent browser can assemble any run into an Atari executable with the bundled MADS.
+- Interruptible: Ctrl+C, a kill or a closing terminal stop a run the way the Stop button does - it saves and exits rather than losing the work since the last autosave.
 - Extras: scripts and generators to assemble Atari executables.
 
 The converter uses Late Acceptance Hill Climbing (LAHC) and [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29).

@@ -151,6 +151,14 @@ RastaConverterBeta21      2025-11-?? [AI RELEASE]
     named rc-... are ever removed, so a history entry pointing somewhere
     unexpected is forgotten rather than deleted, and the dialog says which of
     the two the button is about to do.
+* Windows runtime DLLs are no longer copied next to Linux and macOS binaries,
+  where they were dead weight - and one of them was a stale SDL2 left over from
+  before the SDL3 port.
+* Documentation caught up with the program: a quick start in the README, a table
+  in BUILD.md saying which build configuration produces what, concrete package
+  commands for Fedora and Debian/Ubuntu, and corrected claims about the
+  interfaces, the six colour-distance functions and their two independent
+  defaults.
 * Ctrl+C, a kill or the terminal closing now stop a conversion the way the Stop
   button does: the run saves and exits. Previously the process died where it
   stood and everything since the last autosave was lost - and in GUI builds the

@@ -786,7 +786,10 @@ if(NOT BUILD_NO_GUI)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR}/help.txt"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR}/README.md"
     )
-    if(EXISTS "${CMAKE_SOURCE_DIR}/dlls")
+    # Windows only: these are Windows import/runtime libraries, and copying them
+    # beside a Linux or macOS binary just litters the output directory with
+    # files that platform cannot load.
+    if(WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/dlls")
         add_custom_command(TARGET RastaConverter POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dlls" "${RC_RUNTIME_COPY_DIR}"
         )
@@ -807,7 +810,7 @@ if(BUILD_NO_GUI)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR_NO_GUI}/help.txt"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR_NO_GUI}/README.md"
     )
-    if(EXISTS "${CMAKE_SOURCE_DIR}/dlls")
+    if(WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/dlls")
         add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dlls" "${RC_RUNTIME_COPY_DIR_NO_GUI}"
         )

@@ -13,11 +13,27 @@ cmake --build build --config Release
 ```
 
 Launch the binary without arguments to open interactive setup. `/livegui` (or
-`--livegui`) explicitly selects it when other arguments are present. Ordinary
-command-line conversions continue to use the existing SDL interface. Pass
-`-DENABLE_LIVE_UI=OFF` (or `noliveui` to a build wrapper) to omit Dear ImGui.
-Console-only builds disable it automatically and do not fetch or compile GUI
-dependencies.
+`--livegui`) opens it when other arguments are present. Every run displays the
+dashboard, including runs started entirely from the command line - `/livegui`
+decides whether the setup screen appears first, not how a conversion is shown.
+
+Pass `-DENABLE_LIVE_UI=OFF` (or `noliveui` to a build wrapper) to omit Dear
+ImGui; those builds fall back to the pre-2025 display of three thumbnails with
+statistics beneath them. Console-only builds disable the interface entirely and
+do not fetch or compile GUI dependencies.
+
+Which build do you want?
+------------------------
+
+| You want | Configure with | Needs |
+|---|---|---|
+| The normal program: setup screen, dashboard, editor | *(defaults)* | FreeImage, SDL3, SDL3_ttf; Dear ImGui is fetched automatically |
+| A headless binary for scripts, servers or CI | `-DBUILD_NO_GUI=ON` | FreeImage only |
+| The old three-thumbnail display, no Dear ImGui | `-DENABLE_LIVE_UI=OFF` | FreeImage, SDL3, SDL3_ttf |
+
+If CMake is unavailable, `src/Makefile` builds the headless target directly
+(`cd src && make`). It cannot build the interactive interface, which needs Dear
+ImGui fetched at configure time - use CMake for that.
 
 Requirements
 ------------
@@ -45,9 +61,12 @@ If SDL3 and/or SDL3_ttf still cannot be found after all of that (a common case: 
 Installing dependencies
 -----------------------
 - Ubuntu/Debian
-  - `sudo apt install libfreeimage-dev libsdl3-dev libsdl3-ttf-dev` (where SDL3 packages are available in the configured repositories)
+  - `sudo apt install build-essential cmake ninja-build libfreeimage-dev libsdl3-dev libsdl3-ttf-dev`
+  - Older releases have no SDL3 packages. Install FreeImage alone and let CMake
+    fetch SDL3 and SDL3_ttf from source - the build does this automatically for
+    whichever piece is missing.
 - Fedora
-  - Install the FreeImage, SDL3, and SDL3_ttf development packages for your distribution.
+  - `sudo dnf install gcc-c++ cmake ninja-build freeimage-devel SDL3-devel SDL3_ttf-devel`
 - Arch
   - `sudo pacman -S freeimage sdl3 sdl3_ttf`
 - macOS (Homebrew)
