@@ -1,7 +1,7 @@
 ChangeLog
 =========
 
-RastaConverterBeta21      2025-11-?? [AI RELEASE]
+RastaConverterBeta22      2026-07-27 [AI RELEASE]
 * New interactive Live UI (built with /livegui, or by launching with no command line):
   - Setup screen with the image picker on top, one continuous grouped form covering
     every conversion option beside a large live preview, native system file pickers,

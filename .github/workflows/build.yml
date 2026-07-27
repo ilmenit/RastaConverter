@@ -1,0 +1,132 @@
+name: Build
+
+# Every push builds and tests all three platforms and uploads the packaged zips
+# as artifacts, so the packaging is exercised continuously rather than only on
+# release day. Pushing a Beta* tag additionally publishes those same zips as a
+# GitHub release - the release is the CI output, not a separately built thing.
+
+on:
+  push:
+    branches: [master]
+    tags: ['Beta*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux_x64
+            os: ubuntu-latest
+          - name: macos_arm64
+            os: macos-14
+          - name: win_x64
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # FreeImage is the one dependency with no from-source fallback in
+      # CMakeLists; SDL3 and SDL3_ttf are fetched automatically when a platform
+      # has no package for them, which is currently every platform here.
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfreeimage-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libxinerama-dev libxkbcommon-dev libwayland-dev wayland-protocols \
+            libegl1-mesa-dev libgl1-mesa-dev libasound2-dev libpulse-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja freeimage
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install freeimage:x64-windows
+        shell: pwsh
+
+      - name: Configure
+        shell: bash
+        run: |
+          extra=""
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            extra="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release $extra
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+      # A binary that cannot convert a picture is not a build worth shipping.
+      - name: Smoke test
+        shell: bash
+        run: |
+          cd build/Release 2>/dev/null || cd build
+          ./RastaConverter ../../test.jpg /h=40 /threads=2 /dither=none \
+            /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png \
+            || ./RastaConverter.exe ../../test.jpg /h=40 /threads=2 \
+               /dither=none /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png
+          test -f smoke.png.opt
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          archive=$(./scripts/package.sh --build-dir build --platform ${{ matrix.name }})
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RastaConverter-${{ matrix.name }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/Beta')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # The notes come from the ChangeLog section for this version, so the
+      # release page and the shipped ChangeLog.md cannot disagree.
+      - name: Extract release notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          awk -v v="RastaConverter${version}" '
+            $0 ~ "^"v { found=1; next }
+            found && /^RastaConverter[A-Za-z0-9]+ / { exit }
+            found { print }
+          ' ChangeLog.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "No ChangeLog section for ${version}." > notes.md
+          fi
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "RastaConverter${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            artifacts/*/*.zip
