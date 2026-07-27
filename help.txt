@@ -72,6 +72,15 @@ General options:
   - Single-frame saved scores reconstruct exactly. Dual scores are re-materialized against the loaded
     opposite frame and may shift slightly before new search work; record that baseline separately.
 
+/subfolder=on|off
+  Where a run's files go when the interface derives the name for you. Default: on.
+  on writes them into their own folder beside the source image, rc-<image>-NNN, so
+    a re-run never disturbs an earlier one and a run stays one self-contained thing.
+  off writes them beside the source image directly, taking the plain <image>.png
+    name when it is free and numbering it otherwise, so nothing is overwritten.
+  A /output path you give yourself always wins over both.
+  Aliases: --subfolder
+
 /preprocess
   If this switch exists then RastaConverter generates and saves only destination picture.
   Aliases: --preprocess
@@ -277,31 +286,36 @@ Input:
   oklab - modern perceptual distance with good balance of accuracy and speed.
   Aliases: --distance
 
-/objective=legacy|source|source-spatial|source-composite|source-edge|source-region
-  Experimental single-frame scoring reference. Default: legacy.
-  legacy scores the processed quantized/dithered target, preserving historical behavior.
-  source keeps that processed image as an initialization/mutation guide but scores the full-color source.
-  source-spatial replaces direct error with filtered linear-light OKLab error.
-  source-composite adds that filtered term to direct source error; tune it with /spatial_weight (default 0.1).
-  source-edge adds adjacent-pixel linear-light luminance-gradient error to direct source error; tune it with /edge_weight (default 0.1).
-  source-region adds the mean squared OKLab error of the worst 1% of non-overlapping 8x8 regions to direct source error; tune it with /region_weight (default 0.1).
-  Direct source/Floyd is the recommended general maximum-quality policy. For long runs where sustained local-error reduction justifies about 18x evaluation cost, the validated optional local-quality preset is /objective=source-region /region_weight=0.025 /dither=floyd /dither_val=1 /dither_rand=0. Composite and edge additions remain experimental. Dual mode retains its joint objective.
+/objective=target|source
+  Which picture a candidate raster program is scored against. Default: target.
+  target scores the processed quantized/dithered target picture - the one the GUI
+    shows under "Target". This is the historical behavior (the old spelling
+    /objective=legacy is still accepted and identical), it keeps scores comparable
+    with older runs, and it is the only mode in which the live editor can repaint
+    the destination, since the target picture is what a candidate is measured
+    against.
+  source keeps that processed image as an initialization/mutation guide but scores
+    the full-color source picture. It adds no per-evaluation cost - only the
+    reference the error tables are built from changes - and measured closer to the
+    original on every metric tried: on a photograph and on illustrated artwork at
+    240 lines, 150 s per run, it beat target scoring on mean OKLab error, on the
+    95th percentile, on SSIM and on gradient fidelity. The gap is widest with
+    /dither=none.
+  Removed: source-spatial, source-composite, source-edge and source-region each
+    added a full-frame structural term to every evaluation. The term cost about
+    sixty times the throughput, and in the measurements above none of them beat
+    plain source - at equal wall clock or at equal evaluation counts. The four
+    names are still accepted and now select source, so an existing recipe keeps
+    its intent.
+  Dual mode retains its joint objective and ignores this setting.
   Aliases: --objective
 
 /spatial_weight=FLOAT
-  Spatial-term weight for /objective=source-composite. Range 0-10; default 0.1.
-  The option does not alter legacy, source, or source-spatial behavior.
-  Alias: --spatial_weight
-
 /edge_weight=FLOAT
-  Adjacent-gradient weight for /objective=source-edge. Range 0-10; default 0.1.
-  The option does not alter legacy, source, source-spatial, or source-composite behavior.
-  Alias: --edge_weight
-
 /region_weight=FLOAT
-  Weight of the bounded worst-region term used by /objective=source-region.
-  Range: 0 to 10. Default: 0.1.
-  Alias: --region_weight
+  Accepted and ignored. These tuned the removed structural objectives; a recipe
+  naming one still runs, and prints a warning saying the value had no effect.
+  Aliases: --spatial_weight --edge_weight --region_weight
 
 /predistance=Color distance function for preprocess
   Default: rasta, other options: ciede, yuv, euclid, cie94, oklab

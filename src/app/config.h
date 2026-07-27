@@ -57,13 +57,15 @@ enum e_distance_function {
 	E_DISTANCE_RASTA,
 };
 
+// Which picture a candidate is scored against. The four structural variants
+// that used to follow (spatial, composite, edge, region) added a full-frame
+// term to every evaluation for about a sixtieth of the throughput and never
+// beat plain source scoring on colour error, structural similarity or edge
+// fidelity, on photographs or on artwork. Their command-line names are still
+// accepted, as aliases for source.
 enum e_visual_objective {
 	E_OBJECTIVE_LEGACY_TARGET,
 	E_OBJECTIVE_SOURCE,
-	E_OBJECTIVE_SOURCE_SPATIAL,
-	E_OBJECTIVE_SOURCE_COMPOSITE,
-	E_OBJECTIVE_SOURCE_EDGE,
-	E_OBJECTIVE_SOURCE_REGION,
 };
 
 struct Configuration {
@@ -78,9 +80,6 @@ struct Configuration {
 	e_distance_function dstf;
 	e_distance_function pre_dstf;
 	e_visual_objective visual_objective = E_OBJECTIVE_LEGACY_TARGET;
-	double spatial_weight = 0.1;
-	double edge_weight = 0.1;
-	double region_weight = 0.1;
 	bool continue_processing;
 
 	e_dither_type dither;
@@ -114,6 +113,9 @@ struct Configuration {
 	e_init_type init_type;
 	bool quiet;
 	bool live_gui = false;
+	// Where a run's dozen artifacts go: its own rc-<image>-NNN folder beside the
+	// source image, or straight into that folder alongside it.
+	bool run_subfolder = true;
 	// CLI handling flags
 	bool show_help = false;
 	bool show_version = false;
@@ -162,9 +164,6 @@ struct Configuration {
 	e_distance_function resume_saved_predistance = E_DISTANCE_CIEDE;
 	e_dither_type resume_saved_dither = E_DITHER_NONE;
 	e_visual_objective resume_saved_objective = E_OBJECTIVE_LEGACY_TARGET;
-	double resume_saved_spatial_weight = 0.1;
-	double resume_saved_edge_weight = 0.1;
-	double resume_saved_region_weight = 0.1;
 	std::string resume_saved_details_file;
 	std::string resume_saved_details_mode = "legacy";
 	double resume_saved_details_strength = 0.5;

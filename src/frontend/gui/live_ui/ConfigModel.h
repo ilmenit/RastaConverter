@@ -18,14 +18,20 @@
 namespace rc_live_ui {
 
 // Rail categories, in the pipeline order of design P1/§7.1b.
+// The order here is the order of the form, and the numbers the headers show.
+// It follows the decisions rather than the pipeline: what to convert, how to
+// search for it, then the two ways of shaping what "close enough" means.
+// Colour holds every colour decision - the corrections and the palette match
+// and dither that follow from them - rather than splitting the correction from
+// the quantization it feeds.
+// Objective and dual-frame are not sections of their own - they are the two
+// ends of the Algorithm section, because neither is a decision anyone makes
+// without the optimizer settings in front of them.
 enum class Category {
 	Source,
-	TargetColour,
-	TargetDithering,
-	Objective,
-	Details,
 	Algorithm,
-	DualFrame,
+	Colour,
+	Details,
 	RunOutput,
 	Count,
 };
@@ -120,8 +126,8 @@ extern const char* const kDistanceLabels[6];
 extern const char* const kDistanceTokens[6];
 extern const char* const kDitherLabels[10];
 extern const char* const kDitherTokens[10];
-extern const char* const kObjectiveLabels[6];
-extern const char* const kObjectiveTokens[6];
+extern const char* const kObjectiveLabels[2];
+extern const char* const kObjectiveTokens[2];
 extern const char* const kOptimizerLabels[3];
 extern const char* const kOptimizerTokens[3];
 extern const char* const kInitLabels[4];

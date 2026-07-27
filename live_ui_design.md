@@ -19,7 +19,7 @@ working. What is still outstanding, in the order it is worth doing:
 | §9 dashboard | done, including the §10 paint/edit controls in the shared viewer |
 | §9.2 error heatmap | **outstanding**; the details-mask overlay from the same section is built |
 | §9.4 live tuning tiers | **outstanding** — `LiveTunables` exists but nothing writes or reads it yet |
-| §10 paint mode | **done for the conversion-edit workflow** — the always-owned mask supports brush/line/shape/fill/revert tools, undo/redo and all mask modes; strokes safely pause, rebuild, flush caches and reset history. Destination edits are staged behind Apply & Retarget. Edited mask/target artifacts, exact Continue/Reuse, automatic pre-edit snapshots, explicit Branch and Recent metadata are built. Dual mode is disabled with a reason. The optional manual *named* snapshot/restore browser described at the end of §10 remains a separate enhancement. |
+| §10 paint mode | **done, as one paused editor** — a single "Pause & Edit" button opens a full-window editor with a segmented target selector, eight drawn-icon tools, scrolling/zooming canvas, per-target picker (0-255 value ramp for the mask, 16x8 hardware palette for the destination), live mask parameters, stroke and parameter history with undo/redo, and an apply bar that states the cost and offers this run or a new one. The manual *named* snapshot browser at the end of the section remains a separate enhancement. |
 | §11 Done state | **outstanding** — the window closes when the run ends |
 | §12 Build & Run on Atari | **outstanding** |
 | §13 multi-instance safety | partial — output name is derived from the input and an overwrite warning is shown; the lock file and thread-budget registry are not built |
@@ -414,10 +414,16 @@ It is never fully expanded by default. Default state:
 | Section | Default |
 |---|---|
 | ① Source | expanded |
-| ② Target · Colour | expanded |
-| ② Target · Dithering | expanded |
-| ③ Objective · Details · Algorithm · Dual frame | **collapsed** |
+| ② Algorithm | **collapsed** |
+| ③ Colour | expanded |
+| ④ Dithering | expanded |
+| ⑤ Details mask | **collapsed** |
 | Run & output (bottom bar) | always visible |
+
+*(As built. The sections were originally numbered by pipeline stage, which put
+three of them at "③" and read as a numbering bug rather than as a grouping.
+They are now numbered in the order they appear, and Objective and Dual frame
+have become the last and first groups of Algorithm - see §7.2.)*
 
 So the screen a first-time user meets is: input file, height, filter, palette,
 colour sliders, dither type/strength, output, threads, **Convert!** — about 14
@@ -493,17 +499,15 @@ teaches the pipeline, without paying V1's cost:
   ★ Modified (3)
   ─────────────────
   ① Source
-  ② Target · Colour
-  ② Target · Dithering
-  ③ Objective              ⚠ 1
-  ③ Details mask             2
-  ③ Algorithm
-  ③ Dual frame
+  ② Algorithm              ⚠ 1
+  ③ Colour
+  ④ Dithering
+  ⑤ Details mask             2
   ─────────────────
   Run & output
 ```
 
-Eight categories. `/onoff` lives inside Algorithm rather than a "Constraints"
+Five categories. `/onoff` lives inside Algorithm rather than a "Constraints"
 category of its own — a one-option category is a category too many.
 
 Note what the rail does **not** carry: tier badges. In Setup nothing is live or
@@ -535,14 +539,12 @@ lags the CLI is how the current situation arose.
 | Group | Options | Notes |
 |---|---|---|
 | ① Source | `/i` `/h` `/filter` `/pal` | `/h` behind an "Auto" checkbox |
-| ② Target — colour | `/brightness` `/contrast` `/gamma` + proposed `/saturation` `/vibrance` | tier 3; real-time preview (§7.6) |
-| ② Target — dithering | `/dither` `/dither_val` `/dither_rand` | val/rand gated on type |
-| ② Target — quantization | `/predistance` | labelled "Target build distance" |
-| ③ Objective | `/objective` `/distance` + one contextual weight from `/spatial_weight` `/edge_weight` `/region_weight` | whole group disabled in dual |
-| ③ Details mask | `/details` `/details_mode` `/details_val` `/details_floor` `/details_feather` `/details_refine_mix` `/details_score` `/details_allocate` `/details_global_period` | whole group disabled in dual; params gated on mode |
-| ③ Algorithm | `/opt` `/s` `/init` `/unstuck_after` `/unstuck_drift` `/seed` | |
-| ③ Constraints | `/onoff` | file picker + inline editor (§7.5) |
-| ③ Dual frame | `/dual` `/first_dual_steps` `/after_dual_steps` `/altering_dual_steps` `/dual_blending` `/dual_luma` `/dual_chroma` `/dual_dither` `/dual_dither_val` `/dual_dither_rand` | all sub-options gated on `/dual` |
+| ② Algorithm — frames | `/dual` `/first_dual_steps` `/after_dual_steps` `/altering_dual_steps` `/dual_blending` `/dual_luma` `/dual_chroma` `/dual_dither` `/dual_dither_val` `/dual_dither_rand` | first, because it decides what the rest of the section means; sub-options gated on `/dual` |
+| ② Algorithm — search | `/opt` `/s` `/init` `/unstuck_after` `/unstuck_drift` `/seed` `/onoff` | `/onoff` lives here rather than in a one-option "Constraints" category |
+| ② Algorithm — objective | `/objective` `/distance` + one contextual weight from `/spatial_weight` `/edge_weight` `/region_weight` | last; disabled in dual, which scores jointly |
+| ③ Colour | `/brightness` `/contrast` `/gamma` `/saturation` `/vibrance` | real-time preview (§7.6) |
+| ④ Dithering | `/dither` `/dither_val` `/dither_rand` `/predistance` | val/rand gated on type; `/predistance` labelled "Target build distance" |
+| ⑤ Details mask | `/details` `/details_mode` `/details_val` `/details_floor` `/details_feather` `/details_refine_mix` `/details_score` `/details_allocate` `/details_global_period` | whole group disabled in dual; params gated on mode |
 | Run | `/o` `/threads` `/cache` `/max_evals` `/save` `/continue` `/preprocess` | bottom bar |
 | Console-only | `/v` `/quiet` `/help` | intentionally absent |
 
@@ -990,6 +992,19 @@ the heatmap-to-mask workflow (§9.2) that gives painting its purpose. Painting i
 a **mode of the same `ImageViewer`** — the toolbar appears on the left, a
 colour/snapshot column on the right, the canvas keeps its zoom, pan and
 overlays, and the heatmap can stay visible *underneath the brush*.
+
+**As built**: one `Pause & Edit` button in the dashboard's action row opens the
+editor, which takes the whole window - every dashboard panel is frozen while the
+optimizer is paused, so keeping them would only cost canvas. The target is a
+two-segment control, not tabs: it is one canvas seen two ways, and the segment
+carries the cost of applying ("cheap - dirty rectangle" against "full rebuild").
+Six shape tools collapsed into three plus a *Fill shapes* toggle, and the eraser
+is right-drag, which is what "primary and secondary" already means everywhere
+else. Mask strength, mode, floor, feather and scoring live in the editor's
+inspector: a painted value means nothing without the multiplier that scales it,
+and the retarget an apply already performs covers a parameter change for free.
+Branching is no longer a toolbar verb - it is the second entry in the apply
+menu, named by its result and showing the folder it would create.
 
 Two edit targets. Both are tier 3 (§6) — the earlier claim that mask edits were
 free reweighting was wrong — but they cost very different amounts:

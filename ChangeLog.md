@@ -25,6 +25,132 @@ RastaConverterBeta21      2025-11-?? [AI RELEASE]
   - Finishing a conversion returns to the setup screen with the settings still
     in place, opening on the history so the run just completed is the first
     card, instead of quitting the program.
+  - Live editing is one paused session behind a single "Pause & Edit" button,
+    replacing the earlier paint checkbox and separate destination button. It
+    takes the whole window - the dashboard panels are frozen while the optimizer
+    is paused anyway - and offers a two-segment target selector, eight tools with
+    drawn icons (pan, brush, line, rectangle, ellipse, bucket, eyedropper, revert
+    brush), a scrolling canvas with Ctrl+wheel zoom about the cursor, a reference
+    layer to paint over (target, source, best output) with an optional error
+    heatmap, per-stroke undo/redo, and an apply bar that states what applying
+    will cost before it is pressed.
+  - The picker matches what is being painted: a 0-255 value ramp with presets for
+    the details mask, each value annotated with the error multiplier it produces,
+    and the hardware palette in hardware order for the destination - 16 hues by 8
+    luminances, which is what the 128-entry palette actually is, with the colours
+    the picture already uses ringed.
+  - Mask strength, mode, floor, feather and scoring are editable in the editor
+    and commit with the strokes. One retarget covers both, so they stopped being
+    decisions frozen at Setup.
+  - Applying commits to this run, or to a fresh rc-<image>-NNN through the apply
+    menu; the old "Branch" button, which read as an editor tool and named no
+    outcome, is gone.
+  - Fixed the preview canvas leaving its child window unclosed, which Dear ImGui
+    reported as a red-bordered error window over the setup screen and the panel
+    beside it as soon as an image was loaded. The palette readout was being drawn
+    inside the canvas rather than below it, which is what let the mismatch through.
+  - Slider values are labelled beside the track instead of inside it, so a value
+    parked near the middle is no longer hidden under the grab.
+  - The editor's brush is measured on screen rather than in the buffer: an Atari
+    pixel is twice as wide as it is tall, so a round brush now covers half as
+    many columns as rows instead of painting a wide oval, and a square brush is
+    square. The cursor draws the exact pixels the brush would touch, and follows
+    the round/square choice, which the old circle outline did not.
+  - Line, rectangle and ellipse preview the pixels they would paint, at the
+    brush width, while the mouse is still down. Previously they showed a
+    hairline rubber band and the real, thick shape only appeared on release.
+  - The picture drawn beneath the mask has its own visibility slider, and the
+    whole control is gone when editing the destination, where an opaque layer
+    covers whatever is under it anyway.
+  - "Recent" cards make a run into an Atari executable: XEX assembles the run
+    with the bundled MADS - single-frame or dual, detected from the folder - into
+    <run>/<name>.xex and opens it with whatever the system uses for .xex files.
+    It runs off the UI thread, reports the assembler's own message when it
+    fails, and afterwards just opens the file unless Shift asks for a rebuild.
+  - Names on a "Recent" card are links: the folder opens in the file manager,
+    the source name in the image editor, and the thumbnail opens the picture the
+    run produced. Right-clicking a card offers all of it in one menu, along with
+    "Copy command line".
+  - The convergence chart says what it is showing. It had no scale at all, and
+    a vertical range of two percent either side of the value, so once the steep
+    early drop scrolled out of its five-minute window - or after resuming an
+    already-converged run - it drew a horizontal line and left no way to tell
+    whether that meant "finished" or "broken". It now labels both ends of the
+    curve with the values they reached and the evaluation range beneath them,
+    scales vertically to the data actually plotted, says "unchanged across this
+    view" outright when there is nothing to plot, and reads out any point on
+    hover. The whole run is kept rather than the last few minutes: when the
+    buffer fills, every other sample is dropped and the sampling stride doubles,
+    so the early drop never disappears and memory stays fixed. "Zoom to recent"
+    switches to the last four minutes at full resolution, where late progress is
+    too small to see against the run as a whole.
+  - The setup form is five numbered sections - Source, Algorithm, Colour,
+    Dithering, Details mask - instead of eight numbered by pipeline stage, which
+    put three sections at "2" and four at "3" and read as a numbering bug.
+    Objective and Dual frame are no longer sections of their own: they are the
+    last and first groups of Algorithm, because neither is a decision anyone
+    makes without the optimizer settings in front of them. The section reads
+    frames, then search, then objective.
+  - The objective control says what each choice costs and buys, including the
+    two things that were invisible: scoring the source directly costs nothing
+    extra per evaluation and lands measurably closer to the original, while the
+    paused editor can only repaint the destination in the default target mode.
+    Measured over two images and three seeds at three million evaluations,
+    /objective=source was 2-15% closer to the source in mean OKLab distance than
+    the default, and never worse; the gap is widest with dithering off.
+  - The objective is named after what it scores against, matching the two
+    pictures the viewer already shows: "Score against: Target picture / Source
+    picture". /objective=legacy is now /objective=target - "legacy" described the
+    option's history rather than its behaviour, and implied it was the deprecated
+    choice when it is the default and the only one that allows repainting the
+    destination mid-run. The old token is still accepted, and produces
+    byte-identical runs.
+  - The four structural objectives (source-spatial, source-composite, source-edge,
+    source-region) are deprecated and no longer offered in the setup form. They
+    add a full-frame term to every evaluation, which costs about sixty times the
+    throughput, and measured on a photograph and on illustrated artwork at 240
+    lines none of them beat plain source scoring on colour error, 95th-percentile
+    error, SSIM or gradient fidelity - at equal wall clock or at equal evaluation
+    counts. They still run from the command line, and a configuration that
+    already selects one still shows it in the form, so no existing recipe becomes
+    unreachable.
+  - The four structural objectives are gone from the code, not just from the
+    form: source-spatial, source-composite, source-edge and source-region, their
+    three weight options, the full-frame scoring pass in the evaluator and about
+    170 lines of VisualObjective. The four names now select /objective=source
+    with a warning - that is what they were built on and what beat them - and
+    /spatial_weight, /edge_weight and /region_weight are accepted and ignored,
+    so an existing recipe still runs rather than failing on an unknown option.
+  - A run started from the command line shows the dashboard too. /livegui now
+    decides only whether the setup screen appears first; the legacy three-blit
+    display with statistics under three thumbnails survives solely in builds
+    made with ENABLE_LIVE_UI=OFF, which have nothing else to draw with.
+  - The palette is chosen from a list of the ones shipped with the program,
+    with Browse for anything else, instead of a path you had to know how to fill
+    in.
+  - Every value beside a form slider is an editable field: click, type, Enter.
+    The value is clamped to the option's range when it is committed rather than
+    per keystroke, so a half-typed number never reaches the conversion, and
+    hovering the field states the range.
+  - History length reaches 50000 instead of 64. The engine never had the lower
+    limit - it was a slider bound - and the slider is logarithmic now, because
+    the useful settings span 1 to tens of thousands and no linear track can
+    serve both ends.
+  - New /subfolder=on|off, and an "Own folder" checkbox in the run bar beside
+    "Preprocess only": on, a run writes into its own rc-<image>-NNN folder; off,
+    it writes beside the source image, taking the plain name when free and
+    numbering it otherwise so nothing is overwritten.
+  - The progress panel plots throughput instead of score. A convergence chart
+    starts at whatever distance a random program happens to have - a number with
+    no ceiling, often ten times where the run ends up - so it spent the whole run
+    showing the first two seconds and a flat line for the rest. Evaluations per
+    second has a natural scale, sits under the Rate it explains, marks the
+    average, and shows a stall or the cost of a live edit as a visible dip.
+  - "Clear all" in the Recent browser empties the history, with a confirmation
+    that offers - unchecked - to delete the run folders too. Only directories
+    named rc-... are ever removed, so a history entry pointing somewhere
+    unexpected is forgotten rather than deleted, and the dialog says which of
+    the two the button is about to do.
   - GUI-only conveniences: a warning before overwriting an existing run's
     artifacts, and palette lookup relative to the executable so launching from a
     shortcut works.

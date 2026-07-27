@@ -25,12 +25,13 @@ const char* const kDitherTokens[10] = {
 	"none", "floyd", "rfloyd", "line", "line2",
 	"chess", "simple", "2d", "jarvis", "knoll"};
 
-const char* const kObjectiveLabels[6] = {
-	"Legacy target", "Source", "Source + spatial", "Source composite",
-	"Source + edge", "Source + region"};
-const char* const kObjectiveTokens[6] = {
-	"legacy", "source", "source-spatial", "source-composite",
-	"source-edge", "source-region"};
+// Named after the two pictures the viewer already shows, because that is
+// exactly what the choice is: score a candidate against the Target tab or
+// against the Source tab. "Legacy" named the option's history rather than its
+// behaviour, and implied it was the deprecated one when it is the default.
+// The old token is still accepted; see config.cpp.
+const char* const kObjectiveLabels[2] = {"Target picture", "Source picture"};
+const char* const kObjectiveTokens[2] = {"target", "source"};
 
 const char* const kOptimizerLabels[3] = {"DLAS", "LAHC", "Legacy LAHC"};
 const char* const kOptimizerTokens[3] = {"dlas", "lahc", "legacy"};
@@ -152,94 +153,76 @@ std::vector<OptionDesc> BuildTable()
 	// --- 2 Target: colour --------------------------------------------------
 	add("brightness", "brightness", "Brightness",
 		"Brightness applied to the source before quantization [-100..100].",
-		Category::TargetColour, Tier::Staged, false,
+		Category::Colour, Tier::Staged, false,
 		[](const Configuration& c) { return c.brightness != Defaults().brightness; },
 		[](const Configuration& c) { return Num(c.brightness); });
 	add("contrast", "contrast", "Contrast",
 		"Contrast applied to the source before quantization [-100..100].",
-		Category::TargetColour, Tier::Staged, false,
+		Category::Colour, Tier::Staged, false,
 		[](const Configuration& c) { return c.contrast != Defaults().contrast; },
 		[](const Configuration& c) { return Num(c.contrast); });
 	add("gamma", "gamma", "Gamma",
 		"Gamma applied to the source before quantization [0..8].",
-		Category::TargetColour, Tier::Staged, false,
+		Category::Colour, Tier::Staged, false,
 		[](const Configuration& c) { return !NearlyEqual(c.gamma, Defaults().gamma); },
 		[](const Configuration& c) { return Num(c.gamma); });
 	add("saturation", "saturation", "Saturation",
 		"Uniform chroma scale [-100..100]. Raising it past what the palette can "
 		"represent collapses colours together; watch the palette usage readout.",
-		Category::TargetColour, Tier::Staged, false,
+		Category::Colour, Tier::Staged, false,
 		[](const Configuration& c) { return c.saturation != Defaults().saturation; },
 		[](const Configuration& c) { return Num(c.saturation); });
 	add("vibrance", "vibrance", "Vibrance",
 		"Chroma scale weighted against existing saturation [-100..100], so dull "
 		"regions gain most. Usually the better answer to a grey-looking result.",
-		Category::TargetColour, Tier::Staged, false,
+		Category::Colour, Tier::Staged, false,
 		[](const Configuration& c) { return c.vibrance != Defaults().vibrance; },
 		[](const Configuration& c) { return Num(c.vibrance); });
 
 	// --- 2 Target: dithering ----------------------------------------------
-	add("predistance", "predistance", "Target build distance",
-		"Colour-distance function used to build the target picture during "
-		"preprocessing. Not the same as the search distance.",
-		Category::TargetDithering, Tier::Restart, false,
+	add("predistance", "predistance", "Colour distance",
+		"How the closest Atari colour is chosen for each pixel when the target "
+		"picture is built. Not the same as the search distance, which scores "
+		"candidates during the run.",
+		Category::Colour, Tier::Restart, false,
 		[](const Configuration& c) { return c.pre_dstf != Defaults().pre_dstf; },
 		[](const Configuration& c) { return kDistanceTokens[c.pre_dstf]; });
 	add("dither", "dither", "Dithering",
 		"Dithering algorithm used when building the target picture.",
-		Category::TargetDithering, Tier::Restart, false,
+		Category::Colour, Tier::Restart, false,
 		[](const Configuration& c) { return c.dither != Defaults().dither; },
 		[](const Configuration& c) { return kDitherTokens[c.dither]; });
 	add("dither_val", "dither_val", "Dither strength",
 		"Scales the diffused error. 1.0 is the algorithm's natural strength.",
-		Category::TargetDithering, Tier::Restart, false,
+		Category::Colour, Tier::Restart, false,
 		[](const Configuration& c) { return !NearlyEqual(c.dither_strength, Defaults().dither_strength); },
 		[](const Configuration& c) { return Num(c.dither_strength); },
 		[](const Configuration& c) { return c.dither != E_DITHER_NONE; },
 		"Applies once a dithering algorithm is selected.");
 	add("dither_rand", "dither_rand", "Dither randomness",
 		"Blends random noise into the dither pattern [0..1].",
-		Category::TargetDithering, Tier::Restart, false,
+		Category::Colour, Tier::Restart, false,
 		[](const Configuration& c) { return !NearlyEqual(c.dither_randomness, Defaults().dither_randomness); },
 		[](const Configuration& c) { return Num(c.dither_randomness); },
 		[](const Configuration& c) { return c.dither != E_DITHER_NONE; },
 		"Applies once a dithering algorithm is selected.");
 
 	// --- 3 Objective -------------------------------------------------------
-	add("objective", "objective", "Objective",
-		"What candidate programs are scored against: the quantized target, the "
-		"original source, or the source plus a structural term.",
-		Category::Objective, Tier::Restart, false,
+	add("objective", "objective", "Score against",
+		"Which picture a candidate is measured against: the quantized, dithered "
+		"target, or the original source picture. Scoring the "
+		"source directly costs no more per evaluation and usually lands closer "
+		"to the original; the target objective is the default because it keeps "
+		"scores comparable with older runs and is the only one that allows "
+		"repainting the destination mid-run.",
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.visual_objective != Defaults().visual_objective; },
 		[](const Configuration& c) { return kObjectiveTokens[c.visual_objective]; });
 	add("distance", "distance", "Search distance",
 		"Colour-distance function used to score candidates during the search.",
-		Category::Objective, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.dstf != Defaults().dstf; },
 		[](const Configuration& c) { return kDistanceTokens[c.dstf]; });
-	add("spatial_weight", "spatial_weight", "Spatial weight",
-		"Weight of the filtered term added by /objective=source-composite.",
-		Category::Objective, Tier::Live, false,
-		[](const Configuration& c) { return !NearlyEqual(c.spatial_weight, Defaults().spatial_weight); },
-		[](const Configuration& c) { return Num(c.spatial_weight); },
-		[](const Configuration& c) { return c.visual_objective == E_OBJECTIVE_SOURCE_COMPOSITE; },
-		"Belongs to the source-composite objective.");
-	add("edge_weight", "edge_weight", "Edge weight",
-		"Weight of the luminance-gradient term added by /objective=source-edge.",
-		Category::Objective, Tier::Live, false,
-		[](const Configuration& c) { return !NearlyEqual(c.edge_weight, Defaults().edge_weight); },
-		[](const Configuration& c) { return Num(c.edge_weight); },
-		[](const Configuration& c) { return c.visual_objective == E_OBJECTIVE_SOURCE_EDGE; },
-		"Belongs to the source-edge objective.");
-	add("region_weight", "region_weight", "Region weight",
-		"Weight of the worst-1%-of-8x8-regions OKLab term added by "
-		"/objective=source-region.",
-		Category::Objective, Tier::Live, false,
-		[](const Configuration& c) { return !NearlyEqual(c.region_weight, Defaults().region_weight); },
-		[](const Configuration& c) { return Num(c.region_weight); },
-		[](const Configuration& c) { return c.visual_objective == E_OBJECTIVE_SOURCE_REGION; },
-		"Belongs to the source-region objective.");
-
 	// --- 3 Details mask ----------------------------------------------------
 	add("details", "details", "Mask image",
 		"Greyscale image marking where detail matters most. Brighter means "
@@ -309,8 +292,8 @@ std::vector<OptionDesc> BuildTable()
 		[](const Configuration& c) { return c.optimizer != Defaults().optimizer; },
 		[](const Configuration& c) { return kOptimizerTokens[c.optimizer]; });
 	add("solutions", "s", "History length",
-		"Acceptance-history length for LAHC/DLAS. Longer accepts worse moves "
-		"for longer, exploring more.",
+		"Acceptance-history length for LAHC/DLAS, 1 to 50000. Longer accepts "
+		"worse moves for longer, exploring more before it settles.",
 		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration&) { return GetSolutions() != 1; },
 		[](const Configuration&) { return Num(GetSolutions()); });
@@ -348,12 +331,12 @@ std::vector<OptionDesc> BuildTable()
 	add("dual", "dual", "Dual-frame mode",
 		"Produces two interleaved frames, trading flicker for apparent colour "
 		"depth.",
-		Category::DualFrame, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.dual_mode != Defaults().dual_mode; },
 		[](const Configuration& c) { return std::string(c.dual_mode ? "on" : "off"); });
 	add("first_dual_steps", "first_dual_steps", "Bootstrap A for",
 		"Evaluations spent bootstrapping frame A before frame B exists.",
-		Category::DualFrame, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.first_dual_steps != Defaults().first_dual_steps; },
 		[](const Configuration& c) { return Num(c.first_dual_steps); },
 		[](const Configuration& c) { return c.dual_mode; },
@@ -361,21 +344,21 @@ std::vector<OptionDesc> BuildTable()
 	add("after_dual_steps", "after_dual_steps", "Frame B start",
 		"After A's bootstrap: copy A to B, or generate a fresh B which costs a "
 		"second bootstrap.",
-		Category::DualFrame, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.after_dual_steps != Defaults().after_dual_steps; },
 		[](const Configuration& c) { return c.after_dual_steps; },
 		[](const Configuration& c) { return c.dual_mode; },
 		"Dual-frame mode only.");
 	add("altering_dual_steps", "altering_dual_steps", "Alternate every",
 		"Evaluations per alternation block once both frames exist.",
-		Category::DualFrame, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.altering_dual_steps != Defaults().altering_dual_steps; },
 		[](const Configuration& c) { return Num(c.altering_dual_steps); },
 		[](const Configuration& c) { return c.dual_mode; },
 		"Dual-frame mode only.");
 	add("dual_blending", "dual_blending", "Blend space",
 		"Colour space used to blend the two frames for preview and export.",
-		Category::DualFrame, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.dual_blending != Defaults().dual_blending; },
 		[](const Configuration& c) { return c.dual_blending; },
 		[](const Configuration& c) { return c.dual_mode; },
@@ -383,7 +366,7 @@ std::vector<OptionDesc> BuildTable()
 	add("dual_luma", "dual_luma", "Temporal luma penalty",
 		"Penalizes brightness differences between the two frames. Higher means "
 		"less flicker.",
-		Category::DualFrame, Tier::Live, false,
+		Category::Algorithm, Tier::Live, false,
 		[](const Configuration& c) { return !NearlyEqual(c.dual_luma, Defaults().dual_luma); },
 		[](const Configuration& c) { return Num(c.dual_luma); },
 		[](const Configuration& c) { return c.dual_mode; },
@@ -391,7 +374,7 @@ std::vector<OptionDesc> BuildTable()
 	add("dual_chroma", "dual_chroma", "Temporal chroma penalty",
 		"Penalizes colour differences between the two frames. Higher means "
 		"less colour flicker.",
-		Category::DualFrame, Tier::Live, false,
+		Category::Algorithm, Tier::Live, false,
 		[](const Configuration& c) { return !NearlyEqual(c.dual_chroma, Defaults().dual_chroma); },
 		[](const Configuration& c) { return Num(c.dual_chroma); },
 		[](const Configuration& c) { return c.dual_mode; },
@@ -399,21 +382,21 @@ std::vector<OptionDesc> BuildTable()
 	add("dual_dither", "dual_dither", "Input dithering",
 		"Dithers the source before dual optimization, adding noise the two "
 		"frames can average out.",
-		Category::DualFrame, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.dual_dither != Defaults().dual_dither; },
 		[](const Configuration& c) { return kDualDitherTokens[c.dual_dither]; },
 		[](const Configuration& c) { return c.dual_mode; },
 		"Dual-frame mode only.");
 	add("dual_dither_val", "dual_dither_val", "Input dither strength",
 		"Strength of the dual-mode input dithering [0..2].",
-		Category::DualFrame, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return !NearlyEqual(c.dual_dither_val, Defaults().dual_dither_val); },
 		[](const Configuration& c) { return Num(c.dual_dither_val); },
 		[](const Configuration& c) { return c.dual_mode && c.dual_dither != E_DUAL_DITHER_NONE; },
 		"Applies once dual-mode input dithering is selected.");
 	add("dual_dither_rand", "dual_dither_rand", "Input dither randomness",
 		"Blends random noise into the dual-mode input dither pattern [0..1].",
-		Category::DualFrame, Tier::Restart, false,
+		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return !NearlyEqual(c.dual_dither_rand, Defaults().dual_dither_rand); },
 		[](const Configuration& c) { return Num(c.dual_dither_rand); },
 		[](const Configuration& c) { return c.dual_mode && c.dual_dither != E_DUAL_DITHER_NONE; },
@@ -457,6 +440,13 @@ std::vector<OptionDesc> BuildTable()
 		Category::RunOutput, Tier::Restart, true,
 		[](const Configuration& c) { return c.continue_processing; },
 		[](const Configuration&) { return std::string(); });
+	add("subfolder", "subfolder", "Own folder per run",
+		"On, a run writes into its own rc-<image>-NNN folder beside the source "
+		"image. Off, it writes beside the source image directly.",
+		Category::RunOutput, Tier::Restart, false,
+		[](const Configuration& c) { return c.run_subfolder != Defaults().run_subfolder; },
+		[](const Configuration& c) { return std::string(c.run_subfolder ? "on" : "off"); },
+		{}, "", /*in_form*/ false, "Set in the run bar at the bottom of the window.");
 	add("preprocess", "preprocess", "Preprocess only",
 		"Writes the source and target images, then exits without searching.",
 		Category::RunOutput, Tier::Restart, true,
@@ -471,29 +461,23 @@ std::vector<OptionDesc> BuildTable()
 const char* CategoryTitle(Category category)
 {
 	switch (category) {
-	case Category::Source:          return "Source";
-	case Category::TargetColour:    return "Target - Colour";
-	case Category::TargetDithering: return "Target - Dithering";
-	case Category::Objective:       return "Objective";
-	case Category::Details:         return "Details mask";
-	case Category::Algorithm:       return "Algorithm";
-	case Category::DualFrame:       return "Dual frame";
-	case Category::RunOutput:       return "Run & output";
-	default:                        return "";
+	case Category::Source:    return "Source";
+	case Category::Algorithm: return "Algorithm";
+	case Category::Colour:    return "Colour";
+	case Category::Details:   return "Details mask";
+	case Category::RunOutput: return "Run & output";
+	default:                  return "";
 	}
 }
 
 const char* CategoryOrdinal(Category category)
 {
 	switch (category) {
-	case Category::Source:          return "1";
-	case Category::TargetColour:
-	case Category::TargetDithering: return "2";
-	case Category::Objective:
-	case Category::Details:
-	case Category::Algorithm:
-	case Category::DualFrame:       return "3";
-	default:                        return "";
+	case Category::Source:    return "1";
+	case Category::Algorithm: return "2";
+	case Category::Colour:    return "3";
+	case Category::Details:   return "4";
+	default:                  return "";
 	}
 }
 
@@ -521,9 +505,6 @@ Configuration DefaultConfiguration()
 	c.dstf = E_DISTANCE_RASTA;
 	c.pre_dstf = E_DISTANCE_CIEDE;
 	c.visual_objective = E_OBJECTIVE_LEGACY_TARGET;
-	c.spatial_weight = 0.1;
-	c.edge_weight = 0.1;
-	c.region_weight = 0.1;
 	c.continue_processing = false;
 	c.dither = E_DITHER_NONE;
 	c.dither_randomness = 0.0;

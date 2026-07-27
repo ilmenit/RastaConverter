@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 enum GUI_command {
@@ -7,11 +8,10 @@ enum GUI_command {
 	CONTINUE,
 	SAVE,
 	REDRAW,
-	MASK_EDIT,
-	BRANCH,
-	DESTINATION_BEGIN,
-	DESTINATION_APPLY,
-	DESTINATION_DISCARD,
+	// One editor session: pause, change something, commit or throw away.
+	EDITOR_BEGIN,
+	EDITOR_APPLY,
+	EDITOR_DISCARD,
 	SHOW_A,   // dual-mode: show frame A
 	SHOW_B,   // dual-mode: show frame B
 	SHOW_MIX  // dual-mode: show blended
@@ -47,6 +47,22 @@ struct GuiMaskPixelChange {
 
 struct GuiMaskStroke {
 	std::vector<GuiMaskPixelChange> pixels;
+};
+
+// Everything one editor session wants committed, in a single message: the
+// pixels it painted and, for the details mask, the parameters it retuned. They
+// travel together because one retarget pays for all of it.
+struct GuiEditorApply {
+	bool destination = false;   // false: the details mask
+	bool branch = false;        // commit into a fresh run folder instead
+	std::vector<GuiMaskPixelChange> pixels;
+
+	bool has_mask_parameters = false;
+	std::string details_mode;
+	double details_strength = 0.0;
+	double details_floor = 0.0;
+	unsigned details_feather = 0;
+	bool details_score = true;
 };
 
 struct GuiDestinationLayer {

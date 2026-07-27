@@ -173,14 +173,14 @@ void Overlay::PublishDetailsMask(const unsigned char* values,
 	impl_->dashboard->SetMask(mask, editable);
 }
 
-bool Overlay::TakeMaskStroke(GuiMaskStroke& stroke)
+bool Overlay::TakeEditorApply(GuiEditorApply& request)
 {
-	return impl_->dashboard && impl_->dashboard->TakeMaskStroke(stroke);
+	return impl_->dashboard && impl_->dashboard->TakeEditorApply(request);
 }
 
-bool Overlay::TakeDestinationChanges(GuiMaskStroke& stroke)
+bool Overlay::EditorWantsDestination() const
 {
-	return impl_->dashboard && impl_->dashboard->TakeDestinationChanges(stroke);
+	return impl_->dashboard && impl_->dashboard->EditorWantsDestination();
 }
 
 void Overlay::PublishDestinationLayer(const unsigned char* palette_indices,

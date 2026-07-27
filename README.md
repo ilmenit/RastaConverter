@@ -55,6 +55,15 @@ one another. The "Recent" browser lists previous conversions with their picture,
 score and evaluation count, and offers Continue (resume that run in place) or
 Reuse (the same settings in a fresh folder).
 
+A card is also the shortest way to the files themselves. XEX assembles the run
+into an Atari executable with the bundled MADS - `Generator` for a single-frame
+run, `GeneratorDual` for a dual one - writes it into the run's own folder and
+hands it to whatever your system opens `.xex` with, normally an emulator. After
+that the button just opens the file; Shift-click assembles it again. The folder
+name opens the folder in your file manager, the source name opens the image in
+your editor, and the thumbnail opens the picture the run produced. Right-click a
+card for the same actions in one menu.
+
 During the run, the dashboard shows the convergence chart, plateau state, the
 mutation-operator breakdown, dual-frame phase and a recap of the configuration,
 with explicit Save, Stop and save, and Abort actions. Finishing a conversion

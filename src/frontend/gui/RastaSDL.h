@@ -65,8 +65,8 @@ public:
     void PublishImage(GuiImageSlot slot, FIBITMAP* bitmap);
     void PublishDetailsMask(const GuiDetailsMask& mask);
     void PublishDestinationLayer(const GuiDestinationLayer& layer);
-    bool TakeMaskStroke(GuiMaskStroke& stroke);
-    bool TakeDestinationChanges(GuiMaskStroke& stroke);
+    bool TakeEditorApply(GuiEditorApply& request);
+    bool EditorWantsDestination() const;
     bool CreateBranchOutput(const std::string& input_file,
         std::string& output_file, std::string& error);
     // True when the dashboard owns the window, so the legacy three-image

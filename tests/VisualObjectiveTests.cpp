@@ -1,6 +1,5 @@
 #include "VisualObjective.h"
 
-#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -65,48 +64,9 @@ int main()
 		"an exact rendered reference must have zero direct mean error");
 	Require(objective.DirectMeanScore(dark) > objective.DirectMeanScore(exact),
 		"direct mean error must penalize an incorrect unfiltered rendering");
-	Require(objective.Score(exact) == 0, "an exact rendered reference must score zero");
-	Require(objective.Score(mixed) < objective.Score(dark),
-		"display filtering must credit a local black/white mixture over solid black");
-	const distance_accum_t spatial = objective.Score(mixed);
-	Require(objective.CompositeScore(1234, mixed, 0.0) == 1234,
-		"zero spatial weight must preserve direct source scoring exactly");
-	Require(objective.CompositeScore(1234, mixed, 0.25) ==
-		1234 + static_cast<distance_accum_t>(std::llround(0.25 * spatial)),
-		"composite scoring must add the declared weighted spatial term");
-	Require(objective.EdgeScore(exact) == 0,
-		"an exact rendered reference must have zero edge error");
-	Require(objective.EdgeScore(mixed) > objective.EdgeScore(dark),
-		"the edge term must penalize artificial high-frequency structure");
-	const distance_accum_t edge = objective.EdgeScore(mixed);
-	Require(objective.EdgeCompositeScore(1234, mixed, 0.25) ==
-		1234 + static_cast<distance_accum_t>(std::llround(0.25 * edge)),
-		"edge composite scoring must add the declared weighted gradient term");
-	Require(objective.RegionScore(exact) == 0,
-		"an exact rendered reference must have zero worst-region error");
-	const distance_accum_t region = objective.RegionScore(dark);
-	Require(region > 0, "a uniformly wrong rendering must have worst-region error");
-	Require(objective.RegionCompositeScore(1234, dark, 0.25) ==
-		1234 + static_cast<distance_accum_t>(std::llround(0.25 * region)),
-		"region composite scoring must add the declared weighted CVaR term");
-
-	std::vector<screen_line> local_reference(16);
-	unsigned char local_storage[16][16] = {};
-	const unsigned char* local_rows[16];
-	for (int y = 0; y < 16; ++y)
-	{
-		local_reference[y].Resize(16);
-		local_rows[y] = local_storage[y];
-		for (int x = 0; x < 16; ++x)
-			local_reference[y][x] = Gray(0);
-	}
-	for (int y = 0; y < 8; ++y)
-		for (int x = 0; x < 8; ++x)
-			local_storage[y][x] = 1;
-	DisplayFilteredObjective local_objective;
-	local_objective.Init(16, 16, local_reference.data(), palette);
-	Require(local_objective.RegionScore(local_rows) > 0,
-		"one bad 8x8 region must be selected by the bounded tail");
+	// The four structural terms these tests used to cover - filtered, composite,
+	// edge and worst-region - were removed along with the objectives that added
+	// them to the score. What survives is the direct source-referenced readout.
 
 	std::vector<screen_line> dual_reference(1);
 	dual_reference[0].Resize(2);

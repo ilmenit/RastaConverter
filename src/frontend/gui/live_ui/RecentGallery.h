@@ -15,10 +15,12 @@
 // an old run: carry on with it, or start a fresh one from the same settings.
 
 #include <cstdint>
+#include <future>
 #include <string>
 #include <vector>
 
 #include "RecentRuns.h"
+#include "XexBuild.h"
 
 struct SDL_Renderer;
 struct SDL_Texture;
@@ -58,11 +60,29 @@ public:
 
 private:
 	SDL_Texture* TextureFor(size_t index);
+	void DrawClearPopup();
+	void StartXexBuild(size_t index);
+	void PollXexBuild();
+	void Open(const std::string& path, bool folder);
 
 	SDL_Renderer* renderer_ = nullptr;
 	std::vector<RunSummary> runs_;
 	std::vector<SDL_Texture*> textures_;
+	// Whether each run already has an executable newer than its raster program.
+	// Answered once per refresh rather than per frame: it is two file stats per
+	// card, and there can be sixty cards.
+	std::vector<char> xex_current_;
 	bool loaded_ = false;
+	bool clear_folders_ = false;   // the destructive half of "Clear all"
+
+	// Assembling runs off the UI thread - MADS takes long enough to drop frames.
+	// One at a time: it is a deliberate act on one run, not a batch.
+	std::future<XexBuildResult> xex_future_;
+	size_t xex_index_ = 0;
+	std::string xex_folder_;
+	std::string xex_message_;      // last failure, shown above the grid
+	std::string xex_detail_;       // its full log, on hover
+	bool xex_failed_ = false;
 };
 
 } // namespace rc_live_ui

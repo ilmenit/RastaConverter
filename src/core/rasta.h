@@ -75,7 +75,8 @@ private:
 	std::string m_target_hash;
 	bool m_mask_edited = false;
 	bool m_destination_edited = false;
-	bool m_destination_edit_active = false;
+	bool m_editor_paused = false;
+	bool m_editor_destination = false;
 	bool m_mask_edited_since_save = false;
 	unsigned m_snapshot_count = 0;
 	int m_last_retarget_ms = 0;
@@ -134,13 +135,20 @@ private:
 	// private functions
 	void InitLocalStructure();
 	void GeneratePictureErrorMap();
-	void ApplyMaskStroke(const GuiMaskStroke& stroke);
+	// One editor session: BeginEditorSession stops the workers at a safe point,
+	// ApplyEditorSession commits pixels and parameters together and restarts
+	// them, DiscardEditorSession just restarts them.
+	void BeginEditorSession(bool destination);
+	void ApplyEditorSession(const GuiEditorApply& request);
+	void DiscardEditorSession();
+	void PauseWorkers(std::unique_lock<std::mutex>& lock);
+	void ResumeWorkers(std::unique_lock<std::mutex>& lock);
+	bool ApplyMaskEditLocked(const GuiEditorApply& request);
+	bool ApplyDestinationEditLocked(const GuiEditorApply& request);
+	void RetargetLocked(bool full_rebuild);
 	void SaveEditedMaskArtifact();
 	bool SnapshotBeforeMaskEdit();
 	void BranchCurrentRun();
-	void BeginDestinationEdit();
-	void ApplyDestinationEdit(const GuiMaskStroke& changes);
-	void DiscardDestinationEdit();
 	void SaveEditedTargetArtifact();
 	void RenderCreatedPicture(raster_picture& picture);
 

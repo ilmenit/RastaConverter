@@ -108,7 +108,8 @@ void FormRow(const char* label, const std::string& help = std::string(),
 // rest of the row. Pass it explicitly whenever something follows on the same
 // line, since SetNextItemWidth cannot reach through to the inner slider.
 bool ValueSliderInt(const char* id, int* value, int min, int max,
-	const char* format = "%d", float total_width = 0.0f);
+	const char* format = "%d", float total_width = 0.0f,
+	ImGuiSliderFlags flags = 0);
 bool ValueSliderFloat(const char* id, float* value, float min, float max,
 	const char* format = "%.2f", ImGuiSliderFlags flags = 0,
 	float total_width = 0.0f);

@@ -94,9 +94,6 @@ void Configuration::ProcessCmdLine(const std::vector<std::string>& extraTokens)
 			resume_saved_predistance = pre_dstf;
 			resume_saved_dither = dither;
 			resume_saved_objective = visual_objective;
-			resume_saved_spatial_weight = spatial_weight;
-			resume_saved_edge_weight = edge_weight;
-			resume_saved_region_weight = region_weight;
 			resume_saved_details_file = details_file;
 			resume_saved_details_mode = details_mode;
 			resume_saved_details_strength = details_strength;
@@ -128,18 +125,6 @@ void Configuration::ProcessCmdLine(const std::vector<std::string>& extraTokens)
 	resume_predistance_changed = (resume_saved_predistance != pre_dstf);
 	resume_dither_changed = (resume_saved_dither != dither);
 	resume_objective_changed = (resume_saved_objective != visual_objective);
-	resume_objective_changed = resume_objective_changed ||
-		((resume_saved_objective == E_OBJECTIVE_SOURCE_COMPOSITE ||
-		  visual_objective == E_OBJECTIVE_SOURCE_COMPOSITE) &&
-		 (resume_saved_spatial_weight != spatial_weight));
-	resume_objective_changed = resume_objective_changed ||
-		((resume_saved_objective == E_OBJECTIVE_SOURCE_EDGE ||
-		  visual_objective == E_OBJECTIVE_SOURCE_EDGE) &&
-		 (resume_saved_edge_weight != edge_weight));
-	resume_objective_changed = resume_objective_changed ||
-		((resume_saved_objective == E_OBJECTIVE_SOURCE_REGION ||
-		  visual_objective == E_OBJECTIVE_SOURCE_REGION) &&
-		 (resume_saved_region_weight != region_weight));
 	const bool detailsMetricChanged = resume_saved_details_score != details_score
 		|| ((resume_saved_details_score || details_score)
 			&& (resume_saved_details_file != details_file
@@ -215,18 +200,23 @@ parser.addOption("distance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "rasta",
 parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede",
 		"Distance function used during preprocess (destination picture).",
 		"Image processing");
-	parser.addOption("objective", {}, "legacy|source|source-spatial|source-composite|source-edge|source-region", "legacy",
-		"Single-frame scoring reference or opt-in source/spatial composite.",
+	parser.addOption("subfolder", {}, "on|off", "on",
+		"Write a run's files into their own rc-<image>-NNN folder beside the "
+		"source image, or straight into that folder.",
+		"Output");
+	parser.addOption("objective", {}, "target|source", "target",
+		"Which picture a candidate is scored against.",
 		"Image processing");
+	// Accepted and ignored. These tuned the structural objectives that were
+	// removed, and one of them appeared in the preset this program used to
+	// recommend. Rejecting the option would strand those recipes at the command
+	// line rather than at the objective, which is where the change happened.
 	parser.addOption("spatial_weight", {}, "FLOAT", "0.1",
-		"Weight of the filtered term for /objective=source-composite.",
-		"Image processing");
+		"Ignored; the objective it tuned was removed.", "Image processing");
 	parser.addOption("edge_weight", {}, "FLOAT", "0.1",
-		"Weight of the luminance-gradient term for /objective=source-edge.",
-		"Image processing");
+		"Ignored; the objective it tuned was removed.", "Image processing");
 	parser.addOption("region_weight", {}, "FLOAT", "0.1",
-		"Weight of worst-1%-of-8x8-regions OKLab term for /objective=source-region.",
-		"Image processing");
+		"Ignored; the objective it tuned was removed.", "Image processing");
 	parser.addOption("dither", {}, "none|floyd|rfloyd|line|line2|chess|2d|jarvis|simple|knoll", "none",
 		"Dithering algorithm.",
 		"Image processing");
@@ -421,41 +411,46 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 	}
 
 	{
-		string objective_name = parser.getValue("objective", "legacy");
-		if (objective_name == "source")
+		const string subfolder_value = parser.getValue("subfolder", "on");
+		run_subfolder = subfolder_value != "off" && subfolder_value != "0"
+			&& subfolder_value != "false";
+	}
+	{
+		string objective_name = parser.getValue("objective", "target");
+		// "target" is the current name; "legacy" is what it was called when the
+		// name described the option's history rather than what it scores
+		// against. Recipes written by older versions still carry it.
+		if (objective_name == "target" || objective_name == "legacy")
+			visual_objective = E_OBJECTIVE_LEGACY_TARGET;
+		else if (objective_name == "source")
 			visual_objective = E_OBJECTIVE_SOURCE;
-		else if (objective_name == "source-spatial")
-			visual_objective = E_OBJECTIVE_SOURCE_SPATIAL;
-		else if (objective_name == "source-composite")
-			visual_objective = E_OBJECTIVE_SOURCE_COMPOSITE;
-		else if (objective_name == "source-edge")
-			visual_objective = E_OBJECTIVE_SOURCE_EDGE;
-		else if (objective_name == "source-region")
-			visual_objective = E_OBJECTIVE_SOURCE_REGION;
+		else if (objective_name == "source-spatial"
+			|| objective_name == "source-composite"
+			|| objective_name == "source-edge"
+			|| objective_name == "source-region")
+		{
+			// Retired. Each of these scored the source plus a full-frame
+			// structural term; the term cost about sixty times the throughput
+			// and never earned it back. They map to plain source, which is what
+			// they were built on and what beat them, rather than falling through
+			// to target - a recipe that named one of these asked to score the
+			// source, and that intent survives.
+			warning_messages.push_back("Objective '" + objective_name
+				+ "' was removed; using 'source'.");
+			visual_objective = E_OBJECTIVE_SOURCE;
+		}
 		else
 		{
-			if (objective_name != "legacy")
-				warning_messages.push_back("Unknown objective='" + objective_name + "', using 'legacy'.");
+			warning_messages.push_back("Unknown objective='" + objective_name
+				+ "', using 'target'.");
 			visual_objective = E_OBJECTIVE_LEGACY_TARGET;
 		}
-	}
-	{
-		string v = parser.getValue("spatial_weight", "0.1");
-		spatial_weight = String2Value<double>(v);
-		if (spatial_weight < 0.0) spatial_weight = 0.0;
-		if (spatial_weight > 10.0) spatial_weight = 10.0;
-	}
-	{
-		string v = parser.getValue("edge_weight", "0.1");
-		edge_weight = String2Value<double>(v);
-		if (edge_weight < 0.0) edge_weight = 0.0;
-		if (edge_weight > 10.0) edge_weight = 10.0;
-	}
-	{
-		string v = parser.getValue("region_weight", "0.1");
-		region_weight = String2Value<double>(v);
-		if (region_weight < 0.0) region_weight = 0.0;
-		if (region_weight > 10.0) region_weight = 10.0;
+		for (const char* retired : {"spatial_weight", "edge_weight", "region_weight"})
+		{
+			if (parser.switchExists(retired))
+				warning_messages.push_back(string("/") + retired
+					+ " is ignored; the objective it tuned was removed.");
+		}
 	}
 
 	dst_name = parser.getValue("predistance","ciede");
@@ -823,9 +818,6 @@ else if (dst_name=="yuv")
 			resume_saved_predistance = pre_dstf;
 			resume_saved_dither = dither;
 			resume_saved_objective = visual_objective;
-			resume_saved_spatial_weight = spatial_weight;
-			resume_saved_edge_weight = edge_weight;
-			resume_saved_region_weight = region_weight;
 			resume_have_baseline = true;
 		}
 	}

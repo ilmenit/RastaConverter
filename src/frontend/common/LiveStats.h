@@ -54,12 +54,17 @@ struct LiveStats {
 	// --- lifecycle ---
 	bool preprocessing = false;   // still building the target picture
 	bool finished = false;
-	bool mask_paint_available = false;
+	// The editor pauses the search, so it is offered only while there is a
+	// search to pause. Destination editing additionally needs the target
+	// objective, since it rewrites the target.
+	bool editor_available = false;
 	bool destination_edit_available = false;
-	bool destination_edit_active = false;
+	bool editor_paused = false;
 	bool mask_edited = false;
 	std::string details_mode;
 	double details_strength = 0.0;
+	double details_floor = 0.0;
+	unsigned details_feather = 0;
 	bool details_score = false;
 	unsigned long long objective_revision = 0;
 	int last_retarget_ms = 0;
@@ -75,11 +80,9 @@ enum class LiveCommand {
 	Save,
 	StopAndSave,
 	Abort,
-	MaskEdited,
-	Branch,
-	DestinationBegin,
-	DestinationApply,
-	DestinationDiscard,
+	EditorBegin,
+	EditorApply,
+	EditorDiscard,
 	ShowA,
 	ShowB,
 	ShowMix,

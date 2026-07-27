@@ -295,22 +295,21 @@ bool RastaSDL::AbortRequested() const
 	return abortRequested;
 }
 
-bool RastaSDL::TakeMaskStroke(GuiMaskStroke& stroke)
+bool RastaSDL::TakeEditorApply(GuiEditorApply& request)
 {
 #if defined(RASTA_ENABLE_LIVE_UI)
-	return liveOverlay && liveOverlay->TakeMaskStroke(stroke);
+	return liveOverlay && liveOverlay->TakeEditorApply(request);
 #else
-	(void)stroke;
+	(void)request;
 	return false;
 #endif
 }
 
-bool RastaSDL::TakeDestinationChanges(GuiMaskStroke& stroke)
+bool RastaSDL::EditorWantsDestination() const
 {
 #if defined(RASTA_ENABLE_LIVE_UI)
-	return liveOverlay && liveOverlay->TakeDestinationChanges(stroke);
+	return liveOverlay && liveOverlay->EditorWantsDestination();
 #else
-	(void)stroke;
 	return false;
 #endif
 }
@@ -604,11 +603,9 @@ GUI_command RastaSDL::NextFrame()
 		case LiveCommand::Abort:
 			abortRequested = true;
 			return GUI_command::STOP;
-		case LiveCommand::MaskEdited:  return GUI_command::MASK_EDIT;
-		case LiveCommand::Branch:      return GUI_command::BRANCH;
-		case LiveCommand::DestinationBegin: return GUI_command::DESTINATION_BEGIN;
-		case LiveCommand::DestinationApply: return GUI_command::DESTINATION_APPLY;
-		case LiveCommand::DestinationDiscard: return GUI_command::DESTINATION_DISCARD;
+		case LiveCommand::EditorBegin:   return GUI_command::EDITOR_BEGIN;
+		case LiveCommand::EditorApply:   return GUI_command::EDITOR_APPLY;
+		case LiveCommand::EditorDiscard: return GUI_command::EDITOR_DISCARD;
 		case LiveCommand::ShowA:       return GUI_command::SHOW_A;
 		case LiveCommand::ShowB:       return GUI_command::SHOW_B;
 		case LiveCommand::ShowMix:     return GUI_command::SHOW_MIX;

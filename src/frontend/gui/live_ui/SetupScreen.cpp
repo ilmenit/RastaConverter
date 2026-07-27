@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "ConfigModel.h"
+#include "SetupInternal.h"
 #include "FileDialog.h"
 #include "ImageViewer.h"
 #include "LiveTheme.h"
@@ -23,26 +24,11 @@
 #include "TargetPreview.h"
 
 namespace rc_live_ui {
-
-namespace {
-
-constexpr int kCategoryCount = static_cast<int>(Category::Count);
+namespace setup {
 
 // Below this width the form and a usable image cannot coexist (design §7.1d).
 constexpr float kOverlayViewerBreakpoint = 850.0f;
 
-// A fixed-size editable text field backed by std::string.
-struct TextField {
-	std::array<char, 1024> buffer{};
-
-	void Set(const std::string& value)
-	{
-		const size_t length = std::min(value.size(), buffer.size() - 1);
-		std::memcpy(buffer.data(), value.data(), length);
-		buffer[length] = '\0';
-	}
-	std::string Get() const { return std::string(buffer.data()); }
-};
 
 std::string FileName(const std::string& path)
 {
@@ -110,9 +96,9 @@ void AbsolutizeJobPaths(Configuration& cfg)
 // Each conversion writes into its own folder beside the input image, so a
 // working folder never fills up with a dozen artifacts per attempt and a run
 // stays a single self-contained thing. See RecentRuns.h.
-std::string DeriveOutputName(const std::string& input)
+std::string DeriveOutputName(const std::string& input, bool subfolder)
 {
-	return AllocateRunOutputPath(input);
+	return AllocateRunOutputPath(input, subfolder);
 }
 
 // Artifacts a run writes, checked so an accidental overwrite is visible before
@@ -134,54 +120,6 @@ bool OutputArtifactsExist(const std::string& output, std::string* found)
 	return false;
 }
 
-struct SetupState {
-	Configuration* cfg = nullptr;
-
-	TextField input;
-	TextField output;
-	TextField palette;
-	TextField details;
-	TextField onoff;
-
-	std::array<char, 128> search{};
-	bool only_modified = false;
-	bool section_open[kCategoryCount] = {};
-
-	bool height_auto = true;
-	bool seed_random = true;
-	int seed_value = 0;
-	bool max_evals_unlimited = true;
-	unsigned long long max_evals_value = 100000000ULL;
-	bool autosave_auto = true;
-	int autosave_value = 100000;
-	int cache_mb = 64;
-	int solutions = 1;
-
-	bool output_touched = false; // user typed a name, stop deriving it
-
-	// The form keeps the smaller share; the image is the point of the screen.
-	float form_width = 560.0f;
-
-	std::string copied_notice;
-	double copied_at = 0.0;
-	// Set when the run folder could not be created, so Convert can refuse
-	// rather than let the conversion fail later on every save.
-	std::string folder_error;
-
-	// Drag-and-drop feedback. The image row is the drop target, so it has to
-	// know where the pointer is while a drag is in progress.
-	// The recent-conversions browser takes over the viewer column while it is
-	// open; it opens by itself when there is no image to preview yet.
-	bool show_recent = false;
-	bool recent_dismissed = false;
-	bool recent_refresh = false;
-
-	bool drag_active = false;
-	bool drag_inside_zone = false;
-	ImVec2 drag_point = ImVec2(-1.0f, -1.0f);
-	ImVec4 drop_zone = ImVec4(0.0f, 0.0f, 0.0f, 0.0f); // screen-space rect
-};
-
 double NowMs()
 {
 	return static_cast<double>(SDL_GetTicksNS()) / 1.0e6;
@@ -200,7 +138,7 @@ void AdoptInputFile(SetupState& state, const std::string& path)
 	state.input.Set(path);
 	cfg.input_file = state.input.Get();
 	if (!state.output_touched) {
-		cfg.output_file = DeriveOutputName(cfg.input_file);
+		cfg.output_file = DeriveOutputName(cfg.input_file, cfg.run_subfolder);
 		state.output.Set(cfg.output_file);
 	}
 	state.show_recent = false;
@@ -312,7 +250,7 @@ bool ComboTokens(const char* id, int* value, const char* const* labels, int coun
 // follows on the same line, which is otherwise pushed off the edge.
 bool PathField(const char* id, TextField& field, FileDialogs& dialogs,
 	SDL_Window* window, FileDialogs::Kind kind, bool save, const char* placeholder,
-	float total_width = 0.0f)
+	float total_width)
 {
 	ImGui::PushID(id);
 	const float button_width = ImGui::CalcTextSize("Browse...").x
@@ -341,13 +279,6 @@ bool PathField(const char* id, TextField& field, FileDialogs& dialogs,
 
 // ---- enablement rules (design §7.3) --------------------------------------
 
-struct Rules {
-	bool dual_on = false;
-	bool has_mask = false;
-	bool objective_available = true;
-	bool details_available = true;
-};
-
 Rules EvaluateRules(const Configuration& cfg)
 {
 	Rules rules;
@@ -358,525 +289,6 @@ Rules EvaluateRules(const Configuration& cfg)
 	rules.objective_available = !cfg.dual_mode;
 	rules.details_available = !cfg.dual_mode;
 	return rules;
-}
-
-// Wraps a group in a disabled state and explains why (design P2, P6).
-struct DisabledGroup {
-	bool active = false;
-	explicit DisabledGroup(bool disabled, const char* reason) : active(disabled)
-	{
-		if (!active)
-			return;
-		InlineNote(reason, theme::kWarning);
-		ImGui::Spacing();
-		ImGui::BeginDisabled();
-	}
-	~DisabledGroup()
-	{
-		if (active)
-			ImGui::EndDisabled();
-	}
-};
-
-// ---- section bodies -------------------------------------------------------
-
-void DrawSourceSection(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
-{
-	Configuration& cfg = *state.cfg;
-	if (!BeginForm("source"))
-		return;
-
-	if (Row("height", cfg)) {
-		ImGui::PushID("height");
-		const float check_width = ImGui::CalcTextSize("Auto").x
-			+ ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x * 2.0f;
-		ImGui::BeginDisabled(state.height_auto);
-		int height = state.height_auto ? 240 : cfg.height;
-		if (ValueSliderInt("h", &height, 16, 240, "%d",
-				ImGui::GetContentRegionAvail().x - check_width))
-			cfg.height = height;
-		ImGui::EndDisabled();
-		ImGui::SameLine();
-		if (ImGui::Checkbox("Auto", &state.height_auto))
-			cfg.height = state.height_auto ? -1 : 240;
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Derive the height from the source aspect ratio.");
-		ImGui::PopID();
-	}
-
-	if (Row("filter", cfg)) {
-		int filter = FilterIndex(cfg.rescale_filter);
-		if (ComboTokens("##filter", &filter, kFilterLabels, 6))
-			cfg.rescale_filter = kFilterValues[filter];
-	}
-
-	if (Row("palette", cfg)) {
-		if (PathField("palette", state.palette, dialogs, window,
-				FileDialogs::Kind::Palette, false, "Palettes/laoo.act"))
-			cfg.palette_file = state.palette.Get();
-	}
-
-	EndForm();
-}
-
-void DrawColourSection(SetupState& state)
-{
-	Configuration& cfg = *state.cfg;
-	if (!BeginForm("colour"))
-		return;
-
-	if (Row("brightness", cfg))
-		ValueSliderInt("brightness", &cfg.brightness, -100, 100);
-	if (Row("contrast", cfg))
-		ValueSliderInt("contrast", &cfg.contrast, -100, 100);
-	if (Row("gamma", cfg)) {
-		float gamma = static_cast<float>(cfg.gamma);
-		if (ValueSliderFloat("gamma", &gamma, 0.1f, 4.0f, "%.2f"))
-			cfg.gamma = gamma;
-	}
-	if (Row("saturation", cfg))
-		ValueSliderInt("saturation", &cfg.saturation, -100, 100);
-	if (Row("vibrance", cfg))
-		ValueSliderInt("vibrance", &cfg.vibrance, -100, 100);
-
-	EndForm();
-
-	if (cfg.saturation > 40 && !FilterActive()) {
-		InlineNote("High saturation can push colours past what the palette holds, "
-			"collapsing them together. Check the palette usage count.", theme::kTextMuted);
-	}
-}
-
-void DrawDitheringSection(SetupState& state)
-{
-	Configuration& cfg = *state.cfg;
-	if (!BeginForm("dithering"))
-		return;
-
-	if (Row("predistance", cfg)) {
-		int distance = static_cast<int>(cfg.pre_dstf);
-		if (ComboTokens("##predistance", &distance, kDistanceLabels, 6))
-			cfg.pre_dstf = static_cast<e_distance_function>(distance);
-	}
-
-	if (Row("dither", cfg)) {
-		int dither = static_cast<int>(cfg.dither);
-		if (ComboTokens("##dither", &dither, kDitherLabels, 10))
-			cfg.dither = static_cast<e_dither_type>(dither);
-	}
-
-	// The strength and randomness rows hide themselves when the dither type has
-	// no use for them; here we only have to grey out the type that documents
-	// them as inert (design P2, §7.3).
-	const bool inert = cfg.dither == E_DITHER_RFLOYD;
-	{
-		ImGui::BeginDisabled(inert);
-		if (Row("dither_val", cfg)) {
-			float strength = static_cast<float>(cfg.dither_strength);
-			if (ValueSliderFloat("dither_val", &strength, 0.0f, 2.0f, "%.2f"))
-				cfg.dither_strength = strength;
-		}
-		if (Row("dither_rand", cfg)) {
-			float randomness = static_cast<float>(cfg.dither_randomness);
-			if (ValueSliderFloat("dither_rand", &randomness, 0.0f, 1.0f, "%.2f"))
-				cfg.dither_randomness = randomness;
-		}
-		ImGui::EndDisabled();
-	}
-	EndForm();
-
-	if (FilterActive())
-		return;
-	if (inert) {
-		InlineNote("Random Floyd quantizes without error diffusion, so strength "
-			"and randomness have no effect on it.", theme::kTextMuted);
-	}
-	if (cfg.pre_dstf == E_DISTANCE_CIEDE && cfg.dither == E_DITHER_KNOLL) {
-		InlineNote("CIEDE2000 together with Knoll dithering is a very slow "
-			"combination; preprocessing may take minutes.", theme::kWarning);
-	}
-}
-
-void DrawObjectiveSection(SetupState& state, const Rules& rules)
-{
-	Configuration& cfg = *state.cfg;
-	DisabledGroup disabled(!rules.objective_available,
-		"Dual-frame mode uses its own joint objective, so these do not apply.");
-
-	if (!BeginForm("objective"))
-		return;
-
-	if (Row("objective", cfg)) {
-		int objective = static_cast<int>(cfg.visual_objective);
-		if (ComboTokens("##objective", &objective, kObjectiveLabels, 6))
-			cfg.visual_objective = static_cast<e_visual_objective>(objective);
-	}
-
-	if (Row("distance", cfg)) {
-		int distance = static_cast<int>(cfg.dstf);
-		if (ComboTokens("##distance", &distance, kDistanceLabels, 6))
-			cfg.dstf = static_cast<e_distance_function>(distance);
-	}
-
-	// Exactly one weight is ever live; show that one, relabelled, rather than
-	// three fields with two greyed out (design P2).
-	const char* weight_id = nullptr;
-	double* weight = nullptr;
-	switch (cfg.visual_objective) {
-	case E_OBJECTIVE_SOURCE_COMPOSITE:
-		weight_id = "spatial_weight";
-		weight = &cfg.spatial_weight;
-		break;
-	case E_OBJECTIVE_SOURCE_EDGE:
-		weight_id = "edge_weight";
-		weight = &cfg.edge_weight;
-		break;
-	case E_OBJECTIVE_SOURCE_REGION:
-		weight_id = "region_weight";
-		weight = &cfg.region_weight;
-		break;
-	default:
-		break;
-	}
-	if (weight != nullptr && Row(weight_id, cfg)) {
-		float value = static_cast<float>(*weight);
-		if (ValueSliderFloat("weight", &value, 0.001f, 1.0f, "%.3f",
-				ImGuiSliderFlags_Logarithmic))
-			*weight = value;
-	}
-
-	EndForm();
-
-	if (!FilterActive() && cfg.visual_objective == E_OBJECTIVE_LEGACY_TARGET) {
-		InlineNote("Scoring against the quantized target. The source-based "
-			"objectives compare against the original image instead, which usually "
-			"looks better but changes what a resumed run can be compared to.",
-			theme::kTextMuted);
-	}
-}
-
-void DrawDetailsSection(SetupState& state, const Rules& rules,
-	FileDialogs& dialogs, SDL_Window* window)
-{
-	Configuration& cfg = *state.cfg;
-	DisabledGroup disabled(!rules.details_available,
-		"The details mask is single-frame only and is ignored in dual-frame mode.");
-
-	if (!BeginForm("details"))
-		return;
-
-	if (Row("details", cfg)) {
-		if (PathField("details", state.details, dialogs, window,
-				FileDialogs::Kind::MaskImage, false,
-				"No mask - all pixels weighted equally"))
-			cfg.details_file = state.details.Get();
-	}
-
-	// Every other control here is gated on a mask actually being chosen.
-	ImGui::BeginDisabled(!rules.has_mask);
-
-	if (Row("details_mode", cfg)) {
-		int mode = DetailsModeIndex(cfg.details_mode);
-		if (ComboTokens("##details_mode", &mode, kDetailsModeLabels, 3))
-			cfg.details_mode = kDetailsModeTokens[mode];
-	}
-
-	if (Row("details_val", cfg)) {
-		// The engine puts no ceiling on this, and the classic way to force
-		// detail into a face is a heavy multiplier - x4 or x16 - so the control
-		// has to reach that far. Logarithmic, because the useful range spans
-		// two orders of magnitude and the low end still needs fine control.
-		float strength = static_cast<float>(cfg.details_strength);
-		if (ValueSliderFloat("details_val", &strength, 0.0f, 15.0f, "%.2f",
-				ImGuiSliderFlags_Logarithmic))
-			cfg.details_strength = strength;
-	}
-
-	// Mode-specific parameters hide themselves through the model's rules.
-	if (Row("details_floor", cfg)) {
-		float floor_value = static_cast<float>(cfg.details_floor);
-		if (ValueSliderFloat("details_floor", &floor_value, 0.01f, 1.0f, "%.2f"))
-			cfg.details_floor = floor_value;
-	}
-	if (Row("details_feather", cfg)) {
-		int feather = static_cast<int>(cfg.details_feather);
-		if (ValueSliderInt("details_feather", &feather, 0, 8))
-			cfg.details_feather = static_cast<unsigned>(feather);
-	}
-	if (Row("details_refine_mix", cfg)) {
-		float mix = static_cast<float>(cfg.details_refine_mix);
-		if (ValueSliderFloat("details_refine_mix", &mix, 0.0f, 1.0f, "%.2f"))
-			cfg.details_refine_mix = mix;
-	}
-
-	if (Row("details_score", cfg))
-		ImGui::Checkbox("##details_score", &cfg.details_score);
-
-	// Allocation exists in every mode but does nothing in legacy.
-	const bool allocate_available = cfg.details_mode != "legacy";
-	ImGui::BeginDisabled(!allocate_available);
-	if (Row("details_allocate", cfg))
-		ImGui::Checkbox("##details_allocate", &cfg.details_allocate);
-	if (Row("details_global_period", cfg)) {
-		int period = static_cast<int>(cfg.details_global_period);
-		if (ValueSliderInt("details_global_period", &period, 2, 100))
-			cfg.details_global_period = static_cast<unsigned>(period);
-	}
-	ImGui::EndDisabled();
-
-	ImGui::EndDisabled();
-	EndForm();
-
-	if (FilterActive())
-		return;
-	if (!rules.has_mask && rules.details_available) {
-		InlineNote("Choose a mask image to enable these.", theme::kTextMuted);
-		return;
-	}
-	if (rules.has_mask) {
-		// Say what the strength actually buys, in the units of the active mode.
-		char note[220];
-		if (cfg.details_mode == "legacy") {
-			std::snprintf(note, sizeof(note),
-				"White areas of the mask weigh %.2fx the error of black areas "
-				"(1 + strength). The classic heavy-emphasis settings are 3 for 4x "
-				"and 15 for 16x.", 1.0 + std::max(0.0, cfg.details_strength));
-		} else {
-			const double ratio = cfg.details_floor > 0.0
-				? (cfg.details_floor + std::max(0.0, cfg.details_strength)) / cfg.details_floor
-				: 1.0;
-			std::snprintf(note, sizeof(note),
-				"Fully masked areas weigh %.2fx the background floor; the map is "
-				"then normalized so the average weight stays 1.", ratio);
-		}
-		InlineNote(note, theme::kTextMuted);
-	}
-	if (rules.has_mask && !allocate_available)
-		InlineNote("Mutation biasing needs normalized or refined mask mode.", theme::kTextMuted);
-}
-
-void DrawAlgorithmSection(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
-{
-	Configuration& cfg = *state.cfg;
-	if (!BeginForm("algorithm"))
-		return;
-
-	if (Row("optimizer", cfg)) {
-		int optimizer = static_cast<int>(cfg.optimizer);
-		if (ComboTokens("##optimizer", &optimizer, kOptimizerLabels, 3))
-			cfg.optimizer = static_cast<Configuration::e_optimizer>(optimizer);
-	}
-
-	if (Row("solutions", cfg)) {
-		if (ValueSliderInt("solutions", &state.solutions, 1, 64))
-			SetSolutions(state.solutions);
-	}
-
-	if (Row("init", cfg)) {
-		int init = static_cast<int>(cfg.init_type);
-		if (ComboTokens("##init", &init, kInitLabels, 4))
-			cfg.init_type = static_cast<e_init_type>(init);
-	}
-
-	if (Row("unstuck_after", cfg)) {
-		double evals = static_cast<double>(cfg.unstuck_after);
-		if (ImGui::InputDouble("##unstuck_after", &evals, 100000.0, 1000000.0, "%.0f"))
-			cfg.unstuck_after = static_cast<unsigned long long>(std::max(0.0, evals));
-	}
-
-	// Drift only means anything once escalation is armed.
-	ImGui::BeginDisabled(cfg.unstuck_after == 0);
-	if (Row("unstuck_drift", cfg)) {
-		float drift = static_cast<float>(cfg.unstuck_drift_norm);
-		if (ValueSliderFloat("unstuck_drift", &drift, 0.0f, 0.01f, "%.5f"))
-			cfg.unstuck_drift_norm = drift;
-	}
-	ImGui::EndDisabled();
-
-	if (Row("seed", cfg)) {
-		ImGui::PushID("seed");
-		const float check_width = ImGui::CalcTextSize("Random").x
-			+ ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x * 2.0f;
-		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - check_width);
-		ImGui::BeginDisabled(state.seed_random);
-		if (ImGui::InputInt("##seed", &state.seed_value, 0, 0)) {
-			state.seed_value = std::max(0, state.seed_value);
-			cfg.initial_seed = static_cast<unsigned long>(state.seed_value);
-		}
-		ImGui::EndDisabled();
-		ImGui::SameLine();
-		if (ImGui::Checkbox("Random", &state.seed_random))
-			cfg.initial_seed = state.seed_random ? 0 : static_cast<unsigned long>(state.seed_value);
-		ImGui::PopID();
-	}
-
-	if (Row("onoff", cfg)) {
-		if (PathField("onoff", state.onoff, dialogs, window,
-				FileDialogs::Kind::OnOffText, false,
-				"No restrictions - every register available"))
-			cfg.on_off_file = state.onoff.Get();
-	}
-
-	EndForm();
-
-	if (!FilterActive() && cfg.unstuck_after == 0)
-		InlineNote("Escalation is off, so drift is inactive.", theme::kTextMuted);
-}
-
-void DrawDualSection(SetupState& state)
-{
-	Configuration& cfg = *state.cfg;
-	if (!BeginForm("dual"))
-		return;
-
-	if (Row("dual", cfg))
-		ImGui::Checkbox("##dual", &cfg.dual_mode);
-
-	// All sub-options hide themselves while dual is off (design §7.3).
-	{
-		if (Row("first_dual_steps", cfg)) {
-			double steps = static_cast<double>(cfg.first_dual_steps);
-			if (ImGui::InputDouble("##first_dual_steps", &steps, 10000.0, 100000.0, "%.0f"))
-				cfg.first_dual_steps = static_cast<unsigned long long>(std::max(0.0, steps));
-		}
-
-		if (Row("after_dual_steps", cfg)) {
-			static const char* const kLabels[2] = {"Copy frame A", "Generate a fresh B"};
-			int choice = cfg.after_dual_steps == "generate" ? 1 : 0;
-			if (ComboTokens("##after_dual_steps", &choice, kLabels, 2))
-				cfg.after_dual_steps = choice == 1 ? "generate" : "copy";
-		}
-
-		if (Row("altering_dual_steps", cfg)) {
-			double steps = static_cast<double>(cfg.altering_dual_steps);
-			if (ImGui::InputDouble("##altering_dual_steps", &steps, 10000.0, 100000.0, "%.0f"))
-				cfg.altering_dual_steps = static_cast<unsigned long long>(std::max(0.0, steps));
-		}
-
-		if (Row("dual_blending", cfg)) {
-			static const char* const kLabels[2] = {"YUV", "RGB"};
-			int choice = cfg.dual_blending == "rgb" ? 1 : 0;
-			if (ComboTokens("##dual_blending", &choice, kLabels, 2))
-				cfg.dual_blending = choice == 1 ? "rgb" : "yuv";
-		}
-
-		if (Row("dual_luma", cfg)) {
-			float luma = static_cast<float>(cfg.dual_luma);
-			if (ValueSliderFloat("dual_luma", &luma, 0.0f, 2.0f, "%.3f"))
-				cfg.dual_luma = luma;
-		}
-		if (Row("dual_chroma", cfg)) {
-			float chroma = static_cast<float>(cfg.dual_chroma);
-			if (ValueSliderFloat("dual_chroma", &chroma, 0.0f, 2.0f, "%.3f"))
-				cfg.dual_chroma = chroma;
-		}
-
-		if (Row("dual_dither", cfg)) {
-			int dither = static_cast<int>(cfg.dual_dither);
-			if (ComboTokens("##dual_dither", &dither, kDualDitherLabels, 6))
-				cfg.dual_dither = static_cast<e_dual_dither_type>(dither);
-		}
-		if (Row("dual_dither_val", cfg)) {
-			float value = static_cast<float>(cfg.dual_dither_val);
-			if (ValueSliderFloat("dual_dither_val", &value, 0.0f, 2.0f, "%.3f"))
-				cfg.dual_dither_val = value;
-		}
-		if (Row("dual_dither_rand", cfg)) {
-			float value = static_cast<float>(cfg.dual_dither_rand);
-			if (ValueSliderFloat("dual_dither_rand", &value, 0.0f, 1.0f, "%.3f"))
-				cfg.dual_dither_rand = value;
-		}
-	}
-
-	EndForm();
-
-	if (!FilterActive() && cfg.dual_mode && cfg.after_dual_steps == "generate") {
-		InlineNote("Generating a fresh frame B costs a second bootstrap of the same "
-			"length before alternation begins.", theme::kTextMuted);
-	}
-}
-
-// ---- collapsed-header state summaries (design P3) ------------------------
-
-// A section that is closed still has to say what it is currently set to, so
-// the whole configuration can be audited by reading headers.
-std::string SectionSummary(Category category, const Configuration& cfg,
-	const SetupState& state)
-{
-	auto value = [&cfg](const char* id) {
-		return DisplayValue(Opt(id), cfg);
-	};
-	std::string summary;
-	auto append = [&summary](const std::string& text) {
-		if (!summary.empty())
-			summary += ", ";
-		summary += text;
-	};
-
-	switch (category) {
-	case Category::Source:
-		append(state.height_auto ? "auto height" : value("height") + " lines");
-		append(value("filter"));
-		append(FileName(cfg.palette_file));
-		break;
-	case Category::TargetColour:
-		if (cfg.brightness != 0) append("brightness " + value("brightness"));
-		if (cfg.contrast != 0) append("contrast " + value("contrast"));
-		if (cfg.gamma != 1.0) append("gamma " + value("gamma"));
-		if (cfg.saturation != 0) append("saturation " + value("saturation"));
-		if (cfg.vibrance != 0) append("vibrance " + value("vibrance"));
-		if (summary.empty()) summary = "no adjustments";
-		break;
-	case Category::TargetDithering:
-		append(value("dither"));
-		if (cfg.dither != E_DITHER_NONE && cfg.dither != E_DITHER_RFLOYD) {
-			append("strength " + value("dither_val"));
-			if (cfg.dither_randomness > 0.0)
-				append("randomness " + value("dither_rand"));
-		}
-		append("build " + value("predistance"));
-		break;
-	case Category::Objective:
-		if (cfg.dual_mode) {
-			summary = "dual mode uses its own objective";
-		} else {
-			append(value("objective"));
-			append(value("distance"));
-		}
-		break;
-	case Category::Details:
-		if (cfg.dual_mode)
-			summary = "single-frame only";
-		else if (cfg.details_file.empty())
-			summary = "no mask";
-		else {
-			append(FileName(cfg.details_file));
-			append(value("details_mode"));
-			append("strength " + value("details_val"));
-		}
-		break;
-	case Category::Algorithm:
-		append(value("optimizer"));
-		append("history " + value("solutions"));
-		append("init " + value("init"));
-		if (cfg.unstuck_after != 0)
-			append("escalates after " + value("unstuck_after"));
-		if (!cfg.on_off_file.empty())
-			append("register limits");
-		break;
-	case Category::DualFrame:
-		if (!cfg.dual_mode) {
-			summary = "off";
-		} else {
-			append("on");
-			append(cfg.after_dual_steps == "generate" ? "generate B" : "copy A to B");
-			append("alternate every " + value("altering_dual_steps"));
-		}
-		break;
-	default:
-		break;
-	}
-	return summary;
 }
 
 // ---- form column ----------------------------------------------------------
@@ -928,8 +340,10 @@ void DrawForm(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
 		else
 			std::snprintf(title, sizeof(title), "%s", CategoryTitle(category));
 
-		const bool inert = (category == Category::Objective && cfg.dual_mode)
-			|| (category == Category::Details && cfg.dual_mode);
+		// Dual mode brings its own joint objective and ignores the details
+		// mask; the objective controls live inside Algorithm now, where they
+		// disable themselves, so only the mask section goes inert as a whole.
+		const bool inert = category == Category::Details && cfg.dual_mode;
 		// While filtering, everything that matched is expanded: collapsing a
 		// search result would hide the thing that was searched for.
 		bool open = filtering ? true : state.section_open[i];
@@ -939,13 +353,10 @@ void DrawForm(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
 		if (BeginSection(CategoryTitle(category), title, summary,
 				ModifiedCountInCategory(cfg, category), &open, inert)) {
 			switch (category) {
-			case Category::Source:          DrawSourceSection(state, dialogs, window); break;
-			case Category::TargetColour:    DrawColourSection(state); break;
-			case Category::TargetDithering: DrawDitheringSection(state); break;
-			case Category::Objective:       DrawObjectiveSection(state, rules); break;
-			case Category::Details:         DrawDetailsSection(state, rules, dialogs, window); break;
-			case Category::Algorithm:       DrawAlgorithmSection(state, dialogs, window); break;
-			case Category::DualFrame:       DrawDualSection(state); break;
+			case Category::Source:    DrawSourceSection(state, dialogs, window); break;
+			case Category::Algorithm: DrawAlgorithmSection(state, rules, dialogs, window); break;
+			case Category::Colour:    DrawColourSection(state); break;
+			case Category::Details:   DrawDetailsSection(state, rules, dialogs, window); break;
 			default: break;
 			}
 			EndSection();
@@ -1099,6 +510,23 @@ void DrawBottomBar(SetupState& state, FileDialogs& dialogs, SDL_Window* window,
 	ImGui::Checkbox("Preprocess only", &cfg.preprocess_only);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Writes the source and target images, then exits.");
+	ImGui::SameLine();
+	// Where the dozen files a run writes end up. Changing it re-derives the
+	// output name on the spot, unless the name was typed by hand - that is a
+	// deliberate choice and outranks this one.
+	if (ImGui::Checkbox("Own folder", &cfg.run_subfolder)) {
+		if (!state.output_touched && !cfg.input_file.empty()) {
+			cfg.output_file = AllocateRunOutputPath(cfg.input_file,
+				cfg.run_subfolder);
+			state.output.Set(cfg.output_file);
+		}
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("On: this run writes into its own folder beside the "
+			"source image, rc-<image>-NNN, so a re-run never disturbs an "
+			"earlier one.\nOff: it writes beside the source image directly, "
+			"numbering the name if one is already there.");
+	}
 
 	if (!state.folder_error.empty())
 		InlineNote(state.folder_error.c_str(), theme::kDanger);
@@ -1367,7 +795,9 @@ void DrawSetupFrame(SetupState& state, FileDialogs& dialogs, SDL_Window* window,
 	ImGui::EndChild();
 }
 
-} // namespace
+} // namespace setup
+
+using namespace setup;
 
 bool RunSetupScreen(Configuration& cfg, bool show_recent)
 {
@@ -1446,16 +876,17 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 	}
 
 	if (cfg.output_file == DefaultConfiguration().output_file && !cfg.input_file.empty())
-		cfg.output_file = DeriveOutputName(cfg.input_file);
+		cfg.output_file = DeriveOutputName(cfg.input_file, cfg.run_subfolder);
 
 	SyncStateFromConfig(state);
 
 	for (int i = 0; i < kCategoryCount; ++i) {
-		// Stages 1 and 2 open, stage 3 collapsed to its summaries (§7.1c).
+		// The sections that shape the picture open; Algorithm and the details
+		// mask start collapsed behind their summaries (§7.1c). Both are expert
+		// territory, and both say what they are set to without being opened.
 		const Category category = static_cast<Category>(i);
 		state.section_open[i] = category == Category::Source
-			|| category == Category::TargetColour
-			|| category == Category::TargetDithering;
+			|| category == Category::Colour;
 	}
 
 	FileDialogs dialogs;

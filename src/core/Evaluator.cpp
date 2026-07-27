@@ -1202,9 +1202,7 @@ int Evaluator::SelectMutation()
 void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* errmap,
 	const screen_line* picture, const OnOffMap* onoff, EvalGlobalState* gstate,
 	int solutions, unsigned long long randseed, size_t cache_size, int thread_id,
-	const screen_line* scoring_picture, double direct_objective_weight,
-	double spatial_objective_weight, double edge_objective_weight,
-	double region_objective_weight,
+	const screen_line* scoring_picture,
 	const std::vector<double>* allocation_line_weights,
 	unsigned allocation_global_period)
 {
@@ -1227,23 +1225,13 @@ void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* e
 	m_solutions = solutions;
 	m_cache_size = cache_size;
 	m_thread_id = thread_id;
-	m_direct_objective_weight = direct_objective_weight;
-	m_spatial_objective_weight = spatial_objective_weight;
-	m_edge_objective_weight = edge_objective_weight;
-	m_region_objective_weight = region_objective_weight;
 	m_allocation_line_weights = allocation_line_weights != nullptr
 		? *allocation_line_weights : std::vector<double>();
 	m_allocation_global_period = std::max(2U, allocation_global_period);
 	m_primary_mutation_count = 0;
-	m_display_filtered_objective = spatial_objective_weight > 0.0 || edge_objective_weight > 0.0
-		|| region_objective_weight > 0.0;
 	if (scoring_picture != nullptr)
 	{
 		m_visual_objective.Init(width, height, scoring_picture, atari_palette);
-	}
-	if (m_display_filtered_objective)
-	{
-		m_objective_rows.resize(height);
 	}
 
 	m_currently_mutated_y = 0;
@@ -1276,39 +1264,7 @@ void Evaluator::Init(unsigned width, unsigned height, const distance_t* const* e
 distance_accum_t Evaluator::EvaluateSingle(raster_picture* pic,
 	const line_cache_result** line_results)
 {
-	const distance_accum_t proxy_score = ExecuteRasterProgram(pic, line_results);
-	if (!m_display_filtered_objective)
-		return proxy_score;
-
-	distance_accum_t proxy_pixel_score = 0;
-	for (unsigned y = 0; y < m_height; ++y)
-	{
-		const unsigned char* row = line_results[y]->color_row;
-		m_objective_rows[y] = row;
-		const size_t row_offset = static_cast<size_t>(y) * m_width;
-		for (unsigned x = 0; x < m_width; ++x)
-			proxy_pixel_score += m_picture_all_errors[row[x]][row_offset + x];
-	}
-
-	// Preserve non-color evaluator penalties (currently late PMG HPOS writes)
-	// while replacing the separable pixel score with the rendered objective.
-	const distance_accum_t evaluator_penalty =
-		std::max<distance_accum_t>(0, proxy_score - proxy_pixel_score);
-	distance_accum_t combined_pixel_score = m_visual_objective.Score(m_objective_rows.data());
-	if (m_direct_objective_weight != 0.0)
-	{
-		combined_pixel_score = proxy_pixel_score;
-		if (m_spatial_objective_weight > 0.0)
-			combined_pixel_score = m_visual_objective.CompositeScore(
-				combined_pixel_score, m_objective_rows.data(), m_spatial_objective_weight);
-		if (m_edge_objective_weight > 0.0)
-			combined_pixel_score = m_visual_objective.EdgeCompositeScore(
-				combined_pixel_score, m_objective_rows.data(), m_edge_objective_weight);
-		if (m_region_objective_weight > 0.0)
-			combined_pixel_score = m_visual_objective.RegionCompositeScore(
-				combined_pixel_score, m_objective_rows.data(), m_region_objective_weight);
-	}
-	return combined_pixel_score + evaluator_penalty;
+	return ExecuteRasterProgram(pic, line_results);
 }
 
 distance_accum_t Evaluator::EvaluateUnweightedSource(raster_picture* pic)

@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -221,12 +223,31 @@ std::string FindOptFile(const std::string& folder)
 
 } // namespace
 
-std::string AllocateRunOutputPath(const std::string& input_path)
+std::string AllocateRunOutputPath(const std::string& input_path, bool subfolder)
 {
 	if (input_path.empty())
 		return "output.png";
 	const std::string directory = DirectoryOf(input_path);
 	const std::string base = Sanitize(StripExtension(FileName(input_path)));
+
+	if (!subfolder) {
+		// Beside the source image. The plain name is used when it is free -
+		// and it is never free when the source is itself a .png of that name,
+		// which is the common case and would mean writing the output over the
+		// input. Otherwise the numbering starts at 001, so the sequence reads
+		// as one rather than starting at two for no visible reason.
+		const std::string plain = directory + base + ".png";
+		if (!PathExists(plain))
+			return plain;
+		for (int index = 1; index <= kMaxRunIndex; ++index) {
+			char suffix[8];
+			std::snprintf(suffix, sizeof(suffix), "%03d", index);
+			const std::string candidate = directory + base + "-" + suffix + ".png";
+			if (!PathExists(candidate))
+				return candidate;
+		}
+		return directory + base + "-999.png";
+	}
 
 	for (int index = 1; index <= kMaxRunIndex; ++index) {
 		char suffix[8];
@@ -283,6 +304,36 @@ void ForgetRecentRun(const std::string& folder)
 		}), folders.end());
 	if (folders.size() != before)
 		WriteIndex(folders);
+}
+
+size_t ClearRecentRuns(bool delete_folders, size_t* skipped)
+{
+	std::vector<std::string> folders = ReadIndex();
+	size_t removed = 0;
+	size_t left = 0;
+	if (delete_folders) {
+		for (const std::string& raw : folders) {
+			const std::string folder = NormalizeFolder(raw);
+			// The guard: a run folder is one this program named. Anything else
+			// in the index - a hand-edited line, a path that once pointed at a
+			// working directory - is forgotten but not deleted.
+			const std::string name = FileName(folder);
+			if (name.rfind("rc-", 0) != 0) {
+				++left;
+				continue;
+			}
+			std::error_code ec;
+			const uintmax_t count = std::filesystem::remove_all(folder, ec);
+			if (ec || count == 0)
+				++left;
+			else
+				++removed;
+		}
+	}
+	WriteIndex(std::vector<std::string>());
+	if (skipped != nullptr)
+		*skipped = left;
+	return removed;
 }
 
 std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)

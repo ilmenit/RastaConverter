@@ -24,8 +24,8 @@ public:
     void PublishImage(GuiImageSlot, FIBITMAP*) {}
     void PublishDetailsMask(const GuiDetailsMask&) {}
     void PublishDestinationLayer(const GuiDestinationLayer&) {}
-    bool TakeMaskStroke(GuiMaskStroke&) { return false; }
-    bool TakeDestinationChanges(GuiMaskStroke&) { return false; }
+    bool TakeEditorApply(GuiEditorApply&) { return false; }
+    bool EditorWantsDestination() const { return false; }
     bool CreateBranchOutput(const std::string&, std::string&, std::string&) {
         return false;
     }

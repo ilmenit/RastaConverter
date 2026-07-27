@@ -44,7 +44,12 @@ struct RunSummary {
 // Path the next run for `input_path` should write to, of the form
 // <input dir>/rc-<input base>-NNN/<input base>.png. The directory is not
 // created here; nothing is written until the user commits.
-std::string AllocateRunOutputPath(const std::string& input_path);
+//
+// With `subfolder` false the run writes beside the source image instead, under
+// a name that does not collide with an existing conversion - for anyone who
+// wants the files where they are looking rather than one level down.
+std::string AllocateRunOutputPath(const std::string& input_path,
+	bool subfolder = true);
 
 // Creates the folder holding `output_path`. Returns false and fills `error`
 // when it cannot, so the caller can refuse to start rather than fail later.
@@ -60,5 +65,15 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit = 60);
 
 // Forgets a run folder (used when its directory has been removed).
 void ForgetRecentRun(const std::string& folder);
+
+// Empties the history. `delete_folders` also removes the run directories from
+// disk - permanently, which is why it is a separate argument and why the caller
+// is expected to have asked first.
+//
+// Only directories named like a run folder (rc-...) are removed, so a history
+// entry that somehow points somewhere else cannot take an unrelated directory
+// with it. Returns the number of folders actually removed, and reports through
+// `skipped` how many were left alone.
+size_t ClearRecentRuns(bool delete_folders, size_t* skipped = nullptr);
 
 } // namespace rc_live_ui

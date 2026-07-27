@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace rc_live_ui {
@@ -424,41 +425,64 @@ void FormRow(const char* label, const std::string& help, const char* cli_flag, b
 
 namespace {
 
-// Draws the read-out box and leaves the cursor ready for the slider. Returns
-// the width the slider should take.
-float ValueBox(const char* text, float total_width)
+// Width of the read-out field. Wide enough for the longest value any form row
+// shows ("-100.00", "50000"), so a column of them lines up.
+float ValueBoxWidth()
 {
-	ImDrawList* draw = ImGui::GetWindowDrawList();
-	const float box_width = std::max(56.0f,
-		ImGui::CalcTextSize("-100.00").x + 12.0f);
-	const ImVec2 origin = ImGui::GetCursorScreenPos();
-	const float height = ImGui::GetFrameHeight();
-	draw->AddRectFilled(origin, ImVec2(origin.x + box_width, origin.y + height),
-		ImGui::GetColorU32(ImGuiCol_FrameBg), ImGui::GetStyle().FrameRounding);
-	const ImVec2 text_size = ImGui::CalcTextSize(text);
-	// Right-aligned, so digits line up down a column of sliders.
-	draw->AddText(ImVec2(origin.x + box_width - text_size.x - 7.0f,
-		origin.y + (height - text_size.y) * 0.5f),
-		ImGui::GetColorU32(ImGuiCol_Text), text);
-	ImGui::Dummy(ImVec2(box_width, height));
-	ImGui::SameLine(0.0f, 8.0f);
+	return std::max(64.0f, ImGui::CalcTextSize("-100.00").x + 16.0f);
+}
+
+// Space left for the slider once the field has taken its share.
+float SliderWidth(float total_width)
+{
 	const float remaining = ImGui::GetContentRegionAvail().x;
 	if (total_width <= 0.0f)
 		return remaining;
-	return std::max(24.0f, std::min(remaining, total_width - box_width - 8.0f));
+	return std::max(24.0f, std::min(remaining,
+		total_width - ValueBoxWidth() - 8.0f));
 }
 
 } // namespace
 
+// A slider with its value in an editable field beside it, rather than as text
+// inside the track where the grab covers it. The field is the reason a slider
+// can have a wide range without becoming useless: a range that needs a
+// logarithmic scale to be draggable is still exact to type into.
+//
+// The field commits on Enter or when it loses focus, not on every keystroke -
+// otherwise typing "50" into a field whose minimum is 1 would clamp the "5"
+// away before the "0" arrived, and half-typed numbers would reach the
+// conversion and rebuild the preview.
 bool ValueSliderInt(const char* id, int* value, int min, int max,
-	const char* format, float total_width)
+	const char* format, float total_width, ImGuiSliderFlags flags)
 {
-	char text[64];
-	std::snprintf(text, sizeof(text), format, *value);
 	ImGui::PushID(id);
-	const float width = ValueBox(text, total_width);
-	ImGui::SetNextItemWidth(width);
-	const bool changed = ImGui::SliderInt("##slider", value, min, max, "");
+	bool changed = false;
+
+	int typed = *value;
+	ImGui::SetNextItemWidth(ValueBoxWidth());
+	ImGui::InputInt("##value", &typed, 0, 0,
+		ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_CharsDecimal);
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		const int clamped = std::max(min, std::min(max, typed));
+		if (clamped != *value) {
+			*value = clamped;
+			changed = true;
+		}
+	}
+	if (ImGui::IsItemHovered() && !ImGui::IsItemActive()) {
+		char range[96];
+		std::snprintf(range, sizeof(range), "Type a value between %d and %d.",
+			min, max);
+		ImGui::SetTooltip("%s", range);
+	}
+
+	ImGui::SameLine(0.0f, 8.0f);
+	ImGui::SetNextItemWidth(SliderWidth(total_width));
+	// The format is spent on the field, so the track carries no text.
+	(void)format;
+	changed |= ImGui::SliderInt("##slider", value, min, max, "",
+		flags | ImGuiSliderFlags_AlwaysClamp);
 	ImGui::PopID();
 	return changed;
 }
@@ -466,12 +490,35 @@ bool ValueSliderInt(const char* id, int* value, int min, int max,
 bool ValueSliderFloat(const char* id, float* value, float min, float max,
 	const char* format, ImGuiSliderFlags flags, float total_width)
 {
-	char text[64];
-	std::snprintf(text, sizeof(text), format, *value);
 	ImGui::PushID(id);
-	const float width = ValueBox(text, total_width);
-	ImGui::SetNextItemWidth(width);
-	const bool changed = ImGui::SliderFloat("##slider", value, min, max, "", flags);
+	bool changed = false;
+
+	float typed = *value;
+	ImGui::SetNextItemWidth(ValueBoxWidth());
+	ImGui::InputFloat("##value", &typed, 0.0f, 0.0f, format,
+		ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_CharsScientific);
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
+		const float clamped = std::max(min, std::min(max, typed));
+		if (clamped != *value) {
+			*value = clamped;
+			changed = true;
+		}
+	}
+	if (ImGui::IsItemHovered() && !ImGui::IsItemActive()) {
+		char range[128];
+		std::string pattern = "Type a value between ";
+		pattern += format;
+		pattern += " and ";
+		pattern += format;
+		pattern += ".";
+		std::snprintf(range, sizeof(range), pattern.c_str(), min, max);
+		ImGui::SetTooltip("%s", range);
+	}
+
+	ImGui::SameLine(0.0f, 8.0f);
+	ImGui::SetNextItemWidth(SliderWidth(total_width));
+	changed |= ImGui::SliderFloat("##slider", value, min, max, "",
+		flags | ImGuiSliderFlags_AlwaysClamp);
 	ImGui::PopID();
 	return changed;
 }

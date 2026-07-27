@@ -258,9 +258,7 @@ public:
 	void Init(unsigned width, unsigned height, const distance_t* const* errmap,
 		const screen_line* picture, const OnOffMap* onoff, EvalGlobalState* gstate,
 		int solutions, unsigned long long randseed, size_t cache_size, int thread_id=0,
-		const screen_line* scoring_picture=nullptr, double direct_objective_weight=1.0,
-		double spatial_objective_weight=0.0, double edge_objective_weight=0.0,
-		double region_objective_weight=0.0,
+		const screen_line* scoring_picture=nullptr,
 		const std::vector<double>* allocation_line_weights=nullptr,
 		unsigned allocation_global_period=5);
 
@@ -461,13 +459,10 @@ private:
 	bool m_use_dual_neon = false;
 	const screen_line *m_picture;
 	const screen_line *m_scoring_picture = nullptr;
-	bool m_display_filtered_objective = false;
-	double m_direct_objective_weight = 1.0;
-	double m_spatial_objective_weight = 0.0;
-	double m_edge_objective_weight = 0.0;
-	double m_region_objective_weight = 0.0;
+	// Kept for the source-referenced OKLab readouts (EvaluateUnweightedSource,
+	// CompareStructuredWindow). It is no longer part of scoring: the objectives
+	// that added a full-frame term to every evaluation are gone.
 	DisplayFilteredObjective m_visual_objective;
-	std::vector<const unsigned char*> m_objective_rows;
 	int m_currently_mutated_y;
 	int SelectAllocatedLine(int first, int last);
 	std::vector<double> m_allocation_line_weights;

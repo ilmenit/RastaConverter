@@ -133,9 +133,14 @@ if(ENABLE_LIVE_UI AND NOT BUILD_NO_GUI)
         src/frontend/gui/live_ui/TargetPreview.cpp
         src/frontend/gui/live_ui/ImageViewer.cpp
         src/frontend/gui/live_ui/SetupScreen.cpp
+        src/frontend/gui/live_ui/SetupSections.cpp
         src/frontend/gui/live_ui/Dashboard.cpp
+        src/frontend/gui/live_ui/PaintEditor.cpp
+        src/frontend/gui/live_ui/PaintEditorPanels.cpp
         src/frontend/gui/live_ui/RecentRuns.cpp
         src/frontend/gui/live_ui/RecentGallery.cpp
+        src/frontend/gui/live_ui/Desktop.cpp
+        src/frontend/gui/live_ui/XexBuild.cpp
     )
 endif()
 
@@ -845,6 +850,10 @@ else()
 endif()
 install(FILES README.md ChangeLog.md help.txt DESTINATION share/doc/rasta)
 install(DIRECTORY Palettes DESTINATION share/rasta)
+# The generators travel with the program: the live UI assembles a run into a
+# .xex with the bundled MADS, so they are runtime data, not just samples.
+install(DIRECTORY Generator GeneratorDual DESTINATION share/rasta
+    USE_SOURCE_PERMISSIONS)
 
 # Summary
 message(STATUS "=== BUILD CONFIGURATION SUMMARY ===")

@@ -6,7 +6,7 @@
 
 struct Configuration;
 struct FIBITMAP;
-struct GuiMaskStroke;
+struct GuiEditorApply;
 union SDL_Event;
 struct SDL_Renderer;
 struct SDL_Window;
@@ -47,8 +47,8 @@ public:
 		const unsigned char* editable_values, int width, int height);
 	void PublishDestinationLayer(const unsigned char* palette_indices,
 		int width, int height);
-	bool TakeMaskStroke(GuiMaskStroke& stroke);
-	bool TakeDestinationChanges(GuiMaskStroke& stroke);
+	bool TakeEditorApply(GuiEditorApply& request);
+	bool EditorWantsDestination() const;
 
 	// Drains a command the user issued through the dashboard buttons.
 	LiveCommand TakeCommand();
