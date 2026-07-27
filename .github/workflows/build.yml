@@ -54,21 +54,27 @@ jobs:
       # the toolchain file installs during configure. Naming packages here is an
       # error in manifest mode.
 
+      # Windows uses MSVC through the default Visual Studio generator - that is
+      # what BUILD.md recommends and what the released binaries are built with.
+      # Forcing Ninja there picks up whatever compiler is first on PATH, which
+      # on these runners is MinGW, and MinGW does not resolve the Win32 shell
+      # imports SDL3 pulls in.
       - name: Configure
         shell: bash
         run: |
-          extra=""
           if [ "$RUNNER_OS" = "Windows" ]; then
-            extra="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+            cmake -S . -B build \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          else
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           fi
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release $extra
 
       - name: Build
         run: cmake --build build --config Release --parallel
 
       - name: Test
         working-directory: build
-        run: ctest --output-on-failure
+        run: ctest --output-on-failure -C Release
 
       # A binary that cannot convert a picture is not worth shipping. Runners
       # have no display, so this goes through SDL's offscreen driver.
