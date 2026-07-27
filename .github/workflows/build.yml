@@ -77,20 +77,32 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -C Release
 
-      # A binary that cannot convert a picture is not worth shipping. /quiet is
-      # the program's own headless mode: no window, no dialogs. Relying on SDL's
-      # offscreen video driver instead left the Windows job hanging - a runner
-      # has no desktop session, and a message box there waits forever.
-      - name: Smoke test
+      # A binary that cannot convert a picture is not worth shipping. A GUI
+      # build always initialises SDL video, even under /quiet, so this needs a
+      # display - the offscreen driver provides one on Linux and macOS.
+      - name: Smoke test (convert a picture)
+        if: runner.os != 'Windows'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cd build/Release
+          ./RastaConverter ../../test.jpg /h=40 /threads=2 /dither=none \
+            /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png
+          test -f smoke.png.opt
+
+      # Windows has no session to open a window in, offscreen or otherwise, and
+      # a blocked window creation hangs the job rather than failing it. --version
+      # returns before any of that, which still proves the executable loads with
+      # the DLLs beside it - the failure this step is really guarding against.
+      - name: Smoke test (executable loads)
+        if: runner.os == 'Windows'
         timeout-minutes: 5
         shell: bash
         run: |
           cd build/Release
-          binary=./RastaConverter
-          [ -f ./RastaConverter.exe ] && binary=./RastaConverter.exe
-          "$binary" ../../test.jpg /h=40 /threads=2 /dither=none /quiet \
-            /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png
-          test -f smoke.png.opt
+          ./RastaConverter.exe --version
 
       - name: Package
         id: package
