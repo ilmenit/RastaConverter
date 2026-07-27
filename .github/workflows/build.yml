@@ -20,6 +20,7 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -76,17 +77,18 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -C Release
 
-      # A binary that cannot convert a picture is not worth shipping. Runners
-      # have no display, so this goes through SDL's offscreen driver.
+      # A binary that cannot convert a picture is not worth shipping. /quiet is
+      # the program's own headless mode: no window, no dialogs. Relying on SDL's
+      # offscreen video driver instead left the Windows job hanging - a runner
+      # has no desktop session, and a message box there waits forever.
       - name: Smoke test
+        timeout-minutes: 5
         shell: bash
-        env:
-          SDL_VIDEODRIVER: offscreen
         run: |
           cd build/Release
           binary=./RastaConverter
           [ -f ./RastaConverter.exe ] && binary=./RastaConverter.exe
-          "$binary" ../../test.jpg /h=40 /threads=2 /dither=none \
+          "$binary" ../../test.jpg /h=40 /threads=2 /dither=none /quiet \
             /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png
           test -f smoke.png.opt
 

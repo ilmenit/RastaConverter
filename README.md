@@ -247,9 +247,11 @@ build.bat release x64 CLEANONLY
 Add `nogui` to the POSIX/batch wrapper command, or `-NoGui` in PowerShell, to
 clean the separate console-only build tree instead.
 
-Screenshot
-----------
-![Rasta Converter screenshot](https://github.com/ilmenit/RastaConverter/raw/master/examples/screenshot.jpg "Rasta Converter screenshot")
+Screenshots
+-----------
+![Rasta Converter setup screen](https://github.com/ilmenit/RastaConverter/raw/master/examples/live-ui-setup.png "Rasta Converter setup screen")
+![Rasta Converter live dashboard](https://github.com/ilmenit/RastaConverter/raw/master/examples/live-ui-dashboard.png "Rasta Converter live dashboard")
+![Rasta Converter recent runs](https://github.com/ilmenit/RastaConverter/raw/master/examples/live-ui-results.png "Rasta Converter recent runs")
 
 Examples
 --------
