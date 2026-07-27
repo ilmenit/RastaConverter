@@ -25,6 +25,9 @@ option(ENABLE_FAST_MATH "Enable fast math in Release/RelWithDebInfo (non-MSVC)" 
 option(ENABLE_DEAD_STRIP "Enable function/data section and linker GC (non-MSVC)" ON)
 option(ENABLE_MSVC_FAST_MATH "Use /fp:fast on MSVC/clang-cl in Release/RelWithDebInfo" ON)
 option(ENABLE_AVX2 "Enable AVX2 in Release/RelWithDebInfo" OFF)
+option(ENABLE_NATIVE_ARCH "Tune Release builds for the building machine's CPU" OFF)
+set(RC_ARCH_BASELINE "x86-64-v2" CACHE STRING
+    "Instruction-set baseline for portable x86-64 Release builds")
 option(ENABLE_UNITY_BUILD "Enable unity build for faster compiles" OFF)
 option(ENABLE_LINE_LRU_DIAGNOSTICS "Restore retired line-order bookkeeping for regression diagnosis" OFF)
 option(COPY_ALL_RUNTIME_DLLS "Copy all dependent runtime DLLs on Windows" OFF)
@@ -35,6 +38,32 @@ option(ENABLE_LIVE_UI "Build the Dear ImGui live setup and dashboard for GUI tar
 
 if(NO_GUI)
     set(BUILD_NO_GUI ON)
+endif()
+
+# The C runtime every target links, decided in one place and before any target
+# is created. Per-target /MT is not enough: our ImGui library and everything
+# vcpkg builds would keep the dynamic default, and mixing the two fails to link
+# with unresolved __imp_ symbols.
+if(MSVC AND BUILD_STATIC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+# What CPU the Release build targets.
+#
+# This used to be -march=native unconditionally, which is right for a binary you
+# build for yourself and wrong for one you hand to anyone else: it emits
+# whatever the build machine supports, so a release built on a recent desktop
+# faults with an illegal instruction on an older one. Portable by default,
+# native on request.
+if(ENABLE_NATIVE_ARCH)
+    set(RC_ARCH_FLAG "-march=native")
+    message(STATUS "Architecture: native (this machine only - not for releases)")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    set(RC_ARCH_FLAG "-march=${RC_ARCH_BASELINE}")
+    message(STATUS "Architecture: ${RC_ARCH_BASELINE} (portable)")
+else()
+    set(RC_ARCH_FLAG "")
+    message(STATUS "Architecture: compiler default")
 endif()
 
 # Console-only builds never need GUI implementation dependencies. FORCE is
@@ -588,7 +617,7 @@ if(MSVC)
         target_compile_options(RastaConverter PRIVATE
             /W3 /wd4819
             $<$<CONFIG:Debug>:/MDd;/Od;/RTC1>
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/MT;/O2;/Ob2;/Oi;/Ot;/Gy;/Gw;$<IF:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,/fp:fast,>>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/O2;/Ob2;/Oi;/Ot;/Gy;/Gw;$<IF:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,/fp:fast,>>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:/arch:AVX2>
         )
         target_link_options(RastaConverter PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
@@ -597,7 +626,7 @@ if(MSVC)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
             /W3 /wd4819
             $<$<CONFIG:Debug>:/MDd;/Od;/RTC1>
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/MT;/O2;/Ob2;/Oi;/Ot;/Gy;/Gw;$<IF:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,/fp:fast,>>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/O2;/Ob2;/Oi;/Ot;/Gy;/Gw;$<IF:$<BOOL:${ENABLE_MSVC_FAST_MATH}>,/fp:fast,>>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:/arch:AVX2>
         )
         target_link_options(RastaConverter-NO_GUI PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/OPT:REF;/OPT:ICF>)
@@ -606,7 +635,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if(NOT BUILD_NO_GUI)
         target_compile_options(RastaConverter PRIVATE
             $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 ${RC_ARCH_FLAG}>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
@@ -622,7 +651,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
             $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 ${RC_ARCH_FLAG}>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
@@ -639,7 +668,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     if(NOT BUILD_NO_GUI)
         target_compile_options(RastaConverter PRIVATE
             $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 ${RC_ARCH_FLAG}>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
@@ -653,7 +682,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
             $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 ${RC_ARCH_FLAG}>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
@@ -668,7 +697,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(NOT BUILD_NO_GUI)
         target_compile_options(RastaConverter PRIVATE
             $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 ${RC_ARCH_FLAG}>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
@@ -680,7 +709,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(BUILD_NO_GUI)
         target_compile_options(RastaConverter-NO_GUI PRIVATE
             $<$<CONFIG:Debug>:-Wall -Wextra -Wpedantic>
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 -march=native>
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3 ${RC_ARCH_FLAG}>
             $<$<AND:$<BOOL:${ENABLE_FAST_MATH}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
             $<$<AND:$<BOOL:${ENABLE_DEAD_STRIP}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffunction-sections -fdata-sections>
             $<$<AND:$<BOOL:${ENABLE_AVX2}>,$<BOOL:${IS_X86_64}>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-mavx2 -mfma>
