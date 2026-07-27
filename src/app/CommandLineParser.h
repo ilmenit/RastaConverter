@@ -91,7 +91,8 @@ private:
 	static std::string toLower(const std::string &s);
 	const OptionSpec* findSpec(const std::string &lowerKey) const; // find by alias or canonical
 	std::string canonicalOf(const std::string &lowerKey) const; // returns canonical or ""
-	bool isPrefixed(const std::string &token) const; // starts with '/', '-', or '--'
+	bool isPrefixed(const std::string &token) const;
+	bool looksLikeOption(const std::string &token) const; // starts with '/', '-', or '--'
 
 	// Specification data
 	std::vector<OptionSpec> optionSpecs;

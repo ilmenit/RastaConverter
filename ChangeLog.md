@@ -151,6 +151,12 @@ RastaConverterBeta22      2026-07-27 [AI RELEASE]
     named rc-... are ever removed, so a history entry pointing somewhere
     unexpected is forgotten rather than deleted, and the dialog says which of
     the two the button is about to do.
+* A picture can be given by path again. `rasta photos/pic.png` was rejected
+  because the caller discarded any positional argument containing a slash, and
+  `rasta /home/me/pic.png` never reached it because the parser reads a leading
+  '/' as an option prefix - so on Linux and macOS the program could only be
+  handed a file in the current directory. A '/'-prefixed token is now an option
+  only where it names one; everywhere else it is a path. Covered by tests.
 * Windows runtime DLLs are no longer copied next to Linux and macOS binaries,
   where they were dead weight - and one of them was a stale SDL2 left over from
   before the SDL3 port.

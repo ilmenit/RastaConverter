@@ -341,6 +341,13 @@ else()
 endif()
 
 if(BUILD_TESTING)
+    add_executable(CommandLineParserTests
+        tests/CommandLineParserTests.cpp
+        src/app/CommandLineParser.cpp
+    )
+    target_include_directories(CommandLineParserTests PRIVATE ${CMAKE_SOURCE_DIR}/src/app)
+    add_test(NAME CommandLineParserTests COMMAND CommandLineParserTests)
+
     add_executable(DetailsMaskTests
         tests/DetailsMaskTests.cpp
         src/core/DetailsMask.cpp

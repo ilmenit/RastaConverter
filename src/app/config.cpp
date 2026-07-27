@@ -668,16 +668,19 @@ else if (dst_name=="yuv")
 	if (input_file.empty())
 	{
 		const auto& positional = parser.getPositionalArguments();
+		// Anything the parser did not claim as an option is a candidate path.
+		// It used to skip every candidate containing a slash, which rejected
+		// "photos/pic.png" and every absolute path on Linux and macOS - the
+		// program could only be given a file in the current directory.
 		for (const std::string& candidate : positional) {
 			if (candidate.empty()) continue;
-			if (candidate[0] == '-' || candidate[0] == '/') continue;
-			if (candidate.find('/') != std::string::npos) continue;
+			if (candidate[0] == '-') continue;
 			input_file = candidate;
 			break;
 		}
 		if (input_file.empty() && argc > 1) {
 			std::string temp = argv[1];
-			if (temp.find("/")==string::npos && !temp.empty() && temp[0]!='-')
+			if (!temp.empty() && temp[0] != '-')
 				input_file = temp;
 		}
 	}

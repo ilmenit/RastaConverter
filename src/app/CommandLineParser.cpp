@@ -206,6 +206,23 @@ void CommandLineParser::addOption(const std::string &canonicalName,
 	for (const auto &k : optionSpecs.back().aliases) aliasToIndex[k] = idx;
 }
 
+// Whether a prefixed token should be read as an option rather than a path.
+bool CommandLineParser::looksLikeOption(const std::string &token) const {
+	if (token.empty())
+		return false;
+	if (token[0] == '-')
+		return true;   // '-x' and '--x' are options on every platform
+#if defined(_WIN32)
+	return true;       // and so is '/x' on Windows
+#else
+	std::string key = token.substr(1);
+	const size_t end = key.find_first_of("=:");
+	if (end != std::string::npos)
+		key = key.substr(0, end);
+	return findSpec(toLower(key)) != nullptr;
+#endif
+}
+
 bool CommandLineParser::isPrefixed(const std::string &token) const {
 	if (token.empty()) return false;
 	char c0 = token[0];
@@ -248,7 +265,12 @@ void CommandLineParser::parseTokens(const std::vector<std::string>& tokens)
 	for (size_t idx = 0; idx < tokens.size(); ++idx) {
 		const std::string &token = tokens[idx];
 
-		if (!isPrefixed(token)) {
+		// A leading '/' means an option on Windows and an absolute path
+		// everywhere else, and both spellings have to keep working. Away from
+		// Windows, '/something' is an option only when 'something' is one we
+		// know; otherwise it is a file, which is what /home/me/picture.png has
+		// always been to everyone except this parser.
+		if (!isPrefixed(token) || !looksLikeOption(token)) {
 			++mn_NonInterpreted;
 			positional.push_back(token);
 			continue;
