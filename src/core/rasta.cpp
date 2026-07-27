@@ -52,6 +52,7 @@ const char* program_version = RASTA_CONVERTER_VERSION;
 #include <random>
 
 #include "rasta.h"
+#include "Interrupt.h"
 #include "ColorCorrection.h"
 #include "prng_xoroshiro.h"
 #include "LinearAllocator.h"
@@ -3080,6 +3081,18 @@ void RastaConverter::MainLoop()
 	};
 	while (running)
 	{
+		// Ctrl+C, a kill, or the terminal closing. Treated exactly as the Stop
+		// button: leave the loop, let MainLoop return, and let the caller save.
+		// An editor session has the workers parked, so it has to be unwound
+		// first or the shutdown would wait for threads that are not running.
+		if (interrupts::StopRequested()) {
+			if (lock.owns_lock()) lock.unlock();
+			if (m_editor_paused)
+				DiscardEditorSession();
+			Message("Interrupted - saving.");
+			running = false;
+			break;
+		}
 
 		// Release global lock during UI/rendering to avoid blocking workers
 		if (lock.owns_lock()) lock.unlock();

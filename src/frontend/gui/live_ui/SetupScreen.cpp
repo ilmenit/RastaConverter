@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "Interrupt.h"
 #include "ConfigModel.h"
 #include "SetupInternal.h"
 #include "FileDialog.h"
@@ -826,6 +827,7 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		return true;
 	}
 
+	SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
 	if (!SDL_Init(SDL_INIT_VIDEO))
 		return false;
 
@@ -909,9 +911,27 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 
 	bool accepted = false;
 	bool running = true;
+	// Development hook: accept the form by itself after N frames. It counts
+	// the runs it has started across the whole session, because the session
+	// loop reopens this screen after every conversion - without the limit the
+	// hook converts forever, which is exactly how a test once left three
+	// processes running for fifty minutes.
 	int autoconvert_wait = SDL_getenv("RASTA_TEST_AUTOCONVERT")
 		? SDL_atoi(SDL_getenv("RASTA_TEST_AUTOCONVERT")) : 0;
+	static int autoconvert_runs_left = -1;
+	if (autoconvert_wait > 0 && autoconvert_runs_left < 0) {
+		const char* limit = SDL_getenv("RASTA_TEST_AUTOCONVERT_RUNS");
+		autoconvert_runs_left = limit != nullptr ? SDL_atoi(limit) : 1;
+	}
+	if (autoconvert_wait > 0 && autoconvert_runs_left == 0)
+		return false;
+
 	while (running) {
+		// Ctrl+C or a kill while the setup screen is open ends the session.
+		// SDL turns those signals into a quit event only when it owns the
+		// handlers, and only the run loop was reading that event.
+		if (interrupts::StopRequested())
+			return false;
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
 			ImGui_ImplSDL3_ProcessEvent(&event);
@@ -1055,6 +1075,8 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		// Convert path (folder creation, recipe, window teardown) headlessly.
 		if (autoconvert_wait > 0 && --autoconvert_wait == 0
 			&& !cfg.input_file.empty()) {
+			if (autoconvert_runs_left > 0)
+				--autoconvert_runs_left;
 			AbsolutizeJobPaths(cfg);
 			std::string error;
 			if (CreateRunFolder(cfg.output_file, &error)) {

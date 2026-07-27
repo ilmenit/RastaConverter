@@ -31,6 +31,10 @@ RastaSDL::~RastaSDL()
 bool RastaSDL::Init(std::string command_line, bool enable_live_ui)
 {
 	DBG_PRINT("[SDL] Init start. cmdline='%s'", command_line.c_str());
+	// The program handles SIGINT/SIGTERM itself, turning them into a save-and-
+	// stop. SDL would otherwise install its own handlers and convert them into
+	// a quit event that only some of the loops read.
+	SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
 	if (!SDL_Init(SDL_INIT_VIDEO)) {
 		std::cerr << "SDL_Init: " << SDL_GetError() << std::endl;
 		DBG_PRINT("[SDL] SDL_Init failed: %s", SDL_GetError());

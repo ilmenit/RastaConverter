@@ -1,5 +1,6 @@
 // Dual-mode main loop extracted from RastaDual.cpp
 #include "rasta.h"
+#include "Interrupt.h"
 #include "Program.h"
 #include "Evaluator.h"
 #include "TargetPicture.h"
@@ -312,6 +313,14 @@ void RastaConverter::MainLoopDual()
 	last_eval = m_eval_gstate.m_evaluations;
 	if (!quiet) { m_dual_display = DualDisplayMode::A; }
 	while (!m_eval_gstate.m_finished && m_eval_gstate.m_evaluations < targetE_A) {
+		// An interrupt is a stop here too; m_finished is what every dual worker
+		// already watches, so raising it unwinds the same way the Stop button
+		// does and the caller still saves.
+		if (interrupts::StopRequested()) {
+			Message("Interrupted - saving.");
+			m_eval_gstate.m_finished = true;
+			break;
+		}
 		if (!quiet) {
 			switch (gui.NextFrame()) {
 				case GUI_command::SAVE: SaveBestSolution(); break;
@@ -489,6 +498,14 @@ void RastaConverter::MainLoopDual()
 		last_eval = m_eval_gstate.m_evaluations;
 		if (!quiet) { m_dual_display = DualDisplayMode::B; }
 		while (!m_eval_gstate.m_finished && m_eval_gstate.m_evaluations < targetE_B) {
+		// An interrupt is a stop here too; m_finished is what every dual worker
+		// already watches, so raising it unwinds the same way the Stop button
+		// does and the caller still saves.
+		if (interrupts::StopRequested()) {
+			Message("Interrupted - saving.");
+			m_eval_gstate.m_finished = true;
+			break;
+		}
 			if (!quiet) {
 				switch (gui.NextFrame()) {
 					case GUI_command::SAVE: SaveBestSolution(); break;
@@ -1073,6 +1090,14 @@ void RastaConverter::MainLoopDual()
 
 	// UI loop while workers progress
 	while (!m_eval_gstate.m_finished && (cfg.max_evals == 0 || m_eval_gstate.m_evaluations < m_eval_gstate.m_max_evals)) {
+		// An interrupt is a stop here too; m_finished is what every dual worker
+		// already watches, so raising it unwinds the same way the Stop button
+		// does and the caller still saves.
+		if (interrupts::StopRequested()) {
+			Message("Interrupted - saving.");
+			m_eval_gstate.m_finished = true;
+			break;
+		}
 		// UI update
 		if (!quiet) {
 			switch (gui.NextFrame()) {

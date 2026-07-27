@@ -102,6 +102,7 @@ set(COMMON_SOURCE_FILES
     src/core/VisualObjective.cpp
     src/core/live/ProgressHistory.cpp
     src/app/main.cpp
+    src/utils/Interrupt.cpp
     src/rng/prng_xoroshiro.cpp
     src/core/Program.cpp
     src/core/Cycles.cpp

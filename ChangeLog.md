@@ -151,6 +151,17 @@ RastaConverterBeta21      2025-11-?? [AI RELEASE]
     named rc-... are ever removed, so a history entry pointing somewhere
     unexpected is forgotten rather than deleted, and the dialog says which of
     the two the button is about to do.
+* Ctrl+C, a kill or the terminal closing now stop a conversion the way the Stop
+  button does: the run saves and exits. Previously the process died where it
+  stood and everything since the last autosave was lost - and in GUI builds the
+  signal was swallowed entirely, so a run could not be stopped from outside at
+  all. Handled in single-frame and dual-mode loops and in the setup screen.
+* The version stamp said Beta20; it now matches this release, so .opt headers
+  written today no longer claim the previous version.
+* src/Makefile builds again. It listed thirteen of the twenty-six sources and
+  had not produced a working program in a long time; it now builds the
+  console-only target, which is the one a plain Makefile can honestly build,
+  and says so.
   - GUI-only conveniences: a warning before overwriting an existing run's
     artifacts, and palette lookup relative to the executable so launching from a
     shortcut works.

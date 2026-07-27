@@ -16,6 +16,7 @@
 #include "rasta.h"
 #include "debug_log.h"
 #include "version.h"
+#include "Interrupt.h"
 #include <iostream>
 #include <memory>
 
@@ -133,7 +134,11 @@ int main(int argc, char *argv[])
     // Log console control events (CTRL+C, console close, etc.) and crashes
     RegisterConsoleCtrlLogger();
     RegisterUnhandledExceptionLogger();
-    RegisterSignalHandlers(); 
+    RegisterSignalHandlers();
+    // Before anything creates a window: SDL installs its own SIGINT/SIGTERM
+    // handlers otherwise, and turns them into a quit event that only the run
+    // loop was reading. Ours makes an interrupt mean "stop and save".
+    interrupts::InstallInterruptHandlers();
 
 	FreeImage_Initialise(TRUE);
 
