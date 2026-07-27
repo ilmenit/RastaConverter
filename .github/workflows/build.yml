@@ -50,10 +50,9 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja freeimage
 
-      - name: Install dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: vcpkg install freeimage:x64-windows
-        shell: pwsh
+      # Windows dependencies come from the vcpkg manifest (vcpkg.json), which
+      # the toolchain file installs during configure. Naming packages here is an
+      # error in manifest mode.
 
       - name: Configure
         shell: bash
@@ -71,15 +70,18 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure
 
-      # A binary that cannot convert a picture is not a build worth shipping.
+      # A binary that cannot convert a picture is not worth shipping. Runners
+      # have no display, so this goes through SDL's offscreen driver.
       - name: Smoke test
         shell: bash
+        env:
+          SDL_VIDEODRIVER: offscreen
         run: |
-          cd build/Release 2>/dev/null || cd build
-          ./RastaConverter ../../test.jpg /h=40 /threads=2 /dither=none \
-            /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png \
-            || ./RastaConverter.exe ../../test.jpg /h=40 /threads=2 \
-               /dither=none /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png
+          cd build/Release
+          binary=./RastaConverter
+          [ -f ./RastaConverter.exe ] && binary=./RastaConverter.exe
+          "$binary" ../../test.jpg /h=40 /threads=2 /dither=none \
+            /max_evals=20000 /pal=Palettes/laoo.act /o=smoke.png
           test -f smoke.png.opt
 
       - name: Package
