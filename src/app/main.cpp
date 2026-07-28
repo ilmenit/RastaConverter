@@ -17,15 +17,11 @@
 #include "debug_log.h"
 #include "version.h"
 #include "Interrupt.h"
+#include "Utf8Path.h"
 #include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
-
-#if defined(_WIN32)
-#include <windows.h>
-#include <shellapi.h>
-#endif
 
 #ifndef NO_GUI
 #include <SDL3/SDL_main.h>
@@ -60,27 +56,8 @@ struct WindowsUtf8Arguments
 
 	bool Load()
 	{
-		int native_count = 0;
-		wchar_t** native = CommandLineToArgvW(GetCommandLineW(), &native_count);
-		if (native == nullptr)
+		if (!LoadWindowsUtf8Arguments(storage))
 			return false;
-		storage.reserve(static_cast<std::size_t>(native_count));
-		for (int index = 0; index < native_count; ++index) {
-			const int byte_count = WideCharToMultiByte(CP_UTF8,
-				WC_ERR_INVALID_CHARS, native[index], -1, nullptr, 0,
-				nullptr, nullptr);
-			if (byte_count <= 0) {
-				LocalFree(native);
-				storage.clear();
-				return false;
-			}
-			std::string value(static_cast<std::size_t>(byte_count), '\0');
-			WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, native[index],
-				-1, value.data(), byte_count, nullptr, nullptr);
-			value.pop_back(); // WideCharToMultiByte included the terminator.
-			storage.push_back(std::move(value));
-		}
-		LocalFree(native);
 		pointers.reserve(storage.size() + 1);
 		for (std::string& value : storage)
 			pointers.push_back(value.data());
