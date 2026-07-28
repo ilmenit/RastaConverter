@@ -3,9 +3,9 @@
 // Visual language for the RastaConverter live UI.
 //
 // Everything cosmetic lives here so the screens stay about structure. The
-// palette is deliberately warm-neutral with a single amber accent borrowed from
-// the Atari hardware palette, and the widget helpers exist so a form row looks
-// the same everywhere it is written.
+// palettes share a warm-neutral visual language with a single amber accent
+// borrowed from the Atari hardware palette, and the widget helpers exist so a
+// form row looks the same everywhere it is written.
 
 #include <imgui.h>
 
@@ -20,21 +20,23 @@ namespace rc_live_ui {
 // rather than from a literal, so a theme change stays a one-file change.
 namespace theme {
 
-constexpr ImU32 kAccent      = IM_COL32(0xF0, 0xA8, 0x3C, 0xFF); // amber - primary
-constexpr ImU32 kAccentDim   = IM_COL32(0xA8, 0x74, 0x28, 0xFF);
-constexpr ImU32 kAccentSoft  = IM_COL32(0xF0, 0xA8, 0x3C, 0x28);
-constexpr ImU32 kInfo        = IM_COL32(0x5C, 0xC0, 0xD8, 0xFF); // teal - secondary
-constexpr ImU32 kSuccess     = IM_COL32(0x74, 0xC9, 0x70, 0xFF);
-constexpr ImU32 kWarning     = IM_COL32(0xF2, 0xC1, 0x4E, 0xFF);
-constexpr ImU32 kDanger      = IM_COL32(0xE4, 0x64, 0x5A, 0xFF);
-constexpr ImU32 kTextStrong  = IM_COL32(0xEC, 0xEF, 0xF5, 0xFF);
-constexpr ImU32 kText        = IM_COL32(0xC8, 0xCE, 0xDC, 0xFF);
-constexpr ImU32 kTextMuted   = IM_COL32(0x8B, 0x93, 0xA6, 0xFF);
-constexpr ImU32 kTextFaint   = IM_COL32(0x64, 0x6B, 0x7C, 0xFF);
-constexpr ImU32 kSurface     = IM_COL32(0x1B, 0x1E, 0x26, 0xFF);
-constexpr ImU32 kSurfaceHigh = IM_COL32(0x24, 0x28, 0x33, 0xFF);
-constexpr ImU32 kSurfaceLow  = IM_COL32(0x12, 0x14, 0x1A, 0xFF);
-constexpr ImU32 kBorder      = IM_COL32(0x33, 0x38, 0x46, 0xFF);
+// These are variables because every custom-drawn label, chart and badge must
+// follow the selected theme too. ApplyTheme updates them as one semantic set.
+extern ImU32 kAccent;      // amber - primary
+extern ImU32 kAccentDim;
+extern ImU32 kAccentSoft;
+extern ImU32 kInfo;        // teal/blue - secondary
+extern ImU32 kSuccess;
+extern ImU32 kWarning;
+extern ImU32 kDanger;
+extern ImU32 kTextStrong;
+extern ImU32 kText;
+extern ImU32 kTextMuted;
+extern ImU32 kTextFaint;
+extern ImU32 kSurface;
+extern ImU32 kSurfaceHigh;
+extern ImU32 kSurfaceLow;
+extern ImU32 kBorder;
 
 ImVec4 ToVec4(ImU32 packed);
 
@@ -54,6 +56,16 @@ struct FontSet {
 // device pixels, so the same numbers work at any display density.
 void ApplyTheme();
 
+enum class UiTheme {
+	Dark = 0,
+	HighContrast,
+	Light
+};
+
+UiTheme CurrentUiTheme();
+const char* UiThemeName(UiTheme selected);
+void SetUiTheme(UiTheme selected);
+
 // Discovers a readable system UI font and builds the FontSet.
 //
 // `pixel_density` is device pixels per point. Glyphs are rasterized at that
@@ -61,6 +73,13 @@ void ApplyTheme();
 // HiDPI display while layout still measures in points. Falls back to the
 // built-in font when no system font is installed.
 FontSet LoadFonts(float pixel_density);
+
+// User-selected UI magnification. The default is 1.0 and the supported range
+// is 1.0-2.0; larger values make the fixed top-level toolbars wider than a
+// normal desktop window. The value is persisted in SDL's per-user preference
+// directory and applies to Setup, Dashboard, Recent and the paint editor.
+float UiFontScale();
+void SetUiFontScale(float scale);
 
 // Device pixels per point for `window`. 1.0 when unknown.
 //

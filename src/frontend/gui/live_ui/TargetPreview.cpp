@@ -13,6 +13,7 @@
 #include "TargetBuilder.h"
 #include "DetailsMask.h"
 #include "TargetPicture.h"
+#include "FreeImageIO.h"
 #include "rgb.h"
 
 namespace rc_live_ui {
@@ -308,14 +309,12 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 		Publish(result);
 	};
 
-	FREE_IMAGE_FORMAT format = FreeImage_GetFileType(inputs.input_file.c_str(), 0);
-	if (format == FIF_UNKNOWN)
-		format = FreeImage_GetFIFFromFilename(inputs.input_file.c_str());
+	FREE_IMAGE_FORMAT format = FreeImageFormatUtf8(inputs.input_file);
 	if (format == FIF_UNKNOWN) {
 		fail("Unsupported or unreadable image format.");
 		return;
 	}
-	BitmapPtr loaded(FreeImage_Load(format, inputs.input_file.c_str(), 0));
+	BitmapPtr loaded(FreeImageLoadUtf8(inputs.input_file));
 	if (!loaded) {
 		fail("Could not open " + inputs.input_file);
 		return;

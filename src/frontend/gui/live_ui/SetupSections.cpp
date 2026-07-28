@@ -4,6 +4,7 @@
 // not. What the two halves share is in SetupInternal.h.
 
 #include "SetupInternal.h"
+#include "Utf8Path.h"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -37,16 +38,17 @@ const std::vector<BundledPalette>& BundledPalettes()
 		std::vector<BundledPalette> found;
 		const std::string folder = BundledPath("Palettes");
 		std::error_code ec;
-		for (const auto& entry : std::filesystem::directory_iterator(folder, ec)) {
+		for (const auto& entry :
+				std::filesystem::directory_iterator(Utf8Path(folder), ec)) {
 			if (ec || !entry.is_regular_file())
 				continue;
-			std::string extension = entry.path().extension().string();
+			std::string extension = Utf8String(entry.path().extension());
 			for (char& c : extension)
 				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 			if (extension != ".act")
 				continue;
-			found.push_back({entry.path().stem().string(),
-				entry.path().string()});
+			found.push_back({Utf8String(entry.path().stem()),
+				Utf8String(entry.path())});
 		}
 		std::sort(found.begin(), found.end(),
 			[](const BundledPalette& a, const BundledPalette& b) {

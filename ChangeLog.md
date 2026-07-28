@@ -1,6 +1,36 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC2      2026-07-28 [RELEASE CANDIDATE]
+* Added a persistent Font size control beside Reset in the Live UI. It scales
+  every in-program window from the existing 100% default up to 200%; 200% is
+  the practical limit at the supported 1420x900 minimum window size.
+* Improved UI readability while keeping the warm Atari-inspired visual
+  language. Muted and faint text now have substantially stronger contrast, and
+  the persistent Style menu offers Dark, High contrast and Light themes across
+  Setup, Dashboard, Recent and the editor.
+* Fixed XEX builds on Windows. The assembler and each path argument are now
+  passed directly to SDL's process API, so cmd.exe can no longer reinterpret
+  Generator as a command or break paths containing spaces.
+* Fixed non-ASCII Windows paths throughout image, palette, state, preview and
+  recent-run I/O by using the native wide-character filesystem and FreeImage
+  APIs behind one UTF-8 interface.
+* Fixed absolute Unix paths supplied as separate option values, such as
+  --output /tmp/picture.png, being mistaken for command-line options.
+* Fixed XEX assembler selection on unsupported CPU/OS combinations: native
+  bundled MADS is used only where its binary matches the host, otherwise the
+  portable launcher reports the platform limitation explicitly.
+* Fixed quiet/headless failures opening a native error dialog, propagated
+  initialization and conversion failures to a non-zero process exit status,
+  and corrected recent-run registration for Windows directory separators.
+* Fixed the installed layout so runtime palettes, generators and the UI font
+  are beside the executable where the application expects them.
+* Removed obsolete bundled SDL2 DLLs and the old monolithic FreeImage DLL from
+  Windows packages. Release packages now contain the consistent vcpkg runtime
+  dependency set actually used by the executable.
+* Expanded smoke coverage for Unicode paths, console-only Windows conversion,
+  installation layout, and command-line parsing across platforms.
+
 RastaConverterBeta22      2026-07-27 [AI RELEASE]
 * New interactive Live UI (built with /livegui, or by launching with no command line):
   - Setup screen with the image picker on top, one continuous grouped form covering

@@ -1,6 +1,6 @@
 {
   "name": "rasta-converter",
-  "version": "0.0.1",
+  "version-string": "1.0-RC2",
   "dependencies": [
     "freeimage",
     "sdl3",

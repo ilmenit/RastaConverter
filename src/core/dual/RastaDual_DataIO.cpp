@@ -4,6 +4,8 @@
 #include <fstream>
 #include <iomanip>
 
+#include "Utf8Path.h"
+
 extern const char* program_version;
 unsigned char ConvertColorRegisterToRawData(e_target t);
 
@@ -38,7 +40,7 @@ void RastaConverter::UpdateTargetsFromResults(const std::vector<const line_cache
 
 bool RastaConverter::SaveScreenDataFromTargets(const char *filename, const std::vector< std::vector<unsigned char> >& targets)
 {
-    std::ofstream out(filename, std::ios::out | std::ios::binary | std::ios::trunc);
+    std::ofstream out(Utf8Path(filename), std::ios::out | std::ios::binary | std::ios::trunc);
     if (!out) return false;
 
     for (int y = 0; y < m_height; ++y)
@@ -64,7 +66,7 @@ bool RastaConverter::SaveScreenDataFromTargets(const char *filename, const std::
 void RastaConverter::SavePMGWithSprites(std::string name, const sprites_memory_t& sprites)
 {
     size_t sprite,y,bit; unsigned char b;
-    std::ofstream out(name, std::ios::out | std::ios::trunc);
+    std::ofstream out(Utf8Path(name), std::ios::out | std::ios::trunc);
     if (!out) return;
     out << "; ---------------------------------- \n";
     out << "; RastaConverter by Ilmenit v." << program_version << '\n';

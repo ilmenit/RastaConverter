@@ -19,6 +19,13 @@
 #include "Interrupt.h"
 #include <iostream>
 #include <memory>
+#include <string>
+#include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 #ifndef NO_GUI
 #include <SDL3/SDL_main.h>
@@ -42,9 +49,50 @@ void create_cycles_table();
 // between conversions started from the live UI.
 std::unique_ptr<RastaConverter> rasta;
 
+#if defined(_WIN32)
+// The standard MSVC main() argv is encoded through the active ANSI code page.
+// Re-read the native UTF-16 command line and expose UTF-8 to the rest of the
+// application, matching the encoding used by SDL file dialogs.
+struct WindowsUtf8Arguments
+{
+	std::vector<std::string> storage;
+	std::vector<char*> pointers;
+
+	bool Load()
+	{
+		int native_count = 0;
+		wchar_t** native = CommandLineToArgvW(GetCommandLineW(), &native_count);
+		if (native == nullptr)
+			return false;
+		storage.reserve(static_cast<std::size_t>(native_count));
+		for (int index = 0; index < native_count; ++index) {
+			const int byte_count = WideCharToMultiByte(CP_UTF8,
+				WC_ERR_INVALID_CHARS, native[index], -1, nullptr, 0,
+				nullptr, nullptr);
+			if (byte_count <= 0) {
+				LocalFree(native);
+				storage.clear();
+				return false;
+			}
+			std::string value(static_cast<std::size_t>(byte_count), '\0');
+			WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, native[index],
+				-1, value.data(), byte_count, nullptr, nullptr);
+			value.pop_back(); // WideCharToMultiByte included the terminator.
+			storage.push_back(std::move(value));
+		}
+		LocalFree(native);
+		pointers.reserve(storage.size() + 1);
+		for (std::string& value : storage)
+			pointers.push_back(value.data());
+		pointers.push_back(nullptr);
+		return true;
+	}
+};
+#endif
+
 // Runs a single conversion to completion. Takes the configuration by value:
 // the run mutates it, and the setup screen keeps its own copy for the next one.
-static void RunConversion(Configuration cfg)
+static bool RunConversion(Configuration cfg)
 {
 	ResetProcessGlobalsForNewRun();
 	rasta = std::make_unique<RastaConverter>();
@@ -84,7 +132,7 @@ static void RunConversion(Configuration cfg)
 				profile != nullptr ? profile : "unspecified"))
 			{
 				std::cerr << "Structured fixture screen failed\n";
-				return;
+				return false;
 			}
 		}
 		else
@@ -99,7 +147,7 @@ static void RunConversion(Configuration cfg)
 					profile != nullptr ? profile : "unspecified"))
 				{
 					std::cerr << "Phase 7 retained-window screen failed\n";
-					return;
+					return false;
 				}
 			}
 			if (rasta->AbortedWithoutSave())
@@ -116,15 +164,25 @@ static void RunConversion(Configuration cfg)
 	else {
 		std::cout << "[MAIN] ProcessInit returned false (preprocess-only or error)" << std::endl;
 		DBG_PRINT("[MAIN] ProcessInit returned false");
+		const bool success = cfg.preprocess_only;
+		rasta.reset();
+		return success;
 	}
 
 	// Releases the conversion window before the setup screen opens again.
 	rasta.reset();
+	return true;
 }
 
 int main(int argc, char *argv[])
-{	
+{
 #if defined(_WIN32)
+	WindowsUtf8Arguments utf8_arguments;
+	if (utf8_arguments.Load()) {
+		argc = static_cast<int>(utf8_arguments.storage.size());
+		argv = utf8_arguments.pointers.data();
+	}
+
     // Set a unique AppUserModelID to ensure the taskbar icon is handled correctly on Windows 11/10/7.
     // This allows Windows to group the app correctly and use the runtime-set icon.
     SetCurrentProcessExplicitAppUserModelID(L"RastaConverter.MainUI.1");
@@ -191,7 +249,8 @@ int main(int argc, char *argv[])
 			for (const auto &w : session.warning_messages)
 				std::cerr << "Warning: " << w << "\n";
 
-			RunConversion(session);
+			if (!RunConversion(session))
+				return 1;
 			just_finished = true;
 		}
 		return 0;
@@ -200,7 +259,5 @@ int main(int argc, char *argv[])
 	for (const auto &w : cfg.warning_messages)
 		std::cerr << "Warning: " << w << "\n";
 
-	RunConversion(cfg);
-
-	return 0; // Exit with no errors
+	return RunConversion(cfg) ? 0 : 1;
 }

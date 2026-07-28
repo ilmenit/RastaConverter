@@ -3,11 +3,12 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
-#include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 #include "Desktop.h"
+#include "Utf8Path.h"
 
 namespace rc_live_ui {
 namespace {
@@ -60,55 +61,62 @@ std::string AssemblerPath(const std::string& generator_dir)
 {
 #if defined(_WIN32)
 	const char* preferred = "/mads.exe";
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
 	const char* preferred = "/mads-macos-arm64";
-#else
+#elif defined(__linux__) && (defined(__x86_64__) || defined(__amd64__))
 	const char* preferred = "/mads-linux-x86_64";
+#else
+	const char* preferred = nullptr;
 #endif
-	const std::string candidate = generator_dir + preferred;
-	if (Exists(candidate))
-		return candidate;
+	if (preferred != nullptr) {
+		const std::string candidate = generator_dir + preferred;
+		if (Exists(candidate))
+			return candidate;
+	}
 	const std::string launcher = generator_dir + "/mads";
 	return Exists(launcher) ? launcher : std::string();
 }
 
-std::string Quote(const std::string& text)
+std::string RunCommand(const std::vector<std::string>& arguments, int* status)
 {
-#if defined(_WIN32)
-	return "\"" + text + "\"";
-#else
-	std::string quoted = "'";
-	for (char c : text) {
-		if (c == '\'')
-			quoted += "'\\''";
-		else
-			quoted += c;
-	}
-	quoted += "'";
-	return quoted;
-#endif
-}
+	std::vector<const char*> args;
+	args.reserve(arguments.size() + 1);
+	for (const std::string& argument : arguments)
+		args.push_back(argument.c_str());
+	args.push_back(nullptr);
 
-std::string RunCommand(const std::string& command, int* status)
-{
-#if defined(_WIN32)
-	FILE* pipe = _popen(command.c_str(), "r");
-#else
-	FILE* pipe = popen(command.c_str(), "r");
-#endif
-	if (pipe == nullptr) {
+	const SDL_PropertiesID properties = SDL_CreateProperties();
+	if (properties == 0) {
 		*status = -1;
-		return std::string();
+		const char* error = SDL_GetError();
+		return error != nullptr ? error : std::string();
 	}
+	SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
+		args.data());
+	SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
+		SDL_PROCESS_STDIO_APP);
+	SDL_SetBooleanProperty(properties,
+		SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN, true);
+	SDL_Process* process = SDL_CreateProcessWithProperties(properties);
+	SDL_DestroyProperties(properties);
+	if (process == nullptr) {
+		*status = -1;
+		const char* error = SDL_GetError();
+		return error != nullptr ? error : std::string();
+	}
+
+	size_t size = 0;
+	void* data = SDL_ReadProcess(process, &size, status);
 	std::string output;
-	char buffer[512];
-	while (std::fgets(buffer, sizeof(buffer), pipe) != nullptr)
-		output += buffer;
-#if defined(_WIN32)
-	*status = _pclose(pipe);
-#else
-	*status = pclose(pipe);
-#endif
+	if (data != nullptr) {
+		output.assign(static_cast<const char*>(data), size);
+		SDL_free(data);
+	} else {
+		const char* error = SDL_GetError();
+		if (error != nullptr)
+			output = error;
+	}
+	SDL_DestroyProcess(process);
 	return output;
 }
 
@@ -167,7 +175,7 @@ XexBuildResult BuildRunXex(const std::string& output_base)
 	// is what they were called back when every conversion wrote into one shared
 	// folder. Rather than copying a run's artifacts under those names, the
 	// source is retargeted at the run's own names and assembled where it stands.
-	std::ifstream in(source, std::ios::binary);
+	std::ifstream in(Utf8Path(source), std::ios::binary);
 	if (!in) {
 		result.log = "Could not read " + source + ".";
 		return result;
@@ -187,7 +195,7 @@ XexBuildResult BuildRunXex(const std::string& output_base)
 
 	const std::string script = folder + "/.rasta-xex.asq";
 	{
-		std::ofstream out(script, std::ios::binary);
+		std::ofstream out(Utf8Path(script), std::ios::binary);
 		if (!out) {
 			result.log = "Could not write " + script
 				+ ". Is the run folder read-only?";
@@ -199,13 +207,19 @@ XexBuildResult BuildRunXex(const std::string& output_base)
 	const std::string xex = RunXexPath(output_base);
 	SDL_RemovePath(xex.c_str());
 
-	// Both include paths: the generator's own headers and macros, and the run
-	// folder holding the data the source pulls in.
-	std::string command = Quote(assembler) + " " + Quote(script)
-		+ " " + Quote("-o:" + xex)
-		+ " " + Quote("-i:" + generator)
-		+ " " + Quote("-i:" + folder)
-		+ " 2>&1";
+	// Keep every path as a distinct process argument. In particular, do not
+	// send a quoted command string through cmd.exe on Windows: a relative
+	// "Generator/mads.exe" is parsed there as the command "Generator", and
+	// paths containing spaces have another layer of shell quoting to survive.
+	// Both include paths are needed: the generator's headers and macros, and
+	// the run folder holding the data the source pulls in.
+	const std::vector<std::string> command = {
+		assembler,
+		script,
+		"-o:" + xex,
+		"-i:" + generator,
+		"-i:" + folder
+	};
 	int status = 0;
 	result.log = RunCommand(command, &status);
 	SDL_RemovePath(script.c_str());
