@@ -3087,9 +3087,16 @@ void RastaConverter::MainLoop()
 		// first or the shutdown would wait for threads that are not running.
 		if (interrupts::StopRequested()) {
 			if (lock.owns_lock()) lock.unlock();
+			// An editor session has the workers parked; unwinding it takes the
+			// lock itself, so this happens with the lock released.
 			if (m_editor_paused)
 				DiscardEditorSession();
 			Message("Interrupted - saving.");
+			// Re-taken before leaving: everything after this loop - raising
+			// m_finished, and waiting for the workers to drain - runs under the
+			// lock, and std::condition_variable::wait on a mutex this thread
+			// does not hold waits forever.
+			if (!lock.owns_lock()) lock.lock();
 			running = false;
 			break;
 		}
@@ -3131,6 +3138,18 @@ void RastaConverter::MainLoop()
 		// Reacquire lock before waiting on condition/flags
 		if (!lock.owns_lock()) lock.lock();
 		startRemainingWorkers();
+
+		// Nothing left to wait for. Every wake-up of this loop comes from a
+		// worker, so once they have all gone and the search is not paused
+		// mid-edit, waiting is waiting forever: two runs were found still
+		// sitting here after five and a half hours, ticking over at 5% CPU with
+		// no worker threads left and nothing written but the preprocessed
+		// images. Whatever ends the workers early, the answer here is to stop.
+		if (eval_inited && !m_editor_paused && m_eval_gstate.m_threads_active == 0
+			&& !m_eval_gstate.m_finished) {
+			Message("All workers have stopped - finishing.");
+			break;
+		}
 
 		auto now = std::chrono::steady_clock::now();
 		auto deadline = now + (gui.LiveUiActive()

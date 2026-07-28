@@ -151,6 +151,14 @@ RastaConverterBeta22      2026-07-27 [AI RELEASE]
     named rc-... are ever removed, so a history entry pointing somewhere
     unexpected is forgotten rather than deleted, and the dialog says which of
     the two the button is about to do.
+* Fixed two ways a run could sit forever instead of finishing. Interrupt
+  handling left the loop without re-taking the lock that the shutdown path
+  waits under, which is undefined behaviour and can wait forever. And the main
+  loop waited for updates that only workers produce, so if the workers all
+  stopped it waited for news that would never come - two runs were found still
+  ticking over five and a half hours later, at 5% CPU, with nothing written but
+  the preprocessed images. It now notices there is nothing left to wait for and
+  finishes.
 * A picture can be given by path again. `rasta photos/pic.png` was rejected
   because the caller discarded any positional argument containing a slash, and
   `rasta /home/me/pic.png` never reached it because the parser reads a leading
