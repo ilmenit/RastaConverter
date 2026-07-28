@@ -20,9 +20,10 @@ RastaConverter1.0-RC2      2026-07-28 [RELEASE CANDIDATE]
 * Fixed XEX assembler selection on unsupported CPU/OS combinations: native
   bundled MADS is used only where its binary matches the host, otherwise the
   portable launcher reports the platform limitation explicitly.
-* Fixed quiet/headless failures opening a native error dialog, propagated
-  initialization and conversion failures to a non-zero process exit status,
-  and corrected recent-run registration for Windows directory separators.
+* Made /quiet conversions genuinely headless even from the GUI build, fixed
+  failures opening a native error dialog, propagated initialization and
+  conversion failures to a non-zero process exit status, and corrected
+  recent-run registration for Windows directory separators.
 * Fixed the installed layout so runtime palettes, generators and the UI font
   are beside the executable where the application expects them.
 * Removed obsolete bundled SDL2 DLLs and the old monolithic FreeImage DLL from
