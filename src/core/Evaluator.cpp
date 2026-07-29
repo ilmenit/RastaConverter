@@ -45,6 +45,7 @@ void RasterMutationTransaction::SaveMemory()
 	if (!m_picture || m_memory_saved)
 		return;
 	memcpy(m_memory_snapshot, m_picture->mem_regs_init, sizeof m_memory_snapshot);
+	m_attribute_snapshot = m_picture->antic4_attributes;
 	m_memory_saved = true;
 }
 
@@ -72,7 +73,10 @@ void RasterMutationTransaction::Restore(unsigned long long allocatorEpoch)
 	if (!m_picture)
 		return;
 	if (m_memory_saved)
+	{
 		memcpy(m_picture->mem_regs_init, m_memory_snapshot, sizeof m_memory_snapshot);
+		m_picture->antic4_attributes = m_attribute_snapshot;
+	}
 	for (unsigned index : m_touched)
 	{
 		m_picture->raster_lines[index].swap(m_snapshots[index]);
@@ -92,7 +96,7 @@ namespace
 {
 struct PmgPixelSnapshot
 {
-	unsigned char color_regs[E_COLPM3 + 1];
+	unsigned char color_regs[E_TARGET_MAX];
 	unsigned char shift_regs[4];
 	unsigned char shift_emitted[4];
 };
@@ -389,6 +393,10 @@ void Evaluator::FlushCacheDiagnosticsToGlobal()
 		m_insn_allocator.allocated_bytes(linear_allocator::INSN_CACHE_DATA), std::memory_order_relaxed);
 	m_gstate->m_cache_evaluations.fetch_add(m_local_cache_evaluations, std::memory_order_relaxed);
 	m_gstate->m_cache_recomputed_lines.fetch_add(m_local_cache_recomputed_lines, std::memory_order_relaxed);
+	m_gstate->m_antic4_attribute_cache_evaluations.fetch_add(
+		m_local_antic4_attribute_cache_evaluations, std::memory_order_relaxed);
+	m_gstate->m_antic4_attribute_recomputed_lines.fetch_add(
+		m_local_antic4_attribute_recomputed_lines, std::memory_order_relaxed);
 	AtomicMaxRelaxed(m_gstate->m_cache_max_recomputed_lines, m_local_cache_max_recomputed_lines);
 	m_gstate->m_cache_propagation_span.fetch_add(m_local_cache_propagation_span, std::memory_order_relaxed);
 	AtomicMaxRelaxed(m_gstate->m_cache_max_propagation_span, m_local_cache_max_propagation_span);
@@ -414,6 +422,11 @@ void Evaluator::RecordCacheEvaluation(unsigned recomputedLines,
 {
 	++m_local_cache_evaluations;
 	m_local_cache_recomputed_lines += recomputedLines;
+	if (m_current_mutations[E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE] != 0)
+	{
+		++m_local_antic4_attribute_cache_evaluations;
+		m_local_antic4_attribute_recomputed_lines += recomputedLines;
+	}
 	m_local_cache_max_recomputed_lines = std::max(
 		m_local_cache_max_recomputed_lines,
 		static_cast<unsigned long long>(recomputedLines));
@@ -933,9 +946,12 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
         const int rastinsncnt = (int)rline.instructions.size();
         const SRasterInstruction *__restrict rastinsns = rastinsncnt ? &rline.instructions[0] : nullptr;
 
-        restart_line=false; ip=0; cycle=0; next_instr_offset=screen_cycles[cycle].offset;
+        restart_line=false; ip=0; cycle=0;
+		next_instr_offset = rastinsncnt
+			? RasterInstructionCompletionOffset(
+				screen_cycles, cycle, rastinsns[ip])
+			: 1000;
         memset(m_sprite_shift_regs,0,sizeof(m_sprite_shift_regs));
-        if (!rastinsncnt) next_instr_offset = 1000;
 
         const int picture_row_index = m_width * y;
         distance_accum_t total_line_error = 0;
@@ -978,8 +994,10 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
 				}
                 ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
                 cycle+=GetInstructionCycles(*instr);
-                next_instr_offset=screen_cycles[cycle].offset;
-                if (ip >= rastinsncnt) next_instr_offset = 1000;
+                next_instr_offset = ip < rastinsncnt
+					? RasterInstructionCompletionOffset(
+						screen_cycles, cycle, rastinsns[ip])
+					: 1000;
             }
 
             if ((unsigned)x < (unsigned)m_width)
@@ -1156,6 +1174,11 @@ int Evaluator::SelectMutation()
             if (i == E_MUTATION_COMPLEMENT_VALUE_DUAL) {
                 if (!dual_ok_now) { m_cached_weights[i] = 0.0; continue; }
             }
+			if (i == E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE)
+			{
+				m_cached_weights[i] = 0.0;
+				continue;
+			}
 
             // Preserve the established fallback-chain feasibility signal.
             // Evaluated accepted/improving credit is recorded separately; both
@@ -2029,15 +2052,17 @@ e_target Evaluator::FindClosestColorRegister(sprites_row_memory_t& spriterow, in
 
 	// check standard colors
 
-	int last_color_register;
-
-	if (sprite_covers_colbak)
-		last_color_register=E_COLOR2; // COLBAK is not used
-	else
-		last_color_register=E_COLBAK;
-
-	for (int temp=E_COLOR0;temp<=last_color_register;++temp)
+	const bool antic4 = m_active_raster_picture
+		&& m_active_raster_picture->graphics_mode == GraphicsMode::Antic4;
+	const bool alternate = antic4
+		&& m_active_raster_picture->antic4_attribute(y / 8, x / 4);
+	const e_target playfieldTargets[4] = {
+		E_COLOR0, E_COLOR1, alternate ? E_COLOR3 : E_COLOR2, E_COLBAK
+	};
+	const int playfieldCount = sprite_covers_colbak ? 3 : 4;
+	for (int candidate = 0; candidate < playfieldCount; ++candidate)
 	{
+		const e_target temp = playfieldTargets[candidate];
 //		distance = T_distance_function(pixel,atari_palette[mem_regs[temp]/2]);
 		distance = m_picture_all_errors[m_mem_regs[temp]/2][index];
 		if (distance<min_distance)
@@ -2128,6 +2153,7 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 	}
 
 	// Single-frame path: keep hot; picture should have been recached by caller (m_best_pic.recache_insns).
+	m_active_raster_picture = pic;
 
 	int cycle;
 	int next_instr_offset;
@@ -2174,6 +2200,8 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 		line_cache_key lck;
 		CaptureRegisterState(lck.entry_state);
 		lck.insn_seq = rline.cache_key;
+		if (pic->graphics_mode == GraphicsMode::Antic4)
+			lck.antic4_attribute_row = pic->antic4_attributes[y / 8];
 
 		const uint32_t lck_hash = lck.hash();
 
@@ -2222,13 +2250,16 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 		restart_line=false;
 		ip=0;
 		cycle=0;
-		next_instr_offset=screen_cycles[cycle].offset;
+		const RasterLineSchedule lineSchedule =
+			GetRasterLineSchedule(pic->graphics_mode, y, m_height);
+		const ScreenCycle* lineCycles = lineSchedule.timing->cycles.data();
+		next_instr_offset = rastinsncnt
+			? RasterInstructionCompletionOffset(
+				lineCycles, cycle, rastinsns[ip])
+			: 1000;
 
 		// on new line clear sprite shifts and wait to be taken from mem_regs
 		memset(m_sprite_shift_regs,0,sizeof(m_sprite_shift_regs));
-
-		if (!rastinsncnt)
-			next_instr_offset = 1000;
 
 		const int picture_row_index = m_width * y;
 
@@ -2289,9 +2320,10 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 				ExecuteInstruction(*instr, sprite_check_x, spriterow, total_line_error);
 
 				cycle+=GetInstructionCycles(*instr);
-				next_instr_offset=screen_cycles[cycle].offset;
-				if (ip >= rastinsncnt)
-					next_instr_offset = 1000;
+				next_instr_offset = ip < rastinsncnt
+					? RasterInstructionCompletionOffset(
+						lineCycles, cycle, rastinsns[ip])
+					: 1000;
 			}
 
 			if ((unsigned)x < (unsigned)m_width)		// x>=0 && x<m_width
@@ -2365,6 +2397,13 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 			}
 			ApplyRegisterState(outgoing_state);
 			restart_line = false;
+		}
+
+		if (lineSchedule.chbase_transition)
+		{
+			// The fixed LDA #>charset_N / STA CHBASE suffix intentionally
+			// clobbers A. The concrete generator uses ten 1 KiB sets at $8000.
+			m_reg_a = static_cast<unsigned char>(0x80 + 4 * (y / 24 + 1));
 		}
 
 		if (!restart_line)
@@ -2527,6 +2566,25 @@ void Evaluator::MutateLine(raster_line& prog, raster_picture& pic)
 void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 {
 	int i1, i2, c, x;
+	const RasterLineSchedule currentSchedule =
+		GetRasterLineSchedule(pic.graphics_mode, m_currently_mutated_y, m_height);
+	const int currentCycleLimit = currentSchedule.optimizer_cycle_limit;
+	auto randomWritableTarget = [&]() -> e_target {
+		if (pic.graphics_mode == GraphicsMode::Antic4)
+		{
+			// GTIA applies HPOSP writes five color clocks late and moving a
+			// player behind the active beam also changes its internal
+			// shifter/latch state. The evaluator does not model that full
+			// mid-line state machine, so keep ANTIC 4 player positions fixed
+			// for the frame instead of emitting preview-inaccurate streaks.
+			const int colorTargetCount = E_COLPM3 + 1;
+			if (Random(colorTargetCount + 1) == colorTargetCount)
+				return E_COLOR3;
+			return static_cast<e_target>(Random(colorTargetCount));
+		}
+		const int legacyCount = E_HPOSP3 + 1;
+		return static_cast<e_target>(Random(legacyCount));
+	};
 
 	i1 = Random(prog.instructions.size());
 	i2 = i1;
@@ -2549,6 +2607,8 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 		{
 			int next_y = m_currently_mutated_y + 1;
 			raster_line& next_line = pic.raster_lines[next_y];
+			if (next_line.cycles > currentCycleLimit)
+				break;
 			prog = next_line;
 			m_current_mutations[E_MUTATION_COPY_LINE_TO_NEXT_ONE]++;
 			++m_mutation_applied_count[E_MUTATION_COPY_LINE_TO_NEXT_ONE];
@@ -2562,7 +2622,9 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 			int prev_y = m_currently_mutated_y - 1;
 			raster_line& prev_line = pic.raster_lines[prev_y];
 			c = GetInstructionCycles(prog.instructions[i1]);
-			if (prev_line.cycles + c <= raster_program_cycle_limit)
+			const int previousLimit = GetRasterLineSchedule(
+				pic.graphics_mode, prev_y, m_height).optimizer_cycle_limit;
+			if (prev_line.cycles + c <= previousLimit)
 			{
 				// add it to prev line but do not remove it from the current
 				prev_line.cycles += c;
@@ -2580,6 +2642,10 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 		{
 			int prev_y = m_currently_mutated_y - 1;
 			raster_line& prev_line = pic.raster_lines[prev_y];
+			const int previousLimit = GetRasterLineSchedule(
+				pic.graphics_mode, prev_y, m_height).optimizer_cycle_limit;
+			if (prog.cycles > previousLimit || prev_line.cycles > currentCycleLimit)
+				break;
 			prog.swap(prev_line);
 			m_current_mutations[E_MUTATION_SWAP_LINE_WITH_PREV_ONE]++;
 			++m_mutation_applied_count[E_MUTATION_SWAP_LINE_WITH_PREV_ONE];
@@ -2588,13 +2654,13 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 		}
 	case E_MUTATION_ADD_INSTRUCTION:
 		++m_mutation_attempt_count[E_MUTATION_ADD_INSTRUCTION];
-		if (prog.cycles + 2 <= raster_program_cycle_limit)
+		if (prog.cycles + 2 <= currentCycleLimit)
 		{
-			if (prog.cycles + 4 <= raster_program_cycle_limit && Random(2)) // 4 cycles instructions
+			if (prog.cycles + 4 <= currentCycleLimit && Random(2)) // 4 cycles instructions
 			{
 				temp.loose.instruction = (e_raster_instruction)(E_RASTER_STA + Random(3));
 				temp.loose.value = (Random(128) * 2);
-				temp.loose.target = (e_target)(Random(E_TARGET_MAX));
+				temp.loose.target = randomWritableTarget();
 
 				// More efficient insert - add at end then swap to position
 				prog.instructions.push_back(temp);
@@ -2616,7 +2682,7 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 					temp.loose.value = possible_colors[Random(possible_colors.size())];
 				}
 
-				temp.loose.target = (e_target)(Random(E_TARGET_MAX));
+				temp.loose.target = randomWritableTarget();
 				c = Random(m_picture[m_currently_mutated_y].size());
 				temp.loose.value = FindAtariColorIndex(m_picture[m_currently_mutated_y][c]) * 2;
 
@@ -2670,7 +2736,7 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 		}
 	case E_MUTATION_CHANGE_TARGET:
 		++m_mutation_attempt_count[E_MUTATION_CHANGE_TARGET];
-		prog.instructions[i1].loose.target = (e_target)(Random(E_TARGET_MAX));
+		prog.instructions[i1].loose.target = randomWritableTarget();
 		prog.cache_key = NULL;
 		m_current_mutations[E_MUTATION_CHANGE_TARGET]++;
 		++m_mutation_applied_count[E_MUTATION_CHANGE_TARGET];
@@ -2723,10 +2789,10 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 			while (Random(5) == 0)
 				++c;
 
-			if (c >= raster_program_cycle_limit)
-				c = raster_program_cycle_limit - 1;
-			x = screen_cycles[c].offset;
-			x += Random(screen_cycles[c].length);
+			if (c >= currentCycleLimit)
+				c = currentCycleLimit - 1;
+			x = currentSchedule.timing->cycles[c].offset;
+			x += Random(currentSchedule.timing->cycles[c].length);
 		}
 		if (x < 0 || x >= (int)m_width)
 			x = Random(m_width);
@@ -2767,9 +2833,9 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 							c += 4;
 					}
 					while (Random(5) == 0) ++c;
-					if (c >= raster_program_cycle_limit) c = raster_program_cycle_limit - 1;
-					xx = screen_cycles[c].offset;
-					xx += Random(screen_cycles[c].length);
+					if (c >= currentCycleLimit) c = currentCycleLimit - 1;
+					xx = currentSchedule.timing->cycles[c].offset;
+					xx += Random(currentSchedule.timing->cycles[c].length);
 				}
 				if (xx < 0 || xx >= (int)m_width) xx = Random(m_width);
 				int yy = m_currently_mutated_y; while (Random(5) == 0 && yy + 1 < (int)m_height) ++yy;
@@ -2796,9 +2862,9 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 					if (prog.instructions[k].loose.instruction <= E_RASTER_NOP) c += 2; else c += 4;
 				}
 				while (Random(5) == 0) ++c;
-				if (c >= raster_program_cycle_limit) c = raster_program_cycle_limit - 1;
-				x = screen_cycles[c].offset;
-				x += Random(screen_cycles[c].length);
+				if (c >= currentCycleLimit) c = currentCycleLimit - 1;
+				x = currentSchedule.timing->cycles[c].offset;
+				x += Random(currentSchedule.timing->cycles[c].length);
 			}
 			if (x < 0 || x >= (int)m_width) x = Random(m_width);
 			int ypix = m_currently_mutated_y; while (Random(5) == 0 && ypix + 1 < (int)m_height) ++ypix;
@@ -2871,6 +2937,8 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 			++m_selector_applied_count[mutation];
 			break;
 		}
+	case E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE:
+		break;
 	}
 }
 
@@ -2932,6 +3000,26 @@ void Evaluator::MutateRasterProgram(raster_picture* pic, RasterMutationTransacti
 		}
 	}
 
+	// Keep an ANTIC 4 attribute proposal independent from raster and initial
+	// register mutations. This makes its acceptance and eight-line cache cost
+	// measurable, and tests exactly one coupled 4x8 cell at a time.
+	if (pic->graphics_mode == GraphicsMode::Antic4 && Random(12) == 0)
+	{
+		if (transaction)
+			transaction->SaveMemory();
+		const int characterRow =
+			Random(static_cast<int>(pic->antic4_attributes.size()));
+		const int column = Random(40);
+		pic->set_antic4_attribute(characterRow, column,
+			!pic->antic4_attribute(characterRow, column));
+		m_current_mutations[E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE]++;
+		++m_mutation_attempt_count[E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE];
+		++m_mutation_applied_count[E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE];
+		++m_selector_attempt_count[E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE];
+		++m_selector_applied_count[E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE];
+		return;
+	}
+
     // Batch memory register mutations: fixed probability 1/10 always
     int mem_prob = 10;
     if (Random(mem_prob) == 0) // mutate random init mem reg
@@ -2946,7 +3034,10 @@ void Evaluator::MutateRasterProgram(raster_picture* pic, RasterMutationTransacti
 
 		int targ;
 		do {
-			targ = Random(E_TARGET_MAX);
+			const int legacyCount = E_HPOSP3 + 1;
+			targ = pic->graphics_mode == GraphicsMode::Antic4
+				&& Random(legacyCount + 1) == legacyCount
+				? E_COLOR3 : Random(legacyCount);
 		} while (targ == E_COLBAK);
 
 		pic->mem_regs_init[targ] += c;

@@ -42,21 +42,6 @@ std::uint32_t PackRGBA(unsigned char r, unsigned char g, unsigned char b)
 		| 0xFF000000u;
 }
 
-// Height the converter would choose for this source, mirroring rasta.cpp's
-// auto-height rule so the preview is framed exactly like the real target.
-int ResolveHeight(int configured, int input_width, int input_height)
-{
-	if (configured > 0)
-		return std::min(240, configured);
-	if (input_width <= 0 || input_height <= 0)
-		return 240;
-	const double iw = input_width;
-	const double ih = input_height;
-	if (iw / ih > (320.0 / 240.0))
-		return std::max(1, static_cast<int>(ih / (iw / 320.0)));
-	return 240;
-}
-
 struct BitmapDeleter {
 	void operator()(FIBITMAP* bitmap) const
 	{
@@ -90,6 +75,28 @@ private:
 
 } // namespace
 
+int ResolveTargetHeight(int configured, int input_width, int input_height)
+{
+	if (configured > 0)
+		return std::min(240, configured);
+	if (input_width <= 0 || input_height <= 0)
+		return 240;
+	const double iw = input_width;
+	const double ih = input_height;
+	if (iw / ih > (320.0 / 240.0))
+		return std::max(1, static_cast<int>(ih / (iw / 320.0)));
+	return 240;
+}
+
+int ResolveOutputHeight(GraphicsMode mode, int configured,
+	int input_width, int input_height)
+{
+	const int height =
+		ResolveTargetHeight(configured, input_width, input_height);
+	return mode == GraphicsMode::Antic4
+		? NormalizeAntic4Height(height) : height;
+}
+
 const char* PreviewStageName(PreviewStage stage)
 {
 	switch (stage) {
@@ -116,6 +123,7 @@ bool TargetPreview::Inputs::operator==(const Inputs& other) const
 {
 	return input_file == other.input_file
 		&& palette_file == other.palette_file
+		&& graphics_mode == other.graphics_mode
 		&& height == other.height
 		&& filter == other.filter
 		&& brightness == other.brightness
@@ -141,6 +149,7 @@ TargetPreview::Inputs TargetPreview::Extract(const Configuration& cfg)
 	Inputs inputs;
 	inputs.input_file = cfg.input_file;
 	inputs.palette_file = cfg.palette_file;
+	inputs.graphics_mode = cfg.graphics_mode;
 	inputs.height = cfg.height;
 	inputs.filter = cfg.rescale_filter;
 	inputs.brightness = cfg.brightness;
@@ -325,7 +334,10 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 
 	const int source_width = static_cast<int>(FreeImage_GetWidth(loaded.get()));
 	const int source_height = static_cast<int>(FreeImage_GetHeight(loaded.get()));
-	const int height = ResolveHeight(inputs.height, source_width, source_height);
+	result.input_width = source_width;
+	result.input_height = source_height;
+	const int height = ResolveOutputHeight(inputs.graphics_mode,
+		inputs.height, source_width, source_height);
 
 	// Same rescale + 24-bit conversion the converter performs.
 	BitmapPtr scaled(FreeImage_Rescale(loaded.get(), kAtariWidth, height, inputs.filter));

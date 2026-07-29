@@ -1,0 +1,127 @@
+/************************************************/
+/* RastaConverter ANTIC 4 single-frame template */
+/* Assemble with MADS.                           */
+/************************************************/
+
+	icl "no_name.h"
+	icl "output.png.opt.h"
+
+A4_CHAR_ROWS = PIC_HEIGHT/8
+A4_CHARSETS = (A4_CHAR_ROWS+2)/3
+A4_SCREEN_BYTES = A4_CHAR_ROWS*40
+A4_DISPLAY_LIST_BYTES = A4_CHAR_ROWS+5
+A4_FONT_BYTES = A4_CHARSETS*$0400
+
+	org $00
+byt2	.ds 1
+byt3	.ds 1
+
+* BASIC switch off.
+	org $2000
+	mva #$ff portb
+	rts
+	ini $2000
+
+* The screen stays inside one 4 KiB ANTIC address window.
+	org $3000
+screen
+	ins "output.png.a4.scr"
+
+	.align $0100
+display_list
+	dta $44,a(screen)
+	:A4_CHAR_ROWS-1 dta $04
+	dta $41,a(display_list)
+
+* Single-line PMG layout: 3 unused pages, missiles, then four players.
+	.align $0800
+pmgbase
+	.ds $0300
+	icl "output.png.pmg"
+
+* Keep up to ten 1 KiB character sets at a fixed, evaluator-visible address.
+	org $8000
+charset_0
+	ins "output.png.a4.fnt"
+charset_1 = charset_0+$0400
+charset_2 = charset_0+$0800
+charset_3 = charset_0+$0c00
+charset_4 = charset_0+$1000
+charset_5 = charset_0+$1400
+charset_6 = charset_0+$1800
+charset_7 = charset_0+$1c00
+charset_8 = charset_0+$2000
+charset_9 = charset_0+$2400
+
+	org $4000
+main
+	lda:cmp:req $14
+	sei
+	mva #$00 nmien
+	mva #$fe portb
+
+	mva <display_list dlptr
+	mva >display_list dlptr+1
+	mva >charset_0 chbase
+	mva #$00 chrctl
+	mva #$00 gtictl
+	mva >pmgbase pmbase
+	* The evaluator models each player at quadruple width (32 color clocks).
+	* Keep the generated hardware state identical to that model.
+	mva #$03 sizep0
+	sta sizep1
+	sta sizep2
+	sta sizep3
+	mva #$02 pmcntl
+	mva #%00111110 dmactl
+
+frame
+	* Restore the evaluator's canonical frame-entry hardware state.
+	icl "output.png.opt.ini"
+	mva >charset_0 chbase
+
+	* Wait for the VCOUNT 2->3 transition (ANTIC scanline 6), then use
+	* two WSYNCs to enter line 0 at cycle 106 of scanline 7.
+wait_vcount2
+	lda vcount
+	cmp #$02
+	bne wait_vcount2
+wait_vcount3
+	lda vcount
+	cmp #$03
+	bne wait_vcount3
+	sta wsync
+	lda #$00
+	tax
+	tay
+	sta wsync
+	* A store to WSYNC cannot halt the 6502 until its following read cycle.
+	* Sacrifice this NOP across that boundary so the first generated
+	* instruction really starts at ANTIC cycle 106, as modeled.
+	nop
+
+	icl "output.png.opt"
+
+	* Fixed frame epilogue. The last charset must never leak into the next frame.
+	mva >charset_0 chbase
+	jmp frame
+raster_code_end
+
+	* Fail assembly if a future larger raster program breaks this layout.
+	IFT screen+A4_SCREEN_BYTES > display_list
+		.error 'ANTIC4 screen overlaps display list'
+	EIF
+	IFT display_list+A4_DISPLAY_LIST_BYTES > pmgbase
+		.error 'ANTIC4 display list overlaps PMG memory'
+	EIF
+	IFT pmgbase+$0800 > main
+		.error 'ANTIC4 PMG memory overlaps raster code'
+	EIF
+	IFT raster_code_end > charset_0
+		.error 'ANTIC4 raster code overlaps character sets'
+	EIF
+	IFT charset_0+A4_FONT_BYTES > $d000
+		.error 'ANTIC4 character sets enter hardware address space'
+	EIF
+
+	run main

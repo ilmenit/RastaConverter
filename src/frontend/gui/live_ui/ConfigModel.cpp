@@ -32,6 +32,10 @@ const char* const kDitherTokens[10] = {
 // The old token is still accepted; see config.cpp.
 const char* const kObjectiveLabels[2] = {"Target picture", "Source picture"};
 const char* const kObjectiveTokens[2] = {"target", "source"};
+const char* const kGraphicsModeLabels[2] = {
+	"ANTIC 4 (text mode)", "ANTIC E (gfx mode)"
+};
+const char* const kGraphicsModeTokens[2] = {"antic4", "e"};
 
 const char* const kOptimizerLabels[3] = {"DLAS", "LAHC", "Legacy LAHC"};
 const char* const kOptimizerTokens[3] = {"dlas", "lahc", "legacy"};
@@ -127,7 +131,17 @@ std::vector<OptionDesc> BuildTable()
 			unavailable_hint, in_form, location_hint});
 	};
 
-	// --- 1 Source ----------------------------------------------------------
+	// --- 1 Source and destination -----------------------------------------
+	add("graphics_mode", "graphics_mode", "Graphics mode",
+		"Destination display format. ANTIC 4 uses five-colour character cells; "
+		"ANTIC E uses the traditional four-colour bitmap.",
+		Category::Source, Tier::Restart, false,
+		[](const Configuration& c) {
+			return c.graphics_mode != Defaults().graphics_mode;
+		},
+		[](const Configuration& c) {
+			return kGraphicsModeTokens[GraphicsModeIndex(c.graphics_mode)];
+		});
 	add("input", "i", "Input image",
 		"Source image to convert. Any format FreeImage reads; drag and drop works too.",
 		Category::Source, Tier::Restart, false,
@@ -461,7 +475,7 @@ std::vector<OptionDesc> BuildTable()
 const char* CategoryTitle(Category category)
 {
 	switch (category) {
-	case Category::Source:    return "Source";
+	case Category::Source:    return "Source and destination";
 	case Category::Algorithm: return "Algorithm";
 	case Category::Colour:    return "Colour";
 	case Category::Details:   return "Details mask";
@@ -529,6 +543,7 @@ Configuration DefaultConfiguration()
 	c.threads = 1;
 	c.width = 160;
 	c.height = -1; // auto
+	c.graphics_mode = GraphicsMode::AnticE;
 	c.max_evals = 1000000000000000000ULL;
 	c.rescale_filter = FILTER_BOX;
 	c.init_type = E_INIT_RANDOM;
@@ -639,6 +654,8 @@ std::string DisplayValue(const OptionDesc& option, const Configuration& cfg)
 		return option.modified(cfg) ? "on" : "off";
 	if (option.id == "height")
 		return cfg.height <= 0 ? "auto" : std::to_string(cfg.height);
+	if (option.id == "graphics_mode")
+		return kGraphicsModeLabels[GraphicsModeIndex(cfg.graphics_mode)];
 	if (option.id == "seed")
 		return cfg.initial_seed == 0 ? "random" : std::to_string(cfg.initial_seed);
 	if (option.id == "max_evals")
@@ -672,6 +689,33 @@ int FilterIndex(FREE_IMAGE_FILTER filter)
 			return i;
 	}
 	return 0;
+}
+
+int GraphicsModeIndex(GraphicsMode mode)
+{
+	return mode == GraphicsMode::Antic4 ? 0 : 1;
+}
+
+void ApplyGraphicsModeChoice(Configuration& cfg, GraphicsMode mode,
+	bool& antic_e_dual_mode)
+{
+	if (mode == cfg.graphics_mode)
+		return;
+	if (cfg.graphics_mode == GraphicsMode::AnticE)
+	{
+		antic_e_dual_mode = cfg.dual_mode;
+	}
+	cfg.graphics_mode = mode;
+	if (mode == GraphicsMode::Antic4)
+	{
+		if (cfg.height > 0)
+			cfg.height = NormalizeAntic4Height(cfg.height);
+		cfg.dual_mode = false;
+	}
+	else
+	{
+		cfg.dual_mode = antic_e_dual_mode;
+	}
 }
 
 int DetailsModeIndex(const std::string& mode)

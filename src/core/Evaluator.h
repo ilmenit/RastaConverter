@@ -52,6 +52,7 @@ private:
 	std::vector<unsigned char> m_saved;
 	std::vector<unsigned> m_touched;
 	unsigned char m_memory_snapshot[E_TARGET_MAX]{};
+	std::vector<uint64_t> m_attribute_snapshot;
 	bool m_memory_saved = false;
 	unsigned long long m_allocator_epoch = 0;
 };
@@ -198,6 +199,8 @@ struct EvalGlobalState
 	std::atomic<unsigned long long> m_insn_cache_data_bytes{0};
 	std::atomic<unsigned long long> m_cache_evaluations{0};
 	std::atomic<unsigned long long> m_cache_recomputed_lines{0};
+	std::atomic<unsigned long long> m_antic4_attribute_cache_evaluations{0};
+	std::atomic<unsigned long long> m_antic4_attribute_recomputed_lines{0};
 	std::atomic<unsigned long long> m_cache_max_recomputed_lines{0};
 	std::atomic<unsigned long long> m_cache_propagation_span{0};
 	std::atomic<unsigned long long> m_cache_max_propagation_span{0};
@@ -458,6 +461,7 @@ private:
 	const distance_t *const *m_picture_all_errors;
 	bool m_use_dual_neon = false;
 	const screen_line *m_picture;
+	const raster_picture* m_active_raster_picture = nullptr;
 	const screen_line *m_scoring_picture = nullptr;
 	// Kept for the source-referenced OKLab readouts (EvaluateUnweightedSource,
 	// CompareStructuredWindow). It is no longer part of scoring: the objectives
@@ -485,6 +489,8 @@ private:
 	unsigned long long m_local_cache_hash_blocks = 0;
 	unsigned long long m_local_cache_evaluations = 0;
 	unsigned long long m_local_cache_recomputed_lines = 0;
+	unsigned long long m_local_antic4_attribute_cache_evaluations = 0;
+	unsigned long long m_local_antic4_attribute_recomputed_lines = 0;
 	unsigned long long m_local_cache_max_recomputed_lines = 0;
 	unsigned long long m_local_cache_propagation_span = 0;
 	unsigned long long m_local_cache_max_propagation_span = 0;

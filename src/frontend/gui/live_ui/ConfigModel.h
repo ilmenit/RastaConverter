@@ -124,6 +124,8 @@ std::string DisplayValue(const OptionDesc& option, const Configuration& cfg);
 
 extern const char* const kDistanceLabels[6];
 extern const char* const kDistanceTokens[6];
+extern const char* const kGraphicsModeLabels[2];
+extern const char* const kGraphicsModeTokens[2];
 extern const char* const kDitherLabels[10];
 extern const char* const kDitherTokens[10];
 extern const char* const kObjectiveLabels[2];
@@ -142,6 +144,12 @@ extern const char* const kDetailsModeTokens[3];
 
 // Index of `filter` in kFilterValues, or 0.
 int FilterIndex(FREE_IMAGE_FILTER filter);
+// ANTIC 4 is listed first in the GUI even though ANTIC E is the default.
+int GraphicsModeIndex(GraphicsMode mode);
+// Applies a setup-screen mode change while preserving the ANTIC E-only
+// dual-frame choice that ANTIC 4 temporarily overrides.
+void ApplyGraphicsModeChoice(Configuration& cfg, GraphicsMode mode,
+	bool& antic_e_dual_mode);
 // Index of `mode` in kDetailsModeTokens, or 0.
 int DetailsModeIndex(const std::string& mode);
 

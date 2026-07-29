@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "Desktop.h"
+#include "TargetPreview.h"
 
 namespace rc_live_ui {
 namespace setup {
@@ -73,21 +74,42 @@ void DrawSourceSection(SetupState& state, FileDialogs& dialogs, SDL_Window* wind
 	if (!BeginForm("source"))
 		return;
 
+	if (Row("graphics_mode", cfg)) {
+		int mode = GraphicsModeIndex(cfg.graphics_mode);
+		if (ComboTokens("##graphics_mode", &mode, kGraphicsModeLabels, 2)) {
+			ApplyGraphicsModeChoice(cfg,
+				mode == 0 ? GraphicsMode::Antic4 : GraphicsMode::AnticE,
+				state.antic_e_dual_mode);
+			state.height_auto = cfg.height <= 0;
+		}
+	}
+
 	if (Row("height", cfg)) {
 		ImGui::PushID("height");
 		const float check_width = ImGui::CalcTextSize("Auto").x
 			+ ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x * 2.0f;
 		ImGui::BeginDisabled(state.height_auto);
-		int height = state.height_auto ? 240 : cfg.height;
-		if (ValueSliderInt("h", &height, 16, 240, "%d",
-				ImGui::GetContentRegionAvail().x - check_width))
-			cfg.height = height;
+		int height = state.height_auto
+			? ResolveOutputHeight(cfg.graphics_mode, -1,
+				state.input_width, state.input_height)
+			: cfg.height;
+		if (ValueSliderInt("h", &height,
+				cfg.graphics_mode == GraphicsMode::Antic4 ? 8 : 16, 240, "%d",
+				ImGui::GetContentRegionAvail().x - check_width)) {
+			cfg.height = cfg.graphics_mode == GraphicsMode::Antic4
+				? NormalizeAntic4Height(height) : height;
+		}
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 		if (ImGui::Checkbox("Auto", &state.height_auto))
-			cfg.height = state.height_auto ? -1 : 240;
+			cfg.height = state.height_auto ? -1 : height;
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Derive the height from the source aspect ratio.");
+			ImGui::SetTooltip(state.height_auto
+				? "Derived from the source aspect ratio: %d scanlines."
+				: cfg.graphics_mode == GraphicsMode::Antic4
+					? "ANTIC 4 uses complete 8-scanline character rows."
+					: "Derive the height from the source aspect ratio.",
+				height);
 		ImGui::PopID();
 	}
 
@@ -145,6 +167,11 @@ void DrawSourceSection(SetupState& state, FileDialogs& dialogs, SDL_Window* wind
 	}
 
 	EndForm();
+
+	if (!FilterActive() && cfg.graphics_mode == GraphicsMode::Antic4)
+		InlineNote("ANTIC 4 uses 160-pixel-wide text graphics and complete "
+			"8-scanline character rows. It supports one frame.",
+			theme::kTextMuted);
 }
 
 // Everything that decides what colours the picture ends up with: the
@@ -477,8 +504,11 @@ void DrawDualGroup(SetupState& state)
 	if (!BeginForm("dual"))
 		return;
 
+	const bool unavailable = cfg.graphics_mode == GraphicsMode::Antic4;
+	ImGui::BeginDisabled(unavailable);
 	if (Row("dual", cfg))
 		ImGui::Checkbox("##dual", &cfg.dual_mode);
+	ImGui::EndDisabled();
 
 	// All sub-options hide themselves while dual is off (design §7.3).
 	{
@@ -538,6 +568,9 @@ void DrawDualGroup(SetupState& state)
 
 	EndForm();
 
+	if (!FilterActive() && unavailable)
+		InlineNote("Dual-frame output is unavailable in ANTIC 4 mode.",
+			theme::kTextMuted);
 	if (!FilterActive() && cfg.dual_mode && cfg.after_dual_steps == "generate") {
 		InlineNote("Generating a fresh frame B costs a second bootstrap of the same "
 			"length before alternation begins.", theme::kTextMuted);
@@ -563,7 +596,15 @@ std::string SectionSummary(Category category, const Configuration& cfg,
 
 	switch (category) {
 	case Category::Source:
-		append(state.height_auto ? "auto height" : value("height") + " lines");
+		append(value("graphics_mode"));
+		if (state.height_auto) {
+			append("auto height ("
+				+ std::to_string(ResolveOutputHeight(cfg.graphics_mode,
+					-1, state.input_width, state.input_height))
+				+ " lines)");
+		} else {
+			append(value("height") + " lines");
+		}
 		append(value("filter"));
 		append(FileName(cfg.palette_file));
 		break;

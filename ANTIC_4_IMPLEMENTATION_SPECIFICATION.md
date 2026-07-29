@@ -2,7 +2,7 @@
 
 Status: proposed implementation plan  
 Target branch: `antic-mode-4`  
-Scope: single-frame RastaConverter output, 160×240 pixels
+Scope: single-frame RastaConverter output, 160 pixels wide and 8–240 scanlines
 
 ## 1. Purpose
 
@@ -21,7 +21,8 @@ global playfield color, selected locally by bit 7 of each screen byte.
 
 The first usable implementation shall:
 
-- accept the existing 160×240 input and optimizer workflow;
+- accept the existing 160-pixel-wide input and optimizer workflow, with the
+  target height expressed as complete 8-scanline character rows;
 - provide an explicit `antic4` graphics-mode option;
 - model ANTIC 4 DMA timing per scanline;
 - optimize raster color changes, player graphics, and the ANTIC 4 cell
@@ -35,7 +36,7 @@ The first usable implementation shall:
 
 - ANTIC 4 combined with dual-frame mode;
 - arbitrary display widths, horizontal scrolling, or narrow/wide playfields;
-- arbitrary image heights; the first version supports 160×240 only;
+- sub-character-row heights: ANTIC 4 output height must be a multiple of 8;
 - missiles, player overlap modes, fifth-player mode, or new PRIOR modes beyond
   the priority behavior already supported by RastaConverter;
 - automatic character reuse or character-set compression;
@@ -83,11 +84,11 @@ mode-4 attribute.
 
 ### 4.2 Screen and font geometry
 
-For a 160×240 image:
+For an output height `H`, where `8 <= H <= 240` and `H % 8 == 0`:
 
 - screen width: 40 bytes;
-- character rows: 30;
-- screen memory: 1,200 bytes;
+- character rows: `R = H / 8` (1–30);
+- screen memory: `40 * R` bytes (40–1,200);
 - glyph scanlines per character: 8;
 - one mode-4 character set: 1,024 bytes, containing 128 glyphs.
 
@@ -103,7 +104,8 @@ character row 2 in group -> glyphs 80..119
 glyphs 120..127          -> unused
 ```
 
-Thirty character rows therefore require 10 character sets, or 10 KiB. For
+The number of character sets is `ceil(R / 3)`, from one through ten. A
+240-line picture therefore uses all 10 sets and 10 KiB. For
 screen cell `(cell_x, char_y)`:
 
 ```text
@@ -133,13 +135,13 @@ saving.
 
 “Changing the charset” at runtime means changing `CHBASE` once per three-row
 group. The program does not rewrite font RAM while the picture is displayed.
-All ten character sets are generated before display.
+All required character sets are generated before display.
 
 This layout gives the same pixel freedom as a 2-bpp bitmap inside the legal
 ANTIC-4 color set: every cell can have arbitrary glyph bytes, with no glyph
 shared by another cell in the same three-row group. It costs 640 unused bytes
-overall (8 glyphs × 8 bytes × 10 sets), which is a good trade for simple,
-independent encoding.
+in a 240-line picture (8 glyphs × 8 bytes × 10 sets), which is a good trade
+for simple, independent encoding.
 
 ### 4.3 DMA timing
 
@@ -148,6 +150,12 @@ The supported hardware profile is:
 - normal-width playfield;
 - ANTIC display-list DMA enabled;
 - single-line player/missile DMA enabled;
+- quadruple-width players (`SIZEP0..3 = $03`), matching the evaluator's
+  32-color-clock player model;
+- one optimized `HPOSP` value per player for the complete frame; ANTIC 4
+  raster programs do not move players mid-scanline, because GTIA's delayed
+  position latch and active shifter state cannot be represented by the
+  evaluator's pixel-state model without producing preview-inaccurate streaks;
 - no horizontal scrolling;
 - one LMS at the beginning of screen memory;
 - 40 mode-4 cells per row.
@@ -210,6 +218,12 @@ scanline. The timing map must therefore preserve negative visible-X offsets; a
 table built only from cycles 0–113 would place early register writes
 incorrectly.
 
+Available-slot positions are ANTIC CPU cycles, while evaluator offsets are
+relative to the normal-width visible playfield. Convert a slot with
+`(slot - 24) * 2`, not `(slot - 16) * 2`. A store changes GTIA on its fourth
+CPU slot and first affects the following color clock; applying it at opcode
+fetch shifts every transition and is not hardware-equivalent.
+
 The canonical available CPU-slot arrays in that logical window are:
 
 ```text
@@ -268,8 +282,24 @@ without the extension remain valid.
 For the first version:
 
 - `graphics_mode=e` follows the current code path exactly;
-- `graphics_mode=antic4` requires 160×240 and single-frame mode;
+- `graphics_mode=antic4` requires a 160-pixel-wide, single-frame target whose
+  height is a multiple of 8 in the range 8–240;
 - `graphics_mode=antic4` with `/dual on` is an error.
+
+The setup GUI exposes the same choice as the first option under **Source and
+destination**, labeled `ANTIC 4 (text mode)` and `ANTIC E (gfx mode)`.
+Selecting ANTIC 4 turns off/disables dual-frame output but does not replace the
+height choice. Auto height first uses the same aspect-ratio rule as ANTIC E,
+then rounds to the nearest complete 8-scanline character row and clamps to
+8–240. An explicit height is normalized by the same row rule. The GUI displays
+the effective height and explains the row constraint. Switching modes preserves
+Auto height; an explicit non-multiple selected before switching to ANTIC 4 is
+normalized once. The selection participates in search, changed-option
+tracking, presets, collapsed summaries, and copied command lines.
+
+Recent-conversion cards show a persistent `TEXT` badge for ANTIC 4 and `GFX`
+for ANTIC E. The value is read from the saved raster-program header, with the
+recorded command line as a fallback for older partial runs.
 
 Use a typed enum internally rather than repeated string comparisons:
 
@@ -345,18 +375,23 @@ This is required for byte-for-byte legacy output compatibility.
 
 ### 6.2 Store the cell attributes with the candidate picture
 
-Add 30 packed attribute rows to `raster_picture`:
+Add mode-conditional packed attribute rows to `raster_picture`:
 
 ```cpp
-std::array<uint64_t, 30> antic4_attributes{};
+std::vector<uint64_t> antic4_attributes;
 ```
 
 Only the low 40 bits of each row are used. Bit `x` selects `COLPF3` for the
 cell at `(x, char_y)`; a clear bit selects `COLPF2`.
 
+The vector is empty in mode E and has exactly `H / 8` entries in ANTIC 4.
+Validate that invariant at candidate, load, evaluation, and export boundaries. This
+avoids copying unused attribute payload through the frequent mode-E
+`raster_picture` copy paths. Copy-on-write storage is not justified initially.
+
 Keeping attributes inside `raster_picture` makes them part of candidate copy,
 accept/reject, publication, migration, save, and resume behavior. Extend those
-operations explicitly. For mode E the array remains zero and is ignored.
+operations explicitly.
 
 Do not store glyph bytes in optimizer state. Glyph data is a lossless encoding
 of the selected per-pixel playfield targets and can be generated when saving.
@@ -372,16 +407,11 @@ struct DmaTimingProfile {
     int cpu_to_screen_count;
 };
 
-enum RasterFixedEvent : uint8_t {
-    RasterFixedEventNone = 0,
-    RasterFixedEventChbase = 1
-};
-
 struct RasterLineSchedule {
     const DmaTimingProfile* dma;
     int optimizer_cycle_limit;
     int suffix_cycles;
-    uint8_t fixed_events;
+    bool changes_chbase;
 };
 ```
 
@@ -408,6 +438,9 @@ profile. A helper selected by `(graphics_mode, y)` returns the complete
 schedule, deriving the optimizer limit from CPU slots minus suffix and fixed
 events.
 
+There is deliberately no general fixed-event bit field. `CHBASE` is the only
+fixed event, and its charset number is derived from `y`.
+
 Do not create a general ANTIC emulator in the C++ code. These four DMA profiles
 and the small schedule overlay are sufficient for the supported output modes.
 
@@ -430,7 +463,7 @@ The existing three-cycle zero-page `CMP` tail can be retained:
 | LMS badline | 25 | 22 | 3-cycle `CMP` |
 | Badline | 27 | 24 | 3-cycle `CMP` |
 | Continuation | 60 | 54 | extra 3-cycle `CMP` + existing 3-cycle `CMP` |
-| Continuation with `CHBASE` | 60 | 48 | 6-cycle event + both `CMP`s |
+| Continuation with `CHBASE` | 60 | 48 | 3-cycle safety delay + 6-cycle event + 3-cycle `CMP` |
 
 This deliberately limits continuation-line optimizer instructions to the
 current 54-cycle maximum. It avoids adding odd-length optimizer instructions
@@ -449,11 +482,11 @@ showing exact line alignment.
 
 Each character set covers three character rows, so `CHBASE` changes every 24
 visible scanlines. Set 0 is installed before the raster display starts. Sets
-1–9 are selected by fixed `LDA #value` / `STA CHBASE` code scheduled late on
-lines:
+1 through `ceil(R / 3) - 1` are selected by fixed `LDA #value` /
+`STA CHBASE` code scheduled late on applicable lines:
 
 ```text
-23, 47, 71, ..., 215
+23, 47, 71, ... while the following scanline is still below H
 ```
 
 In the supported normal-width profile, the last current-line character-data DMA
@@ -463,23 +496,26 @@ hardware write. Select a slot whose effective time lies strictly between those
 fetch regions, and verify it with AltirraBridge. Reserve all six instruction
 cycles before giving the remaining budget to the optimizer.
 
-With the initial suffix policy, a `CHBASE` switching line therefore has a
-48-cycle optimizer limit:
+The dedicated AltirraBridge two-font test found that the initially proposed
+cycle-98 hardware write corrupts the last character cell on each switching
+line, at logical pixels 152–159. The source-derived two-cycle register queue
+was correct, but the final cell still consumed the font address after that
+point. The verified schedule therefore inserts a three-cycle zero-page `BIT`
+before the fixed load/store and keeps a 48-cycle optimizer limit:
 
 ```text
-48 optimizer/filler + 6 LDA/STA CHBASE + 3 CMP + 3 CMP = 60
+48 optimizer/filler + 3 BIT + 6 LDA/STA CHBASE + 3 CMP = 60
 ```
 
 The fixed sequence must occupy the reserved late slot; it must not merely be
 inserted wherever an optimizer mutation leaves a six-cycle gap.
 
-The intended first schedule starts the `LDA` after exactly 48 executable CPU
-slots from the line's WSYNC-release boundary. In the source-verified
-continuation-line map, the `STA CHBASE` write cycle then lands at ANTIC cycle 98
-and becomes effective at cycle 100: after the final cycle-99 fetch and well
-before the next row's cycle-21 character-data fetch. Treat these positions as
-assertions. This transition is not bridge-verified until the dedicated
-two-font screenshot test passes.
+The verified schedule starts `BIT` after exactly 48 executable CPU slots from
+the line's WSYNC-release boundary. The `STA CHBASE` hardware write lands at
+ANTIC cycle 102 and the queued change is visible at cycle 104, well before the
+following row's cycle-21 character-data fetch. Treat these positions as
+assertions. The test must distinguish every adjacent font and compare all
+pixels on both the switching line and following badline.
 
 Treat a `CHBASE` update as a fixed scheduling event, not as an optimizer
 mutation. Do not use DLI handlers in the first implementation; keeping the
@@ -500,15 +536,19 @@ emitted `.rp`, delimit it explicitly:
 
 ```asm
 ; ANTIC4_FIXED_CHBASE_BEGIN
+        bit byt2
         lda #>charset_1
         sta CHBASE
 ; ANTIC4_FIXED_CHBASE_END
 ```
 
-The raster-program loader must skip these tagged physical instructions and
-reconstruct the fixed event from graphics mode and line number. Otherwise it
-would reload the `LDA` as a mutable optimizer instruction while failing to
-represent `STA CHBASE`, causing cycle and A-state drift after resume.
+The raster-program loader must validate the exact tagged load/store for the
+line-derived charset, skip those physical instructions, and reconstruct the
+fixed event from graphics mode and line number. Reject malformed, nested, or
+unexpected tagged blocks; do not trust comments as arbitrary skip delimiters.
+Otherwise it could reload the `LDA` as a mutable optimizer instruction while
+failing to represent `STA CHBASE`, causing cycle and A-state drift after
+resume.
 
 Do not ship until a safe slot is demonstrated at every transition. Using more
 character sets would increase switching frequency without fixing an unsafe
@@ -525,24 +565,27 @@ The generator contract is:
 1. After cold startup, disable interrupts and OS display-list shadow activity
    before direct ANTIC setup.
 2. During initialization or vertical blank, install the display-list pointer,
-   DMA/PMG configuration, `CHACTL=0`, `PRIOR`, initial color/position
-   registers, and `CHBASE` for charset 0.
+   DMA/PMG configuration, `CHACTL=0`, `PRIOR`, `SIZEP0..3=$03`, initial
+   color/position registers, and `CHBASE` for charset 0.
 3. Finish initialization by placing A, X, Y, and the tracked hardware
    registers in the exact canonical entry state used by the evaluator.
 4. Synchronize with `VCOUNT` and a calibrated delay/WSYNC sequence so logical
    line 0 begins at the execution-window boundary: ANTIC cycle 106 of the
    scanline preceding the first LMS badline, represented by timing position
-   `-8`.
-5. Execute lines 0–239 and leave line 239 at the same cycle-105 boundary as
-   every other raster line.
+   `-8`. Because WSYNC holds the following read cycle after that instruction
+   has already started, place one fixed sacrificial `NOP` immediately after
+   the final `STA WSYNC`; the generated line-0 instruction stream begins
+   after that NOP.
+5. Execute lines `0..H-1` and leave line `H-1` at the same cycle-105 boundary
+   as every other raster line.
 6. Enter the frame epilogue during vertical blank. Restore charset 0 and all
    canonical initial raster state before waiting for the next line-0 phase.
-   In particular, line 215 leaves `CHBASE` on charset 9; it must not remain
-   there for the next frame.
+   In particular, the last selected charset must not remain active for the
+   next frame.
 
 The evaluator models one canonical frame. It initializes A/X/Y and
 `mem_regs_init` exactly as the generator does and does not carry the outgoing
-state of line 239 directly into line 0. Fixed frame-reset code is outside the
+state of line `H-1` directly into line 0. Fixed frame-reset code is outside the
 optimized raster lines.
 
 The ANTIC-4 generator may reuse the broad structure of the current mode-E
@@ -550,7 +593,7 @@ bootstrap, but its VCOUNT target and delay constants are not assumed correct.
 Calibrate them against the ANTIC-4 display list and verify:
 
 - cold startup to the first complete frame;
-- line 239 through vertical blank to the next line 0;
+- line `H-1` through vertical blank to the next line 0;
 - identical line-0 pixels and register timing on consecutive frames.
 
 ## 8. Evaluation and optimization
@@ -590,19 +633,23 @@ Flip ANTIC 4 cell attribute
 
 The mutation:
 
-- chooses one of the 1,200 cells;
+- chooses one of the `40 * (H / 8)` cells;
 - toggles its packed bit;
+- is an attribute-only proposal, not bundled with a raster or initial-register
+  mutation;
 - affects exactly the eight scanlines belonging to that character row;
 - participates in normal accept/reject and mutation statistics;
 - is disabled in mode E.
 
-Initialize the attribute mask once when the initial `raster_picture` is built,
-using the run's existing seeded RNG. Worker/island copies inherit that same
-picture; do not add a separate per-island initialization path. Use all-zero
-attributes for deterministic unit and bridge tests. A smarter initializer can
-be added later if measurements show it is worthwhile.
+Initialize all attributes to zero. This gives a mode-E-like baseline, makes the
+benefit of introducing `COLPF3` measurable, and consumes no additional seeded
+RNG values in mode E. Worker/island copies inherit the same picture. Random or
+image-informed initialization can be considered only after correctness and
+quality measurements.
 
 The initial implementation should use a fixed, modest mutation probability.
+Report its attempts, acceptance, and line-cache recomputation separately from
+ordinary raster mutations so the expected eight-line cost remains visible.
 Do not add adaptive cell-block mutation strategies until single-bit mutation
 quality and cost have been measured.
 
@@ -638,8 +685,8 @@ swap A and B:
 
 This applies to the current copy/push/swap mutations, mutation chains,
 initializers, raster-program loading, optimization passes, and structured-solver
-insertions. A line numbered 23, 47, ..., 215 uses the 48-cycle switching limit,
-not the ordinary 54-cycle continuation limit.
+insertions. A line numbered 23, 47, ... uses the 48-cycle switching limit only
+when another visible scanline follows; the final line never switches charset.
 
 Reject an illegal mutation without modifying the candidate. Do not silently
 trim instructions: trimming changes instruction order, register state, and the
@@ -669,8 +716,13 @@ First cache-enabled milestone:
 This is preferable to global cache invalidation. It also avoids putting all
 1,200 attributes in every line key.
 
+Adding one 64-bit field to the common cache key may affect mode E. Keep the
+shared implementation initially, but define the compatibility target as no
+measurable/material regression and benchmark seeded mode-E throughput and
+cache residency. Do not create separate cache implementations without evidence.
+
 Any candidate-copy or undo optimization must copy or restore the changed
-64-bit attribute row. It need not copy all 30 rows for a one-cell mutation.
+64-bit attribute row. It need not copy all `H / 8` rows for a one-cell mutation.
 
 ## 9. Output encoding
 
@@ -681,8 +733,8 @@ In ANTIC 4 mode save:
 ```text
 <output>.rp / <output>.opt       raster programs, as today
 <output>.pmg                     player data, as today
-<output>.a4.scr                  1,200-byte mode-4 screen
-<output>.a4.fnt                  ten consecutive 1 KiB character sets
+<output>.a4.scr                  40 * (H / 8) byte mode-4 screen
+<output>.a4.fnt                  ceil((H / 8) / 3) consecutive 1 KiB sets
 <output>.png                     preview, as today
 <output>.optstate                optimizer history plus optional ANTIC-4 state
 ```
@@ -696,15 +748,16 @@ after the existing history values:
 ```text
 ANTIC4_STATE 1
 graphics_mode antic4
-attribute_rows 30
-<30 hexadecimal 40-bit masks, one per line>
+attribute_rows <H / 8>
+<H / 8 hexadecimal 40-bit masks, one per character row>
 ```
 
 This requires passing the saved `raster_picture` to `SaveOptimizerState`.
 Loading rules are:
 
 - end-of-file after the legacy history is a valid old mode-E state;
-- ANTIC 4 resume requires the tagged block and exactly 30 valid 40-bit masks;
+- ANTIC 4 resume requires the tagged block and exactly `H / 8` valid 40-bit
+  masks;
 - a run configured for mode E rejects an `antic4` tagged block;
 - unknown block versions fail with a clear error.
 
@@ -735,13 +788,13 @@ not be silently rewritten.
 Use:
 
 - one `$44` mode-4 instruction with LMS;
-- 29 further `$04` mode-4 row instructions;
+- `H / 8 - 1` further `$04` mode-4 row instructions;
 - one `$41` JVB instruction.
 
-Place the 1,200-byte screen so it does not cross ANTIC's 4 KiB playfield
+Place the variable-size screen so it does not cross ANTIC's 4 KiB playfield
 address wrap; 4 KiB alignment is the simplest rule. Align every character set
-to 1 KiB. The assembly template may place the ten sets consecutively when the
-first is 1 KiB-aligned. Keep the 35-byte display list within one 1 KiB
+to 1 KiB. The assembly template places the required sets consecutively when the
+first is 1 KiB-aligned. Keep the `H / 8 + 5` byte display list within one 1 KiB
 display-list page; aligning its start is the simplest generator rule.
 
 The generated program must explicitly initialize `CHACTL=0`, the first
@@ -762,7 +815,7 @@ AltirraBridge is the display oracle. The existing PoC already randomizes:
 - character data;
 - four player bitmaps at fixed, non-overlapping positions;
 - initial playfield and player colors;
-- WSYNC-delimited, per-line color-register writes.
+- a continuous, full-budget 240-line raster kernel with color-register writes.
 
 The PoC deliberately forces background playfield data under the players and
 uses `PRIOR=0`. It does not validate the generated program's current priority
@@ -780,10 +833,12 @@ Before using the PoC as an acceptance gate, make its frame phase explicit:
 2. install all RAM and hardware state while paused;
 3. make the test kernel restore a canonical register/`CHBASE` state on every
    frame, rather than relying on colors left by the preceding frame;
-4. add a RAM completion counter or marker written only after line 239;
+4. add a RAM frame counter and fixed completion signature written only after
+   line 239;
 5. run enough gated frames to obtain at least two completed canonical frames;
-6. issue a read/ping after `FRAME`, validate the completion marker, then capture
-   RAWSCREEN.
+6. issue a read/ping after `FRAME`, require the signature and a counter advance
+   of at least two, record the final counter value associated with the capture,
+   then capture RAWSCREEN.
 
 The bridge protocol already makes the command following `FRAME` wait for the
 frame gate, but the explicit pause/setup/marker sequence also proves that the
@@ -824,15 +879,18 @@ failure bundle is the model.
 - render with the legal four-color set for each cell;
 - support `COLPF3` raster writes;
 - initially disable line-result caching in ANTIC 4 mode;
-- compare randomized evaluator output with the PoC/AltirraBridge.
+- unit-test target legality and compare software rendering with a small
+  in-memory ANTIC 4 encoder.
 
 ### Milestone 3: output and runnable program
 
 - write `.a4.scr` and `.a4.fnt`;
+- perform the first full evaluator/export-to-Altirra differential comparison;
 - add the ANTIC 4 display-list/generator template;
 - implement and verify cold-start and steady-state frame bootstrap;
 - schedule and bridge-verify every `CHBASE` change and the frame reset to set 0;
-- produce a runnable 160×240 program;
+- produce runnable programs at representative short, automatic, and 240-line
+  heights;
 - require exact AltirraBridge screenshots for deterministic test cases.
 
 At this milestone the hardware path is proven end to end, even though the
@@ -855,7 +913,8 @@ schemes be considered.
 
 - all four glyph values with attribute clear and set;
 - screen/glyph packing at character-set boundaries;
-- correct glyph indices for all 30 character rows;
+- correct glyph indices for every character row, including partial final
+  three-row charset groups;
 - `E_COLOR3` register name and serialization;
 - mode-E and all three ANTIC-4 cycle counts;
 - legal instruction limits for all four ANTIC-4 scheduling cases;
@@ -867,6 +926,9 @@ schemes be considered.
 - a switching-line fixed event produces the same outgoing A before and after
   save/resume;
 - ANTIC-4 export rejects an illegal PF2/PF3 target/attribute combination.
+- dead-load optimization invalidates instruction cache keys and the final
+  preview, PMG, screen, and font artifacts are re-rendered from the exact
+  optimized program written to `.opt`.
 
 ### Timing-model tests
 
@@ -879,21 +941,28 @@ schemes be considered.
   two- and four-cycle sequences before, within, and after visible pixels;
 - assert character-name cycles 18–96, character-data cycles 21–99, badline
   refresh at 98, and continuation refresh at 26–58 every four cycles;
-- assert the switching-line `STA CHBASE` write at cycle 98, effective update at
-  cycle 100, and total line completion at cycle 105.
+- assert the switching-line `STA CHBASE` write at cycle 102, effective update
+  at cycle 104, and total line completion at cycle 105;
+- retain a regression proving that the earlier cycle-98 write corrupts the
+  final cell, so the safety delay is not accidentally removed.
 
 ### Regression tests
 
 - existing mode-E fixture outputs remain unchanged;
 - mode-E `.rp.ini` does not gain a `COLOR3` initialization;
 - mode-E performance does not take the ANTIC-4 uncached path;
+- seeded mode-E optimizer behavior consumes the same RNG sequence;
+- benchmark the enlarged common cache key and require no material throughput
+  or cache-residency regression;
 - save/resume preserves graphics mode and all attributes;
 - cold startup and steady-state frame entry produce the same evaluator state;
-- unsupported dual/size combinations report an error.
+- unsupported dual/width combinations report an error and illegal heights are
+  normalized consistently.
 
 ### Emulator tests
 
-- deterministic simple patterns for each playfield register;
+- deterministic simple patterns for each playfield register at more than one
+  legal height;
 - PF2/PF3 split patterns proving bit-7 behavior;
 - color writes before, during, and after the visible region;
 - first LMS badline, ordinary badlines, and continuation lines;
@@ -923,15 +992,20 @@ profiling.
 ### Character-set switching
 
 An incorrectly timed `CHBASE` write can corrupt part of a row. Make every
-transition an emulator test. If the reserved cycle-98 write does not pass,
-correct the scheduler or timing model; increasing the number of character sets
-does not solve the unsafe-write problem.
+transition an emulator test. The original cycle-98 write demonstrably corrupts
+the final cell; retain the verified safety delay. Increasing the number of
+character sets does not solve an unsafe-write problem.
 
 ### Memory use
 
-The straightforward layout costs 10 KiB of font data plus 1,200 bytes of
-screen data. This is acceptable for the first version and substantially simpler
-than character deduplication.
+The straightforward layout costs up to 10 KiB of font data plus 1,200 bytes of
+screen data at 240 lines; shorter outputs allocate only the required sets and
+screen rows. This is acceptable and substantially simpler than character
+deduplication.
+
+The assembly template must assert that the screen, display list, 2 KiB PMG
+region, worst-case raster code, and maximum 10 KiB font block do not overlap and that
+none enters `$D000-$D7FF`.
 
 ### Existing enum assumptions
 
@@ -943,7 +1017,8 @@ enabling ANTIC 4.
 
 ANTIC 4 is ready for normal experimental use when:
 
-- `/graphics_mode antic4` completes a 160×240 single-frame conversion;
+- `/graphics_mode antic4` completes automatic-height, explicit short-height,
+  and 240-line single-frame conversions;
 - it emits runnable screen, font, PMG, and raster-program artifacts;
 - the generated program displays exactly as the internal evaluator predicts;
 - cold startup and consecutive steady-state frames have identical line-0 phase

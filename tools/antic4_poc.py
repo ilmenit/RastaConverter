@@ -3,7 +3,7 @@
 
 This is intentionally a proof of concept, not a second emulator.  It exercises
 random mode 4 character data, the bit-7 PF2/PF3 attribute, four randomized
-players, and a WSYNC-delimited randomized color-register program.
+players, and a continuous full-budget randomized color-register program.
 """
 
 from __future__ import annotations
@@ -23,9 +23,13 @@ WIDTH = 160
 HEIGHT = 240
 DL_ADDR = 0x1000
 SCREEN_ADDR = 0x2000
-FONT_ADDR = 0x3000
+FONT_ADDR = 0x6000
 PMBASE = 0x40
-CODE_ADDR = 0x5000
+CODE_ADDR = 0x9000
+FRAME_MARKER = 0x0600
+FRAME_SIGNATURE = 0x0601
+PLAYER_SCALE = 4
+PLAYER_WIDTH = 8 * PLAYER_SCALE
 
 COLOR_REGS = tuple(range(0xD012, 0xD01B))
 PF_REGS = (0xD016, 0xD017, 0xD018, 0xD019)
@@ -54,25 +58,33 @@ def make_case(seed: int) -> Case:
     rng = random.Random(seed)
     hpos = (56, 96, 136, 176)
 
-    # Keep the playfield at background under each player.  This leaves player
-    # priority out of the first PoC while still checking all four DMA streams,
-    # shapes, positions, and mid-line player color changes.
+    # Keep the playfield at background under each quadruple-width player. This
+    # leaves player priority out of the first PoC while still checking all four
+    # DMA streams, shapes, positions, and mid-line player color changes.
     protected_cells: set[int] = set()
     for pos in hpos:
         x0 = pos - 48
-        protected_cells.update(range(x0 // 4, (x0 + 7) // 4 + 1))
+        protected_cells.update(
+            range(x0 // 4, (x0 + PLAYER_WIDTH - 1) // 4 + 1))
 
-    font = bytearray(1024)
-    for i in range(8, len(font)):
+    font = bytearray(10 * 1024)
+    for i in range(len(font)):
         font[i] = rng.randrange(256)
+    for row in range(HEIGHT // 8):
+        charset = row // 3
+        for cell in protected_cells:
+            glyph = (row % 3) * 40 + cell
+            start = charset * 1024 + glyph * 8
+            font[start:start + 8] = bytes(8)
 
     screen = bytearray()
-    for _row in range(HEIGHT // 8):
+    for row in range(HEIGHT // 8):
         for cell in range(40):
+            glyph = (row % 3) * 40 + cell
             if cell in protected_cells:
-                screen.append(0)
+                screen.append(glyph)
             else:
-                screen.append(rng.randrange(1, 128) | (rng.randrange(2) << 7))
+                screen.append(glyph | (rng.randrange(2) << 7))
 
     players = tuple(
         bytes(rng.randrange(256) for _ in range(HEIGHT))
@@ -81,13 +93,23 @@ def make_case(seed: int) -> Case:
     initial_colors = {reg: rng.randrange(128) * 2 for reg in COLOR_REGS}
 
     lines: list[list[Insn]] = [[] for _ in range(HEIGHT)]
-    for y in range(1, HEIGHT):
-        insns: list[Insn] = [Insn("nop") for _ in range(rng.randrange(3))]
-        for pair in range(1 + rng.randrange(2)):
-            if pair:
-                insns.extend(Insn("nop") for _ in range(rng.randrange(3)))
-            insns.append(Insn("lda", rng.randrange(128) * 2))
-            insns.append(Insn("sta", rng.choice(COLOR_REGS)))
+    for y in range(HEIGHT):
+        transition = y < 216 and y % 24 == 23
+        limit = 22 if y == 0 else (
+            24 if y % 8 == 0 else (48 if transition else 54))
+        insns: list[Insn] = [Insn("lda", rng.randrange(128) * 2)]
+        cycles = 2
+        while cycles < limit:
+            remaining = limit - cycles
+            if remaining >= 4 and rng.randrange(3) != 0:
+                insns.append(Insn("sta", rng.choice(COLOR_REGS)))
+                cycles += 4
+            else:
+                if rng.randrange(2):
+                    insns.append(Insn("lda", rng.randrange(128) * 2))
+                else:
+                    insns.append(Insn("nop"))
+                cycles += 2
         lines[y] = insns
 
     return Case(seed, bytes(screen), bytes(font), players, hpos,
@@ -103,25 +125,75 @@ def build_display_list() -> bytes:
 
 
 def build_kernel(case: Case) -> bytes:
-    code = bytearray((
-        0xAD, 0x0B, 0xD4,       # sync: lda VCOUNT
-        0xC9, 0x04,             #       cmp #4 (ANTIC scanlines 8/9)
-        0xD0, 0xF9,             #       bne sync
-        0x8D, 0x0A, 0xD4,       #       sta WSYNC; line 0 remains unchanged
+    code = bytearray()
+    # Canonical state is restored on every frame, not just cold startup.
+    for reg, value in sorted(case.initial_colors.items()):
+        code.extend((0xA9, value, 0x8D, reg & 0xFF, reg >> 8))
+    code.extend((0xA9, FONT_ADDR >> 8, 0x8D, 0x09, 0xD4))
+    code.extend((
+        0xAD, 0x0B, 0xD4,       # wait2: lda VCOUNT
+        0xC9, 0x02,
+        0xD0, 0xF9,             #        bne wait2
+        0xAD, 0x0B, 0xD4,       # wait3: lda VCOUNT
+        0xC9, 0x03,
+        0xD0, 0xF9,             #        bne wait3
+        0x8D, 0x0A, 0xD4,       #        sta WSYNC
+        0xA9, 0x00,             #        lda #0
+        0xAA,                   #        tax
+        0xA8,                   #        tay
+        0x8D, 0x0A, 0xD4,       #        sta WSYNC
+        0xEA,                   #        consume the post-WSYNC read-cycle leak
     ))
 
-    for y in range(1, HEIGHT):
+    for y in range(HEIGHT):
+        body_cycles = 0
         for insn in case.lines[y]:
             if insn.op == "nop":
                 code.append(0xEA)
-            elif insn.op == "lda":
-                code.extend((0xA9, insn.value))
-            elif insn.op == "sta":
-                code.extend((0x8D, insn.value & 0xFF, insn.value >> 8))
+                body_cycles += 2
+            elif insn.op in ("lda", "ldx", "ldy"):
+                code.extend(({"lda": 0xA9, "ldx": 0xA2, "ldy": 0xA0}[insn.op],
+                             insn.value))
+                body_cycles += 2
+            elif insn.op in ("sta", "stx", "sty"):
+                code.extend(({"sta": 0x8D, "stx": 0x8E, "sty": 0x8C}[insn.op],
+                             insn.value & 0xFF, insn.value >> 8))
+                body_cycles += 4
             else:
                 raise AssertionError(insn.op)
-        code.extend((0x8D, 0x0A, 0xD4))  # sta WSYNC
 
+        transition = y < 216 and y % 24 == 23
+        if y == 0:
+            limit = 22
+        elif y % 8 == 0:
+            limit = 24
+        else:
+            limit = 48 if transition else 54
+        if body_cycles > limit or (limit - body_cycles) % 2:
+            raise AssertionError(
+                f"line {y} body cannot fill {limit}-cycle budget")
+        code.extend((0xEA,) * ((limit - body_cycles) // 2))
+
+        if transition:
+            next_charset = y // 24 + 1
+            code.extend((
+                0x24, 0x00,  # BIT zp: keep CHBASE away from the final cell
+                0xA9, (FONT_ADDR >> 8) + next_charset * 4,
+                0x8D, 0x09, 0xD4,
+            ))
+            code.extend((0xC5, 0x00))  # CMP zp completes the 60-slot line
+        else:
+            code.extend((0xC5, 0x00))
+            if y % 8 != 0:
+                code.extend((0xC5, 0x00))
+
+    code.extend((
+        0xA9, FONT_ADDR >> 8,
+        0x8D, 0x09, 0xD4,
+        0xA9, 0xA4,
+        0x8D, FRAME_SIGNATURE & 0xFF, FRAME_SIGNATURE >> 8,
+        0xEE, FRAME_MARKER & 0xFF, FRAME_MARKER >> 8,
+    ))
     code.extend((0x4C, CODE_ADDR & 0xFF, CODE_ADDR >> 8))
     return bytes(code)
 
@@ -174,38 +246,28 @@ def consume_cpu_cycles(output_y: int, start: int, count: int) -> tuple[int, int]
 
 
 def raster_events(case: Case) -> tuple[list[dict[int, int]], list[list[tuple[int, int, int]]]]:
-    # At steady state, scanline 0 begins with the colors left by scanline 239
-    # of the preceding frame.
-    steady = dict(case.initial_colors)
-    for line in case.lines:
-        accumulator = 0
-        for insn in line:
-            if insn.op == "lda":
-                accumulator = insn.value
-            elif insn.op == "sta":
-                steady[insn.value] = accumulator & 0xFE
-
-    state = dict(steady)
-    initial_states = [dict(steady) for _ in range(HEIGHT)]
+    state = dict(case.initial_colors)
+    initial_states = [dict(case.initial_colors) for _ in range(HEIGHT)]
     events: list[list[tuple[int, int, int]]] = [[] for _ in range(HEIGHT)]
-    for y in range(1, HEIGHT):
+    cpu = {"a": 0, "x": 0, "y": 0}
+    for y in range(HEIGHT):
         pos = -8  # cycle 106 of the preceding scanline after WSYNC release
-        accumulator = 0
         after_visible: list[tuple[int, int]] = []
         for insn in case.lines[y]:
-            cycles = 2 if insn.op in ("nop", "lda") else 4
+            cycles = 2 if insn.op in ("nop", "lda", "ldx", "ldy") else 4
             pos, write_pos = consume_cpu_cycles(y, pos, cycles)
-            if insn.op == "lda":
-                accumulator = insn.value
-            elif insn.op == "sta":
+            if insn.op in ("lda", "ldx", "ldy"):
+                cpu[insn.op[-1]] = insn.value
+            elif insn.op in ("sta", "stx", "sty"):
+                stored = cpu[insn.op[-1]] & 0xFE
                 line_delta, antic_x = divmod(write_pos, 114)
                 effect_x = antic_x * 2 + 1 - 48
                 if line_delta < 0 or effect_x < 0:
-                    state[insn.value] = accumulator & 0xFE
+                    state[insn.value] = stored
                 elif line_delta == 0 and effect_x < WIDTH:
-                    events[y].append((effect_x, insn.value, accumulator & 0xFE))
+                    events[y].append((effect_x, insn.value, stored))
                 else:
-                    after_visible.append((insn.value, accumulator & 0xFE))
+                    after_visible.append((insn.value, stored))
 
         initial_states[y] = dict(state)
         for _x, reg, value in events[y]:
@@ -235,8 +297,10 @@ def render_local(case: Case) -> list[list[int]]:
 
             player = -1
             for i, pos in enumerate(case.hpos):
-                bit = x - (pos - 48)
-                if 0 <= bit < 8 and case.players[i][y] & (0x80 >> bit):
+                offset = x - (pos - 48)
+                bit = offset // PLAYER_SCALE
+                if (0 <= offset < PLAYER_WIDTH
+                        and case.players[i][y] & (0x80 >> bit)):
                     player = i
                     break
 
@@ -245,7 +309,9 @@ def render_local(case: Case) -> list[list[int]]:
                 continue
 
             code = case.screen[row * 40 + x // 4]
-            glyph = case.font[(code & 0x7F) * 8 + glyph_y]
+            charset = row // 3
+            glyph = case.font[
+                charset * 1024 + (code & 0x7F) * 8 + glyph_y]
             value = (glyph >> (6 - 2 * (x & 3))) & 3
             if value == 0:
                 reg = BK_REG
@@ -296,11 +362,14 @@ def render_bridge(case: Case, bridge_dir: Path):
     server, bridge = start_bridge(bridge_dir)
     try:
         with bridge as a:
+            a.config("video", "pal")
             a.boot_bare()
+            a.pause()
             a.config("artifact", "none")
             a.memload(DL_ADDR, build_display_list())
             a.memload(SCREEN_ADDR, case.screen)
             a.memload(FONT_ADDR, case.font)
+            a.memload(FRAME_MARKER, b"\x00\x00")
             a.memload(0x4300, bytes(256))
             for i, player in enumerate(case.players):
                 # Single-line P/M DMA indexes the 256-byte player page by
@@ -319,7 +388,7 @@ def render_bridge(case: Case, bridge_dir: Path):
                 (0xD01D, 2),
             ]
             writes += [(0xD000 + i, pos) for i, pos in enumerate(case.hpos)]
-            writes += [(0xD008 + i, 0) for i in range(4)]
+            writes += [(0xD008 + i, 3) for i in range(4)]
             writes += sorted(case.initial_colors.items())
             for addr, value in writes:
                 a.hwpoke(addr, value)
@@ -327,6 +396,11 @@ def render_bridge(case: Case, bridge_dir: Path):
             a.hwpoke(0xD400, 0x3E)
             a.memload(0x060F, bytes((0x4C, CODE_ADDR & 0xFF, CODE_ADDR >> 8)))
             a.frame(3)
+            marker = a.peek(FRAME_MARKER, 1)[0]
+            if marker < 2:
+                raise RuntimeError("kernel did not reach deterministic steady state")
+            if a.peek(FRAME_SIGNATURE, 1)[0] != 0xA4:
+                raise RuntimeError("kernel completion signature is missing")
             raw = a.rawscreen()
             palette = a.palette()
             a.quit()

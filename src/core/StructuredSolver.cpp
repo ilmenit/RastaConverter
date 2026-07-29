@@ -78,9 +78,13 @@ bool IsPmgTarget(e_target target)
 int StructuredInstructionEffectPixel(int startCycle)
 {
 	assert(startCycle >= 0 && startCycle <= raster_program_cycle_limit);
-	// Evaluator instructions execute while offset < x, immediately before x is
-	// rendered. Therefore an instruction at offset N first affects pixel N+1.
-	return screen_cycles[startCycle].offset + 1;
+	SRasterInstruction store{};
+	store.loose.instruction = E_RASTER_STA;
+	// A GTIA store takes effect after the fourth 6502 cycle. The evaluator
+	// executes it while that completion offset is < x, immediately before the
+	// first affected pixel is rendered.
+	return RasterInstructionCompletionOffset(
+		screen_cycles, startCycle, store) + 1;
 }
 
 bool BuildStructuredSourceSegment(

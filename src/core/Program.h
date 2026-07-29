@@ -3,6 +3,9 @@
 
 #include <vector>
 #include <cstring>
+#include <array>
+#include <cstdint>
+#include <cassert>
 #include "rgb.h"
 #include "RasterInstruction.h"
 #include "InsnSequenceCache.h"
@@ -20,6 +23,12 @@ constexpr int raster_program_cycle_limit = raster_cpu_slots - raster_tail_cycles
 constexpr int antic_scanline_cycles = 114;
 constexpr int cycle_map_size = antic_scanline_cycles + 9;
 
+enum class GraphicsMode : unsigned char
+{
+	AnticE,
+	Antic4,
+};
+
 typedef unsigned char sprites_row_memory_t[4][8];
 typedef sprites_row_memory_t sprites_memory_t[240]; // we convert it to 240 bytes of PMG memory at the end of processing.
 
@@ -32,6 +41,44 @@ const int CYCLES_MAX = 114;
 
 extern ScreenCycle screen_cycles[CYCLES_MAX];
 extern int screen_cpu_slots;
+
+enum class DmaTimingKind : unsigned char
+{
+	AnticE,
+	Antic4LmsBadline,
+	Antic4Badline,
+	Antic4Continuation,
+};
+
+struct DmaTimingProfile
+{
+	DmaTimingKind kind = DmaTimingKind::AnticE;
+	std::array<ScreenCycle, CYCLES_MAX> cycles{};
+	int cpu_slots = 0;
+};
+
+struct RasterLineSchedule
+{
+	const DmaTimingProfile* timing = nullptr;
+	int optimizer_cycle_limit = raster_program_cycle_limit;
+	int fixed_suffix_cycles = raster_tail_cycles;
+	bool chbase_transition = false;
+};
+
+const DmaTimingProfile& GetDmaTimingProfile(DmaTimingKind kind);
+RasterLineSchedule GetRasterLineSchedule(GraphicsMode mode, int y,
+	int pictureHeight = 240);
+bool IsAntic4Badline(int y);
+bool IsAntic4ChbaseTransitionLine(int y, int pictureHeight = 240);
+
+inline int NormalizeAntic4Height(int height)
+{
+	if (height < 8)
+		return 8;
+	if (height > 240)
+		return 240;
+	return ((height + 4) / 8) * 8;
+}
 
 enum e_raster_instruction {
 	// DO NOT CHANGE ORDER OF THOSE. A LOT OF THINGS DEPEND ON THE ORDER. ADD STH AT THE END IF YOU NEED!
@@ -61,8 +108,62 @@ enum e_target {
 	E_HPOSP1,
 	E_HPOSP2,
 	E_HPOSP3,
+	// Appended to preserve every legacy target's numeric ID.
+	E_COLOR3,
 	E_TARGET_MAX,
 };
+
+inline bool IsColorTargetForMode(e_target target, GraphicsMode mode)
+{
+	if (target >= E_COLOR0 && target <= E_COLBAK)
+		return true;
+	return mode == GraphicsMode::Antic4 && target == E_COLOR3;
+}
+
+inline bool IsWritableTargetForMode(e_target target, GraphicsMode mode)
+{
+	if (target < E_COLOR0 || target >= E_TARGET_MAX)
+		return false;
+	if (mode == GraphicsMode::Antic4
+		&& target >= E_HPOSP0 && target <= E_HPOSP3)
+		return false;
+	return mode == GraphicsMode::Antic4 || target != E_COLOR3;
+}
+
+inline bool EncodeAntic4PlayfieldTarget(
+	e_target target, bool alternate, unsigned char& encoded)
+{
+	switch (target)
+	{
+	case E_COLBAK: encoded = 0; return true;
+	case E_COLOR0: encoded = 1; return true;
+	case E_COLOR1: encoded = 2; return true;
+	case E_COLOR2:
+		if (alternate) return false;
+		encoded = 3;
+		return true;
+	case E_COLOR3:
+		if (!alternate) return false;
+		encoded = 3;
+		return true;
+	case E_COLPM0:
+	case E_COLPM1:
+	case E_COLPM2:
+	case E_COLPM3:
+		// Keep a legal conservative background beneath PMG winners.
+		encoded = 0;
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline unsigned char Antic4ScreenCode(
+	int characterRow, int column, bool alternate)
+{
+	const int glyph = (characterRow % 3) * 40 + column;
+	return static_cast<unsigned char>(glyph | (alternate ? 0x80 : 0));
+}
 
 enum e_mutation_type {
 	E_MUTATION_PUSH_BACK_TO_PREV, 
@@ -75,6 +176,7 @@ enum e_mutation_type {
 	E_MUTATION_CHANGE_VALUE, // -1,+1,-16,+16
 	E_MUTATION_CHANGE_VALUE_TO_COLOR, 
 	E_MUTATION_COMPLEMENT_VALUE_DUAL,
+	E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE,
 	E_MUTATION_MAX,
 };
 
@@ -153,8 +255,11 @@ struct raster_line {
 };
 
 struct raster_picture {
-	unsigned char mem_regs_init[E_TARGET_MAX];
+	unsigned char mem_regs_init[E_TARGET_MAX]{};
 	std::vector < raster_line > raster_lines;
+	GraphicsMode graphics_mode = GraphicsMode::AnticE;
+	// Empty in mode E; one low-40-bit mask per character row in ANTIC 4.
+	std::vector<uint64_t> antic4_attributes;
 	raster_picture()
 	{
 	}
@@ -162,6 +267,22 @@ struct raster_picture {
 	raster_picture(size_t height)
 	{
 		raster_lines.resize(height);
+	}
+
+	bool antic4_attribute(int characterRow, int column) const
+	{
+		assert(characterRow >= 0
+			&& static_cast<size_t>(characterRow) < antic4_attributes.size());
+		return (antic4_attributes[characterRow] & (uint64_t{1} << column)) != 0;
+	}
+
+	void set_antic4_attribute(int characterRow, int column, bool enabled)
+	{
+		assert(characterRow >= 0
+			&& static_cast<size_t>(characterRow) < antic4_attributes.size());
+		uint64_t& value = antic4_attributes[characterRow];
+		const uint64_t mask = uint64_t{1} << column;
+		value = enabled ? value | mask : value & ~mask;
 	}
 
 	void recache_insns(insn_sequence_cache& cache, linear_allocator& alloc)
@@ -206,6 +327,8 @@ inline raster_patch_stats patch_raster_picture(
 	raster_patch_stats stats;
 	memcpy(destination.mem_regs_init, source.mem_regs_init,
 		sizeof destination.mem_regs_init);
+	destination.graphics_mode = source.graphics_mode;
+	destination.antic4_attributes = source.antic4_attributes;
 	if (destination.raster_lines.size() != source.raster_lines.size())
 	{
 		destination.raster_lines = source.raster_lines;
@@ -246,6 +369,15 @@ inline int GetInstructionCycles(const SRasterInstruction &instr)
 	return 4;
 }
 
+inline int RasterInstructionCompletionOffset(const ScreenCycle* cycles,
+	int startCycle, const SRasterInstruction& instruction)
+{
+	const int completionCycle =
+		startCycle + GetInstructionCycles(instruction) - 1;
+	assert(startCycle >= 0 && completionCycle < CYCLES_MAX);
+	return cycles[completionCycle].offset;
+}
+
 enum raster_program_validation_error
 {
 	E_RASTER_VALID = 0,
@@ -253,9 +385,12 @@ enum raster_program_validation_error
 	E_RASTER_INVALID_TARGET = 1 << 1,
 	E_RASTER_CYCLE_MISMATCH = 1 << 2,
 	E_RASTER_CYCLE_LIMIT_EXCEEDED = 1 << 3,
+	E_RASTER_INVALID_ANTIC4_ATTRIBUTES = 1 << 4,
 };
 
-inline unsigned ValidateRasterLine(const raster_line& line)
+inline unsigned ValidateRasterLine(const raster_line& line,
+	int cycleLimit = raster_program_cycle_limit,
+	GraphicsMode mode = GraphicsMode::AnticE)
 {
 	unsigned errors = E_RASTER_VALID;
 	int calculatedCycles = 0;
@@ -274,11 +409,17 @@ inline unsigned ValidateRasterLine(const raster_line& line)
 		{
 			errors |= E_RASTER_INVALID_TARGET;
 		}
+		else if (instruction.loose.instruction >= E_RASTER_STA
+			&& !IsWritableTargetForMode(
+				static_cast<e_target>(instruction.loose.target), mode))
+		{
+			errors |= E_RASTER_INVALID_TARGET;
+		}
 	}
 	if (line.cycles != calculatedCycles)
 		errors |= E_RASTER_CYCLE_MISMATCH;
-	if (line.cycles < 0 || line.cycles > raster_program_cycle_limit
-		|| calculatedCycles > raster_program_cycle_limit)
+	if (line.cycles < 0 || line.cycles > cycleLimit
+		|| calculatedCycles > cycleLimit)
 	{
 		errors |= E_RASTER_CYCLE_LIMIT_EXCEEDED;
 	}
@@ -288,8 +429,34 @@ inline unsigned ValidateRasterLine(const raster_line& line)
 inline unsigned ValidateRasterPicture(const raster_picture& picture)
 {
 	unsigned errors = E_RASTER_VALID;
-	for (const raster_line& line : picture.raster_lines)
-		errors |= ValidateRasterLine(line);
+	if (picture.graphics_mode == GraphicsMode::Antic4)
+	{
+		const size_t height = picture.raster_lines.size();
+		const size_t expectedRows =
+			height >= 8 && height <= 240 && height % 8 == 0 ? height / 8 : 0;
+		if (expectedRows == 0
+			|| picture.antic4_attributes.size() != expectedRows)
+			errors |= E_RASTER_INVALID_ANTIC4_ATTRIBUTES;
+		else
+		{
+			for (uint64_t row : picture.antic4_attributes)
+				if ((row >> 40) != 0)
+					errors |= E_RASTER_INVALID_ANTIC4_ATTRIBUTES;
+		}
+	}
+	else if (!picture.antic4_attributes.empty())
+	{
+		errors |= E_RASTER_INVALID_ANTIC4_ATTRIBUTES;
+	}
+	for (size_t y = 0; y < picture.raster_lines.size(); ++y)
+	{
+		const RasterLineSchedule schedule =
+			GetRasterLineSchedule(picture.graphics_mode, static_cast<int>(y),
+				static_cast<int>(picture.raster_lines.size()));
+		errors |= ValidateRasterLine(
+			picture.raster_lines[y], schedule.optimizer_cycle_limit,
+			picture.graphics_mode);
+	}
 	return errors;
 }
 

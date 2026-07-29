@@ -13,6 +13,7 @@ struct line_cache_key
 {
 	register_state entry_state;
 	const insn_sequence *insn_seq;
+	uint64_t antic4_attribute_row = 0;
 
 	uint32_t hash()
 	{
@@ -29,6 +30,8 @@ struct line_cache_key
 		// using its address for hashing avoids crashes while equality still guards correctness.
 		uintptr_t pval = (uintptr_t)insn_seq;
 		hash += (uint32_t)(pval ^ (pval >> 16));
+		hash += static_cast<uint32_t>(antic4_attribute_row);
+		hash += static_cast<uint32_t>(antic4_attribute_row >> 32) * 0x9e3779b9u;
 
 		hash += (hash * 0x1a572cf3) >> 20;
 
@@ -43,6 +46,7 @@ inline bool operator==(const line_cache_key& key1, const line_cache_key& key2)
 	if (key1.entry_state.reg_x != key2.entry_state.reg_x) return false;
 	if (key1.entry_state.reg_y != key2.entry_state.reg_y) return false;
 	if (memcmp(key1.entry_state.mem_regs, key2.entry_state.mem_regs, sizeof key1.entry_state.mem_regs)) return false;
+	if (key1.antic4_attribute_row != key2.antic4_attribute_row) return false;
 
 	return true;
 }

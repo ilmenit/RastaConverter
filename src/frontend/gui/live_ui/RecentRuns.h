@@ -33,6 +33,7 @@ struct RunSummary {
 	double score = 0.0;       // normalized distance; 0 when unknown
 	bool has_score = false;
 	bool mask_edited = false;
+	bool text_mode = false; // ANTIC 4; false is ANTIC E (including old runs).
 	unsigned snapshots = 0;
 	std::int64_t modified_time = 0; // for ordering, seconds
 
