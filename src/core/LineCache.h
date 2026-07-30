@@ -13,7 +13,6 @@ struct line_cache_key
 {
 	register_state entry_state;
 	const insn_sequence *insn_seq;
-	uint64_t antic4_attribute_row = 0;
 
 	uint32_t hash()
 	{
@@ -30,8 +29,6 @@ struct line_cache_key
 		// using its address for hashing avoids crashes while equality still guards correctness.
 		uintptr_t pval = (uintptr_t)insn_seq;
 		hash += (uint32_t)(pval ^ (pval >> 16));
-		hash += static_cast<uint32_t>(antic4_attribute_row);
-		hash += static_cast<uint32_t>(antic4_attribute_row >> 32) * 0x9e3779b9u;
 
 		hash += (hash * 0x1a572cf3) >> 20;
 
@@ -46,9 +43,30 @@ inline bool operator==(const line_cache_key& key1, const line_cache_key& key2)
 	if (key1.entry_state.reg_x != key2.entry_state.reg_x) return false;
 	if (key1.entry_state.reg_y != key2.entry_state.reg_y) return false;
 	if (memcmp(key1.entry_state.mem_regs, key2.entry_state.mem_regs, sizeof key1.entry_state.mem_regs)) return false;
-	if (key1.antic4_attribute_row != key2.antic4_attribute_row) return false;
 
 	return true;
+}
+
+struct antic4_line_cache_key : line_cache_key
+{
+	uint64_t attribute_row = 0;
+
+	uint32_t hash()
+	{
+		uint32_t value = line_cache_key::hash();
+		value += static_cast<uint32_t>(attribute_row);
+		value += static_cast<uint32_t>(attribute_row >> 32) * 0x9e3779b9u;
+		value += (value * 0x1a572cf3) >> 20;
+		return value;
+	}
+};
+
+inline bool operator==(const antic4_line_cache_key& key1,
+	const antic4_line_cache_key& key2)
+{
+	return static_cast<const line_cache_key&>(key1)
+			== static_cast<const line_cache_key&>(key2)
+		&& key1.attribute_row == key2.attribute_row;
 }
 
 struct line_cache_result
@@ -92,7 +110,7 @@ public:
 	struct hash_node
 	{
 		uint32_t hash;
-		value_type *value;
+		void *value;
 	};
 
 	struct hash_block
@@ -127,7 +145,9 @@ public:
 		}
 	}
 
-	const line_cache_result *find(const line_cache_key& key, uint32_t hash, unsigned* probes = NULL) const
+	template<typename Key>
+	const line_cache_result *find(const Key& key, uint32_t hash,
+		unsigned* probes = NULL) const
 	{
 		unsigned local_probes = 0;
 		const hash_chain& hc = hash_table[hash & (HTSIZE - 1)];
@@ -139,11 +159,14 @@ public:
 			for(int i=hbidx - 1; i>=0; --i)
 			{
 				++local_probes;
+				const std::pair<Key, line_cache_result>* value =
+					static_cast<const std::pair<Key, line_cache_result>*>(
+						hb->nodes[i].value);
 				if (hb->nodes[i].hash == hash
-					&& key == hb->nodes[i].value->first)
+					&& key == value->first)
 				{
 					if (probes) *probes = local_probes;
-					return &hb->nodes[i].value->second;
+					return &value->second;
 				}
 			}
 
@@ -154,8 +177,9 @@ public:
 		return NULL;
 	}
 
-	line_cache_result& insert(const line_cache_key& key, uint32_t hash, linear_allocator& alloc,
-		bool* allocated_block = NULL)
+	template<typename Key>
+	line_cache_result& insert(const Key& key, uint32_t hash,
+		linear_allocator& alloc, bool* allocated_block = NULL)
 	{
 		if (allocated_block) *allocated_block = false;
 		hash_chain& hc = hash_table[hash & (HTSIZE - 1)];
@@ -175,7 +199,9 @@ public:
 
 		hc.offset = hbidx+1;
 
-		value_type *value = alloc.allocate<value_type>(linear_allocator::LINE_CACHE_ENTRY);
+		typedef std::pair<Key, line_cache_result> stored_value_type;
+		stored_value_type *value =
+			alloc.allocate<stored_value_type>(linear_allocator::LINE_CACHE_ENTRY);
 		value->first = key;
 
 		hash_node node = { hash, value };

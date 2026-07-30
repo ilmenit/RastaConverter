@@ -2205,17 +2205,24 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 		line_cache_key lck;
 		CaptureRegisterState(lck.entry_state);
 		lck.insn_seq = rline.cache_key;
-		if (pic->graphics_mode == GraphicsMode::Antic4)
-			lck.antic4_attribute_row = pic->antic4_attributes[y / 8];
-
-		const uint32_t lck_hash = lck.hash();
+		antic4_line_cache_key antic4_lck;
+		const bool antic4Cache = pic->graphics_mode == GraphicsMode::Antic4;
+		if (antic4Cache)
+		{
+			static_cast<line_cache_key&>(antic4_lck) = lck;
+			antic4_lck.attribute_row = pic->antic4_attributes[y / 8];
+		}
+		const uint32_t lck_hash =
+			antic4Cache ? antic4_lck.hash() : lck.hash();
 
 		// check line cache
 		unsigned char * __restrict created_picture_row = &m_created_picture[y][0];
 		unsigned char * __restrict created_picture_targets_row = &m_created_picture_targets[y][0];
 
 		unsigned lookupProbes = 0;
-		const line_cache_result* cached_line_result = m_line_caches[y].find(lck, lck_hash, &lookupProbes);
+		const line_cache_result* cached_line_result = antic4Cache
+			? m_line_caches[y].find(antic4_lck, lck_hash, &lookupProbes)
+			: m_line_caches[y].find(lck, lck_hash, &lookupProbes);
 		++m_local_cache_lookups;
 		m_local_cache_lookup_probes += lookupProbes;
 		m_local_cache_max_lookup_probes = std::max(
@@ -2419,8 +2426,11 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 			// add this to line cache
 			bool allocatedBlock = false;
-			line_cache_result& result_state = m_line_caches[y].insert(
-				lck, lck_hash, m_line_allocator, &allocatedBlock);
+			line_cache_result& result_state = antic4Cache
+				? m_line_caches[y].insert(
+					antic4_lck, lck_hash, m_line_allocator, &allocatedBlock)
+				: m_line_caches[y].insert(
+					lck, lck_hash, m_line_allocator, &allocatedBlock);
 			++m_local_cache_inserts;
 			if (allocatedBlock)
 				++m_local_cache_hash_blocks;

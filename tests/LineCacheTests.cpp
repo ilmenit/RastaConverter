@@ -62,13 +62,16 @@ void TestReclaimableLineArena()
 
 void TestAntic4AttributeRowIsPartOfKey()
 {
-	line_cache_key normal{};
-	line_cache_key alternate = normal;
-	alternate.antic4_attribute_row = uint64_t{1} << 39;
+	antic4_line_cache_key normal{};
+	antic4_line_cache_key alternate = normal;
+	alternate.attribute_row = uint64_t{1} << 39;
 	Require(!(normal == alternate),
 		"ANTIC 4 attribute-row changes must not reuse a line result");
 	Require(normal.hash() != alternate.hash(),
 		"ANTIC 4 attribute-row changes should perturb the cache hash");
+	Require(sizeof(line_cache::value_type)
+			< sizeof(std::pair<antic4_line_cache_key, line_cache_result>),
+		"mode E cache entries must not carry the ANTIC 4 attribute payload");
 }
 }
 
