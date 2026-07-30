@@ -72,14 +72,26 @@ void RastaConverter::SavePMGWithSprites(std::string name, const sprites_memory_t
     out << "; RastaConverter by Ilmenit v." << program_version << '\n';
     out << "; ---------------------------------- \n";
     out << "missiles\n";
-    out << "\t.ds $100\n";
+    out << "\t.he 00 00 00 00 00 00 00 00";
+    for (y=0;y<240;++y)
+    {
+        b = y < static_cast<size_t>(m_height) ? 0x50 : 0x00;
+        out << ' ' << std::uppercase << std::hex << std::setw(2)
+            << std::setfill('0') << static_cast<int>(b);
+        out << std::nouppercase << std::dec;
+        if (y%16==7) out << "\n\t.he";
+    }
+    out << " 00 00 00 00 00 00 00 00\n";
     for(sprite=0;sprite<4;++sprite)
     {
         out << "player" << sprite << '\n';
         out << "\t.he 00 00 00 00 00 00 00 00";
         for (y=0;y<240;++y)
         {
-            b=0; for (bit=0;bit<8;++bit) { b|=(sprites[y][sprite][bit])<<(7-bit); }
+            b=0;
+            if (y < static_cast<size_t>(m_height))
+                for (bit=0;bit<8;++bit)
+                    b|=(sprites[y][sprite][bit])<<(7-bit);
             out << ' ' << std::uppercase << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
             out << std::nouppercase << std::dec;
             if (y%16==7) out << "\n\t.he";

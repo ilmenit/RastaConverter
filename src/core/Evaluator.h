@@ -464,6 +464,16 @@ private:
 	bool m_use_dual_neon = false;
 	const screen_line *m_picture;
 	const raster_picture* m_active_raster_picture = nullptr;
+	GraphicsMode ActiveGraphicsMode() const
+	{
+		return m_active_raster_picture
+			? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE;
+	}
+	PlayfieldWidth ActivePlayfieldWidth() const
+	{
+		return m_active_raster_picture
+			? m_active_raster_picture->playfield_width : PlayfieldWidth::Normal;
+	}
 	const screen_line *m_scoring_picture = nullptr;
 	// Kept for the source-referenced OKLab readouts (EvaluateUnweightedSource,
 	// CompareStructuredWindow). It is no longer part of scoring: the objectives

@@ -302,6 +302,9 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 	parser.addOption("graphics_mode", {}, "e|antic4", "e",
 		"Output graphics mode: ANTIC E bitmap (default) or ANTIC 4 character mode.",
 		"General options");
+	parser.addOption("playfield", {}, "normal|wide", "normal",
+		"ANTIC playfield width. Normal is the default for both graphics modes.",
+		"General options");
 
     // Aggressive search threshold (0 = never escalate)
     parser.addOption("unstuck_after", {"ua"}, "N", "0",
@@ -708,8 +711,20 @@ else if (dst_name=="yuv")
 			graphics_mode = GraphicsMode::AnticE;
 		}
 	}
-	width = graphics_mode == GraphicsMode::Antic4
-		? antic4_visible_width : 160;
+	playfield_width = DefaultPlayfieldWidth(graphics_mode);
+	if (parser.valueProvided("playfield"))
+	{
+		std::string playfield = parser.getValue("playfield", "");
+		std::transform(playfield.begin(), playfield.end(), playfield.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		if (playfield == "normal")
+			playfield_width = PlayfieldWidth::Normal;
+		else if (playfield == "wide")
+			playfield_width = PlayfieldWidth::Wide;
+		else
+			error_messages.push_back("/playfield must be normal or wide.");
+	}
+	width = PlayfieldVisibleWidth(playfield_width);
 
 	string rescale_filter_value = parser.getValue("filter","box");
 	if (rescale_filter_value=="box")
@@ -845,6 +860,9 @@ else if (dst_name=="yuv")
 			height = normalized;
 		}
 	}
+	if (dual_mode && playfield_width == PlayfieldWidth::Wide)
+		error_messages.push_back(
+			"Wide playfield currently supports single-frame conversion only; disable /dual.");
 	if (!error_messages.empty())
 		bad_arguments = true;
 

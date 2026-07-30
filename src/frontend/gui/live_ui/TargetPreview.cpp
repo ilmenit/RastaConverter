@@ -86,14 +86,15 @@ int ResolveTargetHeight(int configured, int input_width, int input_height)
 	return 240;
 }
 
-int ResolveOutputHeight(GraphicsMode mode, int configured,
+int ResolveOutputHeight(GraphicsMode mode, PlayfieldWidth playfield,
+	int configured,
 	int input_width, int input_height)
 {
 	int height = configured > 0 ? std::min(240, configured) : 240;
 	if (configured <= 0 && input_width > 0 && input_height > 0)
 	{
 		const double outputWidth =
-			mode == GraphicsMode::Antic4 ? 336.0 : 320.0;
+			static_cast<double>(PlayfieldVisibleWidth(playfield) * 2);
 		const double aspect = static_cast<double>(input_width) / input_height;
 		if (aspect > outputWidth / 240.0)
 			height = std::max(1, static_cast<int>(
@@ -130,6 +131,7 @@ bool TargetPreview::Inputs::operator==(const Inputs& other) const
 	return input_file == other.input_file
 		&& palette_file == other.palette_file
 		&& graphics_mode == other.graphics_mode
+		&& playfield_width == other.playfield_width
 		&& height == other.height
 		&& filter == other.filter
 		&& brightness == other.brightness
@@ -156,6 +158,7 @@ TargetPreview::Inputs TargetPreview::Extract(const Configuration& cfg)
 	inputs.input_file = cfg.input_file;
 	inputs.palette_file = cfg.palette_file;
 	inputs.graphics_mode = cfg.graphics_mode;
+	inputs.playfield_width = cfg.playfield_width;
 	inputs.height = cfg.height;
 	inputs.filter = cfg.rescale_filter;
 	inputs.brightness = cfg.brightness;
@@ -341,9 +344,8 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 	result.input_width = source_width;
 	result.input_height = source_height;
 	const int height = ResolveOutputHeight(inputs.graphics_mode,
-		inputs.height, source_width, source_height);
-	const int width = inputs.graphics_mode == GraphicsMode::Antic4
-		? antic4_visible_width : 160;
+		inputs.playfield_width, inputs.height, source_width, source_height);
+	const int width = PlayfieldVisibleWidth(inputs.playfield_width);
 
 	// Same rescale + 24-bit conversion the converter performs.
 	BitmapPtr scaled(FreeImage_Rescale(loaded.get(), width, height, inputs.filter));

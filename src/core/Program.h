@@ -12,11 +12,14 @@
 
 const int sprite_screen_color_cycle_start=48;
 const int sprite_size=32;
-constexpr int antic4_visible_width = 168;
-constexpr int antic4_visible_characters = 42;
-constexpr int antic4_dma_characters = 48;
-constexpr int antic4_screen_left_hidden_characters = 3;
-constexpr int antic4_sprite_screen_color_cycle_start = 44;
+constexpr int normal_playfield_visible_width = 160;
+constexpr int wide_playfield_visible_width = 168;
+constexpr int normal_playfield_characters = 40;
+constexpr int wide_playfield_visible_characters = 42;
+constexpr int wide_playfield_dma_characters = 48;
+constexpr int wide_playfield_left_hidden_characters = 3;
+constexpr int normal_playfield_screen_color_cycle_start = 48;
+constexpr int wide_playfield_screen_color_cycle_start = 44;
 
 // The emitted display uses ANTIC mode E, normal-width playfield DMA, LMS on
 // every line, and single-line player/missile DMA. That fixed profile leaves 57
@@ -34,11 +37,47 @@ enum class GraphicsMode : unsigned char
 	Antic4,
 };
 
-inline int SpriteScreenColorCycleStart(GraphicsMode mode)
+enum class PlayfieldWidth : unsigned char
 {
-	return mode == GraphicsMode::Antic4
-		? antic4_sprite_screen_color_cycle_start
-		: sprite_screen_color_cycle_start;
+	Normal,
+	Wide,
+};
+
+inline PlayfieldWidth DefaultPlayfieldWidth(GraphicsMode)
+{
+	return PlayfieldWidth::Normal;
+}
+
+inline int PlayfieldVisibleWidth(PlayfieldWidth width)
+{
+	return width == PlayfieldWidth::Wide
+		? wide_playfield_visible_width : normal_playfield_visible_width;
+}
+
+inline int PlayfieldVisibleCharacters(PlayfieldWidth width)
+{
+	return width == PlayfieldWidth::Wide
+		? wide_playfield_visible_characters : normal_playfield_characters;
+}
+
+inline int PlayfieldDmaCharacters(PlayfieldWidth width)
+{
+	return width == PlayfieldWidth::Wide
+		? wide_playfield_dma_characters : normal_playfield_characters;
+}
+
+inline int PlayfieldLeftHiddenCharacters(PlayfieldWidth width)
+{
+	return width == PlayfieldWidth::Wide
+		? wide_playfield_left_hidden_characters : 0;
+}
+
+inline int SpriteScreenColorCycleStart(
+	GraphicsMode, PlayfieldWidth width = PlayfieldWidth::Normal)
+{
+	return width == PlayfieldWidth::Wide
+		? wide_playfield_screen_color_cycle_start
+		: normal_playfield_screen_color_cycle_start;
 }
 
 typedef unsigned char sprites_row_memory_t[4][8];
@@ -56,16 +95,21 @@ extern int screen_cpu_slots;
 
 enum class DmaTimingKind : unsigned char
 {
-	AnticE,
-	Antic4LmsBadline,
-	Antic4Badline,
-	Antic4Continuation,
-	Antic4ContinuationAfterBadline,
+	AnticENormal,
+	AnticEWide,
+	Antic4NormalLmsBadline,
+	Antic4NormalBadline,
+	Antic4NormalContinuation,
+	Antic4WideLmsBadline,
+	Antic4WideBadline,
+	Antic4WideContinuation,
+	Antic4WideContinuationAfterBadline,
+	Count,
 };
 
 struct DmaTimingProfile
 {
-	DmaTimingKind kind = DmaTimingKind::AnticE;
+	DmaTimingKind kind = DmaTimingKind::AnticENormal;
 	std::array<ScreenCycle, CYCLES_MAX> cycles{};
 	int cpu_slots = 0;
 };
@@ -80,7 +124,8 @@ struct RasterLineSchedule
 
 const DmaTimingProfile& GetDmaTimingProfile(DmaTimingKind kind);
 RasterLineSchedule GetRasterLineSchedule(GraphicsMode mode, int y,
-	int pictureHeight = 240);
+	int pictureHeight = 240,
+	PlayfieldWidth width = PlayfieldWidth::Normal);
 bool IsAntic4Badline(int y);
 bool IsAntic4ChbaseTransitionLine(int y, int pictureHeight = 240);
 
@@ -217,11 +262,74 @@ inline unsigned char ResolveGtiaPriority0ColorIndex(
 	return static_cast<unsigned char>(color >> 1);
 }
 
+// Normal-width ANTIC 4 reserves P2/P3 and uses PRIOR=$1F so a reserved player
+// overlapping a fifth-player missile blanks the side border. Inside the
+// playfield there is no missile; these are the reduced PRIOR[3:0]=$F equations
+// for the ordinary playfield and player inputs.
+inline unsigned char ResolveGtiaPriorityFColorIndex(
+	const unsigned char* colorRegisters, e_target playfield,
+	unsigned playerMask)
+{
+	assert(colorRegisters != nullptr);
+	const bool pf0 = playfield == E_COLOR0;
+	const bool pf1 = playfield == E_COLOR1;
+	const bool pf2 = playfield == E_COLOR2;
+	const bool pf3 = playfield == E_COLOR3;
+	const bool pf01 = pf0 || pf1;
+	const bool pf23 = pf2 || pf3;
+	const bool p0 = (playerMask & 1u) != 0;
+	const bool p1 = (playerMask & 2u) != 0;
+	const bool p2 = (playerMask & 4u) != 0;
+	const bool p3 = (playerMask & 8u) != 0;
+	const bool p01 = p0 || p1;
+	const bool p23 = p2 || p3;
+
+	const bool sp0 = p0 && !pf01 && !pf23;
+	const bool sp1 = p1 && !pf01 && !pf23 && !p0;
+	const bool sp2 = p2 && !p01 && !pf23;
+	const bool sp3 = p3 && !p01 && !pf23 && !p2;
+	const bool sf3 = pf3 && !p23;
+	const bool sf0 = pf0 && !p23 && !p01 && !sf3;
+	const bool sf1 = pf1 && !p23 && !p01 && !sf3;
+	const bool sf2 = pf2 && !p23 && !sf3;
+
+	unsigned char color = 0;
+	if (sp0) color |= colorRegisters[E_COLPM0];
+	if (sp1) color |= colorRegisters[E_COLPM1];
+	if (sp2) color |= colorRegisters[E_COLPM2];
+	if (sp3) color |= colorRegisters[E_COLPM3];
+	if (sf0) color |= colorRegisters[E_COLOR0];
+	if (sf1) color |= colorRegisters[E_COLOR1];
+	if (sf2) color |= colorRegisters[E_COLOR2];
+	if (sf3) color |= colorRegisters[E_COLOR3];
+	if (!p01 && !p23 && !pf01 && !pf23)
+		color |= colorRegisters[E_COLBAK];
+	return static_cast<unsigned char>(color >> 1);
+}
+
+// The mode-E template uses PRIOR=$14. With PRI2 set, every ordinary
+// playfield has priority over all four players; a player is visible only over
+// COLBK. Bit 4 merely moves missiles to the fifth-player/PF3 layer and does
+// not change this player-only result inside the picture.
+inline unsigned char ResolveGtiaPriority4ColorIndex(
+	const unsigned char* colorRegisters, e_target playfield,
+	unsigned playerMask)
+{
+	assert(colorRegisters != nullptr);
+	if (playfield != E_COLBAK || playerMask == 0)
+		return static_cast<unsigned char>(colorRegisters[playfield] >> 1);
+	for (int player = 0; player < 4; ++player)
+		if (playerMask & (1u << player))
+			return static_cast<unsigned char>(
+				colorRegisters[E_COLPM0 + player] >> 1);
+	return static_cast<unsigned char>(colorRegisters[E_COLBAK] >> 1);
+}
+
 inline unsigned char Antic4ScreenCode(
-	int characterRow, int column, bool alternate)
+	int characterRow, int column, int visibleCharacters, bool alternate)
 {
 	const int glyph =
-		(characterRow % 3) * antic4_visible_characters + column;
+		(characterRow % 3) * visibleCharacters + column;
 	return static_cast<unsigned char>(glyph | (alternate ? 0x80 : 0));
 }
 
@@ -318,6 +426,7 @@ struct raster_picture {
 	unsigned char mem_regs_init[E_TARGET_MAX]{};
 	std::vector < raster_line > raster_lines;
 	GraphicsMode graphics_mode = GraphicsMode::AnticE;
+	PlayfieldWidth playfield_width = PlayfieldWidth::Normal;
 	// Empty in mode E; one low-40-bit mask per character row in ANTIC 4.
 	std::vector<uint64_t> antic4_attributes;
 	raster_picture()
@@ -388,6 +497,7 @@ inline raster_patch_stats patch_raster_picture(
 	memcpy(destination.mem_regs_init, source.mem_regs_init,
 		sizeof destination.mem_regs_init);
 	destination.graphics_mode = source.graphics_mode;
+	destination.playfield_width = source.playfield_width;
 	destination.antic4_attributes = source.antic4_attributes;
 	if (destination.raster_lines.size() != source.raster_lines.size())
 	{
@@ -513,8 +623,10 @@ inline unsigned ValidateRasterPicture(const raster_picture& picture)
 			errors |= E_RASTER_INVALID_ANTIC4_ATTRIBUTES;
 		else
 		{
+			const int visibleCharacters =
+				PlayfieldVisibleCharacters(picture.playfield_width);
 			for (uint64_t row : picture.antic4_attributes)
-				if ((row >> antic4_visible_characters) != 0)
+				if ((row >> visibleCharacters) != 0)
 					errors |= E_RASTER_INVALID_ANTIC4_ATTRIBUTES;
 		}
 	}
@@ -526,7 +638,8 @@ inline unsigned ValidateRasterPicture(const raster_picture& picture)
 	{
 		const RasterLineSchedule schedule =
 			GetRasterLineSchedule(picture.graphics_mode, static_cast<int>(y),
-				static_cast<int>(picture.raster_lines.size()));
+				static_cast<int>(picture.raster_lines.size()),
+				picture.playfield_width);
 		errors |= ValidateRasterLine(
 			picture.raster_lines[y], schedule.optimizer_cycle_limit,
 			picture.graphics_mode);

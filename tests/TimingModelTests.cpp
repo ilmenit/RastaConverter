@@ -109,13 +109,13 @@ void TestAntic4TimingProfiles()
 	// exactly these counts runs a full frame without drifting one cycle, and a
 	// store placed on each slot changes color exactly where these offsets say.
 	// Do not regenerate these from the production builder.
-	RequireSlots(GetDmaTimingProfile(DmaTimingKind::Antic4LmsBadline),
+	RequireSlots(GetDmaTimingProfile(DmaTimingKind::Antic4WideLmsBadline),
 		{-8,-7,-6,-5,-4,-3,-2,-1,8,9,11}, 22,
 		"ANTIC 4 LMS badline slot map differs from the hardware contract");
-	RequireSlots(GetDmaTimingProfile(DmaTimingKind::Antic4Badline),
+	RequireSlots(GetDmaTimingProfile(DmaTimingKind::Antic4WideBadline),
 		{-8,-7,-6,-5,-4,-3,-2,-1,6,7,8,9,11}, 22,
 		"ANTIC 4 ordinary badline slot map differs from the hardware contract");
-	RequireSlots(GetDmaTimingProfile(DmaTimingKind::Antic4Continuation),
+	RequireSlots(GetDmaTimingProfile(DmaTimingKind::Antic4WideContinuation),
 		{-8,-7,-6,-5,-4,-3,-2,-1,1,6,7,8,9,10,11,12,
 			14,16,18,20,22,24,28,32,36,40,44,48,52,56,60,62,64,66,68,70,
 			72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,102,104}, 22,
@@ -124,11 +124,37 @@ void TestAntic4TimingProfiles()
 	// cannot run before cycle 106 - the slot the next logical line would have
 	// opened with. The line after a badline is one CPU slot shorter.
 	RequireSlots(
-		GetDmaTimingProfile(DmaTimingKind::Antic4ContinuationAfterBadline),
+		GetDmaTimingProfile(DmaTimingKind::Antic4WideContinuationAfterBadline),
 		{-7,-6,-5,-4,-3,-2,-1,1,6,7,8,9,10,11,12,
 			14,16,18,20,22,24,28,32,36,40,44,48,52,56,60,62,64,66,68,70,
 			72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,102,104}, 22,
 		"the line after an ANTIC 4 badline loses cycle 106 to deferred refresh");
+	RequireSlots(GetDmaTimingProfile(
+			DmaTimingKind::Antic4NormalLmsBadline),
+		{-8,-7,-6,-5,-4,-3,-2,-1,8,9,10,11,12,13,14,15,16,17,19,
+			100,101,102,103,104,105}, 24,
+		"normal ANTIC 4 LMS badline slots differ from hardware DMA");
+	RequireSlots(GetDmaTimingProfile(
+			DmaTimingKind::Antic4NormalBadline),
+		{-8,-7,-6,-5,-4,-3,-2,-1,6,7,8,9,10,11,12,13,14,15,16,17,19,
+			100,101,102,103,104,105}, 24,
+		"normal ANTIC 4 badline slots differ from hardware DMA");
+	RequireSlots(GetDmaTimingProfile(
+			DmaTimingKind::Antic4NormalContinuation),
+		{-8,-7,-6,-5,-4,-3,-2,-1,1,6,7,8,9,10,11,12,13,14,15,16,17,
+			18,19,20,22,24,28,32,36,40,44,48,52,56,60,62,64,66,68,70,
+			72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,101,102,103,
+			104,105}, 24,
+		"normal ANTIC 4 continuation slots differ from hardware DMA");
+	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 0, 240,
+			PlayfieldWidth::Normal).optimizer_cycle_limit == 20
+		&& GetRasterLineSchedule(GraphicsMode::Antic4, 8, 240,
+			PlayfieldWidth::Normal).optimizer_cycle_limit == 22
+		&& GetRasterLineSchedule(GraphicsMode::Antic4, 2, 240,
+			PlayfieldWidth::Normal).optimizer_cycle_limit == 56
+		&& GetRasterLineSchedule(GraphicsMode::Antic4, 23, 240,
+			PlayfieldWidth::Normal).optimizer_cycle_limit == 50,
+		"normal ANTIC 4 schedules must spend their additional DMA-free slots");
 
 	// Raster instructions cost 2 or 4 cycles, so every optimizer limit must be
 	// even, and limit + suffix must exactly equal the line's CPU slots: the
@@ -140,35 +166,42 @@ void TestAntic4TimingProfiles()
 	for (const auto& line : lines)
 	{
 		const RasterLineSchedule schedule =
-			GetRasterLineSchedule(GraphicsMode::Antic4, line.y, 200);
+			GetRasterLineSchedule(GraphicsMode::Antic4, line.y, 200,
+				PlayfieldWidth::Wide);
 		Require(schedule.timing->cpu_slots == line.slots
 			&& schedule.optimizer_cycle_limit % 2 == 0
 			&& schedule.optimizer_cycle_limit + schedule.fixed_suffix_cycles
 				== line.slots,
 			"ANTIC 4 line budget must spend every CPU slot the hardware offers");
 	}
-	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 0).optimizer_cycle_limit == 6,
+	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 0, 240,
+		PlayfieldWidth::Wide).optimizer_cycle_limit == 6,
 		"line 0 must reserve the LMS badline suffix");
-	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 8).optimizer_cycle_limit == 8,
+	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 8, 240,
+		PlayfieldWidth::Wide).optimizer_cycle_limit == 8,
 		"ordinary ANTIC 4 badlines must allow 8 optimizer cycles");
-	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 2).optimizer_cycle_limit == 48,
+	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 2, 240,
+		PlayfieldWidth::Wide).optimizer_cycle_limit == 48,
 		"ordinary continuation lines must allow 48 optimizer cycles");
 	const RasterLineSchedule transition =
-		GetRasterLineSchedule(GraphicsMode::Antic4, 23);
+		GetRasterLineSchedule(GraphicsMode::Antic4, 23, 240,
+			PlayfieldWidth::Wide);
 	Require(transition.optimizer_cycle_limit == 44
 		&& transition.fixed_suffix_cycles == 9
 		&& transition.chbase_transition,
 		"CHBASE transition lines must reserve the wide-playfield suffix");
-	Require(!GetRasterLineSchedule(GraphicsMode::Antic4, 23, 24).chbase_transition,
+	Require(!GetRasterLineSchedule(GraphicsMode::Antic4, 23, 24,
+		PlayfieldWidth::Wide).chbase_transition,
 		"the final scanline must not switch to a charset that is never displayed");
-	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 23, 32).chbase_transition,
+	Require(GetRasterLineSchedule(GraphicsMode::Antic4, 23, 32,
+		PlayfieldWidth::Wide).chbase_transition,
 		"line 23 must switch CHBASE when another character row follows");
 	Require(NormalizeAntic4Height(181) == 184
 		&& NormalizeAntic4Height(240) == 240
 		&& NormalizeAntic4Height(1) == 8,
 		"ANTIC 4 height normalization must use complete nearest character rows");
 	const DmaTimingProfile& continuation =
-		GetDmaTimingProfile(DmaTimingKind::Antic4Continuation);
+		GetDmaTimingProfile(DmaTimingKind::Antic4WideContinuation);
 	// 44 body + BIT zp (3) + LDA # (2) + STA abs (4) consumes all 53
 	// wide-playfield CPU slots. The store starts on cycle 49 and completes on
 	// slot 52, ANTIC cycle 104: the line's own last character-data fetch at 105
@@ -190,18 +223,36 @@ void TestAntic4TimingProfiles()
 	// delay again puts every write three slots late - invisible in the preview,
 	// but it shears the generated .xex. Measured against Altirra: 99% of color
 	// clocks match without the delay, 90% with it.
+	RequireSlots(GetDmaTimingProfile(DmaTimingKind::AnticENormal),
+		{7,8,9,10,11,12,13,14,15,16,17,18,19,21,23,27,31,35,39,43,47,
+			51,55,59,61,63,65,67,69,71,73,75,77,79,81,83,85,87,89,91,93,
+			95,97,99,100,101,102,103,104,105,106,107,108,109,110,111,112},
+		24, "normal ANTIC E slots differ from hardware DMA");
+	RequireSlots(GetDmaTimingProfile(DmaTimingKind::AnticEWide),
+		{7,8,9,10,11,13,15,17,19,21,23,27,31,35,39,43,47,51,55,59,61,
+			63,65,67,69,71,73,75,77,79,81,83,85,87,89,91,93,95,97,99,101,
+			103,105,106,107,108,109,110,111,112},
+		22, "wide ANTIC E slots differ from hardware DMA");
 	create_cycles_table();
 	Require(GetRasterLineSchedule(GraphicsMode::AnticE, 0).timing
-			== &GetDmaTimingProfile(DmaTimingKind::AnticE),
+			== &GetDmaTimingProfile(DmaTimingKind::AnticENormal),
 		"mode E must keep using the proven mode-E DMA profile");
 	for (int cycle = 0; cycle <= raster_program_cycle_limit; ++cycle)
 		Require(RasterInstructionCompletionOffset(
 				screen_cycles, cycle, timedStore, false)
 				== screen_cycles[cycle].offset,
 			"mode E stores must resolve to their opcode-fetch slot");
+	Require(GetRasterLineSchedule(GraphicsMode::AnticE, 0, 240,
+			PlayfieldWidth::Normal).timing->cpu_slots == 57
+		&& GetRasterLineSchedule(GraphicsMode::AnticE, 0, 240,
+			PlayfieldWidth::Wide).timing->cpu_slots == 50
+		&& GetRasterLineSchedule(GraphicsMode::AnticE, 0, 240,
+			PlayfieldWidth::Wide).optimizer_cycle_limit == 46,
+		"mode E normal and wide widths need distinct exact DMA budgets");
 
 	raster_picture picture(24);
 	picture.graphics_mode = GraphicsMode::Antic4;
+	picture.playfield_width = PlayfieldWidth::Wide;
 	picture.antic4_attributes.assign(3, 0);
 	SRasterInstruction load{};
 	load.loose.instruction = E_RASTER_LDA;
@@ -222,6 +273,7 @@ void TestAntic4TimingProfiles()
 		"mode E must reject COLPF3 stores");
 	raster_picture antic4(8);
 	antic4.graphics_mode = GraphicsMode::Antic4;
+	antic4.playfield_width = PlayfieldWidth::Wide;
 	antic4.antic4_attributes.assign(1, 0);
 	antic4.raster_lines[0] = legacy.raster_lines[0];
 	Require(ValidateRasterPicture(antic4) == E_RASTER_VALID,
@@ -248,13 +300,13 @@ void TestAntic4EncodingPrimitives()
 		"alternate glyph value 11 must select COLPF3");
 	Require(!EncodeAntic4PlayfieldTarget(E_COLOR3, false, encoded),
 		"normal cells must reject COLPF3");
-	Require(Antic4ScreenCode(0, 41, false) == 41,
+	Require(Antic4ScreenCode(0, 41, 42, false) == 41,
 		"first private-glyph row must end at glyph 41");
-	Require(Antic4ScreenCode(1, 0, false) == 42,
+	Require(Antic4ScreenCode(1, 0, 42, false) == 42,
 		"second private-glyph row must begin at glyph 42");
-	Require(Antic4ScreenCode(2, 41, true) == (125 | 0x80),
+	Require(Antic4ScreenCode(2, 41, 42, true) == (125 | 0x80),
 		"third private-glyph row must end at inverse glyph 125");
-	Require(Antic4ScreenCode(3, 0, false) == 0,
+	Require(Antic4ScreenCode(3, 0, 42, false) == 0,
 		"next charset must reuse glyph zero");
 }
 
@@ -289,6 +341,18 @@ void TestGtiaPriority0Resolver()
 		"P2 must suppress P3 before mixing with PF3");
 	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLBAK, 8) == 0x40,
 		"an active P3 must replace background");
+	Require(ResolveGtiaPriorityFColorIndex(colors, E_COLBAK, 1) == 0x08,
+		"PRIOR F must show P0 over background");
+	Require(ResolveGtiaPriorityFColorIndex(colors, E_COLOR0, 1) == 0x00,
+		"conflicting PRIOR bits must blank a PF0/P0 overlap");
+	Require(ResolveGtiaPriorityFColorIndex(colors, E_COLOR2, 1) == 0x43,
+		"PF2 must suppress P0 with PRIOR F");
+	Require(ResolveGtiaPriorityFColorIndex(colors, E_COLOR2, 4) == 0x00,
+		"conflicting PRIOR bits must blank a PF2/P2 overlap");
+	Require(ResolveGtiaPriority4ColorIndex(colors, E_COLBAK, 4) == 0x20,
+		"PRIOR 4 must show P2 over background");
+	Require(ResolveGtiaPriority4ColorIndex(colors, E_COLOR1, 4) == 0x22,
+		"PRIOR 4 must keep PF1 above P2");
 }
 
 }

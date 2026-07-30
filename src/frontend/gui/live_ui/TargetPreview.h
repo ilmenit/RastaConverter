@@ -22,8 +22,8 @@
 
 namespace rc_live_ui {
 
-// A preview surface in SDL_PIXELFORMAT_ABGR8888 order, at Atari color-clock
-// resolution (160 wide for ANTIC E, 168 wide for wide-playfield ANTIC 4).
+// A preview surface in SDL_PIXELFORMAT_ABGR8888 order, at Atari colour-clock
+// resolution (160 for normal playfield or 168 for wide playfield).
 struct PreviewImage {
 	int width = 0;
 	int height = 0;
@@ -45,7 +45,8 @@ const char* PreviewStageName(PreviewStage stage);
 // Mirrors the converter's automatic-height rule. Exposed so the setup control
 // can display the same resolved value as the preview and conversion.
 int ResolveTargetHeight(int configured, int input_width, int input_height);
-int ResolveOutputHeight(GraphicsMode mode, int configured,
+int ResolveOutputHeight(GraphicsMode mode, PlayfieldWidth playfield,
+	int configured,
 	int input_width, int input_height);
 
 struct PreviewResult {
@@ -126,6 +127,7 @@ private:
 		std::string input_file;
 		std::string palette_file;
 		GraphicsMode graphics_mode = GraphicsMode::AnticE;
+		PlayfieldWidth playfield_width = PlayfieldWidth::Normal;
 		int height = -1;
 		FREE_IMAGE_FILTER filter = FILTER_BOX;
 		int brightness = 0;

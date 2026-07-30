@@ -64,16 +64,26 @@ or pass `/graphics_mode=antic4` on the command line:
 RastaConverter photo.jpg /graphics_mode=antic4 /h=200 /threads=8
 ```
 
-This mode uses ANTIC's wide playfield: 42 visible character cells, or 168 Atari
-colour clocks shown as 336 square preview pixels. Every 4x8 cell has four
-colours selected from COLBK, COLPF0, COLPF1, and either COLPF2 or COLPF3. The
-optimizer searches that per-cell choice as well as raster colour changes and
-player/missile graphics.
+Use `/playfield=normal|wide` for either graphics mode. Normal is the default
+for both ANTIC E and ANTIC 4:
 
-ANTIC 4 output is currently single-frame only. Its height is rounded to a
-complete 8-scanline character row and clamped to 8–240; selecting it in the UI
-temporarily disables dual-frame output. A save produces the usual `.rp`,
-`.opt`, `.pmg`, and optimizer-state files plus `.a4.scr` and `.a4.fnt`.
+```sh
+RastaConverter photo.jpg /graphics_mode=antic4
+RastaConverter photo.jpg /graphics_mode=e /playfield=wide
+```
+
+Normal output is 160 Atari colour clocks (320 square preview pixels); wide
+output is the central 168 clocks of ANTIC's 48-byte DMA window (336 pixels).
+In normal ANTIC 4, P2/P3 and two fifth-player missiles mask the four-clock side
+strips. `PRIOR=$1F` makes each overlap resolve to hardware black independently
+of COLPF3. Every 4x8 cell has four colours selected from COLBK, COLPF0, COLPF1,
+and either COLPF2 or COLPF3.
+
+ANTIC 4 output and wide-playfield output are currently single-frame only.
+ANTIC 4 height is rounded to a complete 8-scanline character row and clamped
+to 8–240; selecting an incompatible mode in the UI disables dual-frame output.
+A save produces the usual `.rp`, `.opt`, `.pmg`, and optimizer-state files
+plus `.a4.scr` and `.a4.fnt` for ANTIC 4.
 The **XEX** action in Recent automatically selects the bundled ANTIC 4 MADS
 template and assembles a runnable executable.
 

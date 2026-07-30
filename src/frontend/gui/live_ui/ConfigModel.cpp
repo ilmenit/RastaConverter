@@ -36,6 +36,8 @@ const char* const kGraphicsModeLabels[2] = {
 	"ANTIC 4 (text mode)", "ANTIC E (gfx mode)"
 };
 const char* const kGraphicsModeTokens[2] = {"antic4", "e"};
+const char* const kPlayfieldWidthLabels[2] = {"Normal", "Wide"};
+const char* const kPlayfieldWidthTokens[2] = {"normal", "wide"};
 
 const char* const kOptimizerLabels[3] = {"DLAS", "LAHC", "Legacy LAHC"};
 const char* const kOptimizerTokens[3] = {"dlas", "lahc", "legacy"};
@@ -141,6 +143,17 @@ std::vector<OptionDesc> BuildTable()
 		},
 		[](const Configuration& c) {
 			return kGraphicsModeTokens[GraphicsModeIndex(c.graphics_mode)];
+		});
+	add("playfield", "playfield", "Playfield width",
+		"Normal renders 160 color clocks; wide renders the central 168 clocks "
+		"of ANTIC's 48-byte DMA window.",
+		Category::Source, Tier::Restart, false,
+		[](const Configuration& c) {
+			return c.playfield_width != DefaultPlayfieldWidth(c.graphics_mode);
+		},
+		[](const Configuration& c) {
+			return kPlayfieldWidthTokens[
+				PlayfieldWidthIndex(c.playfield_width)];
 		});
 	add("input", "i", "Input image",
 		"Source image to convert. Any format FreeImage reads; drag and drop works too.",
@@ -344,7 +357,7 @@ std::vector<OptionDesc> BuildTable()
 	// --- 3 Dual frame ------------------------------------------------------
 	add("dual", "dual", "Dual-frame mode",
 		"Produces two interleaved frames, trading flicker for apparent colour "
-		"depth.",
+		"depth. Currently available only with normal-width ANTIC E.",
 		Category::Algorithm, Tier::Restart, false,
 		[](const Configuration& c) { return c.dual_mode != Defaults().dual_mode; },
 		[](const Configuration& c) { return std::string(c.dual_mode ? "on" : "off"); });
@@ -656,6 +669,9 @@ std::string DisplayValue(const OptionDesc& option, const Configuration& cfg)
 		return cfg.height <= 0 ? "auto" : std::to_string(cfg.height);
 	if (option.id == "graphics_mode")
 		return kGraphicsModeLabels[GraphicsModeIndex(cfg.graphics_mode)];
+	if (option.id == "playfield")
+		return kPlayfieldWidthLabels[
+			PlayfieldWidthIndex(cfg.playfield_width)];
 	if (option.id == "seed")
 		return cfg.initial_seed == 0 ? "random" : std::to_string(cfg.initial_seed);
 	if (option.id == "max_evals")
@@ -696,6 +712,11 @@ int GraphicsModeIndex(GraphicsMode mode)
 	return mode == GraphicsMode::Antic4 ? 0 : 1;
 }
 
+int PlayfieldWidthIndex(PlayfieldWidth width)
+{
+	return width == PlayfieldWidth::Normal ? 0 : 1;
+}
+
 void ApplyGraphicsModeChoice(Configuration& cfg, GraphicsMode mode,
 	bool& antic_e_dual_mode)
 {
@@ -714,7 +735,8 @@ void ApplyGraphicsModeChoice(Configuration& cfg, GraphicsMode mode,
 	}
 	else
 	{
-		cfg.dual_mode = antic_e_dual_mode;
+		cfg.dual_mode = cfg.playfield_width == PlayfieldWidth::Normal
+			&& antic_e_dual_mode;
 	}
 }
 

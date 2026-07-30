@@ -85,31 +85,36 @@ void DrawSourceSection(SetupState& state, FileDialogs& dialogs, SDL_Window* wind
 			state.height_auto = cfg.height <= 0;
 		}
 	}
+	if (Row("playfield", cfg)) {
+		int width = PlayfieldWidthIndex(cfg.playfield_width);
+		if (ComboTokens(
+			"##playfield", &width, kPlayfieldWidthLabels, 2))
+		{
+			cfg.playfield_width = width == 0
+				? PlayfieldWidth::Normal : PlayfieldWidth::Wide;
+			if (cfg.playfield_width == PlayfieldWidth::Wide)
+				cfg.dual_mode = false;
+		}
+	}
 
-	// Width is decided by the graphics mode, so it is shown rather than edited.
-	// It sits above Height because the pair reads as one output size, and
-	// because the wide playfield is the surprising half of the ANTIC 4 choice.
+	// Width follows the selected ANTIC DMA width.
 	if (!FilterActive()) {
-		const bool antic4 = cfg.graphics_mode == GraphicsMode::Antic4;
-		const int clocks = antic4 ? antic4_visible_width : 160;
+		const bool wide = cfg.playfield_width == PlayfieldWidth::Wide;
+		const int clocks = PlayfieldVisibleWidth(cfg.playfield_width);
 		FormRow("Width",
-			"Fixed by the graphics mode - there is nothing to choose here.\n\n"
+			"Fixed by the selected playfield width.\n\n"
 			"An Atari color clock is twice as wide as a scanline is tall, so the "
 			"picture is stored one pixel per color clock and displayed at double "
 			"width. Each color clock becomes 2 square pixels, which is what makes "
 			"the result look correctly proportioned rather than squashed.\n\n"
-			"ANTIC E uses the normal playfield: 160 color clocks, shown as 320 "
-			"square pixels. The narrow strips of border left at each side are "
-			"painted over by missiles.\n\n"
-			"ANTIC 4 uses the wide playfield: 168 color clocks, shown as 336 "
-			"square pixels. It spends every playfield color register on the "
-			"character cells, so no register is left to make those side strips "
-			"black. Instead of hiding the border, the picture is made wide "
-			"enough to fill it.");
+			"Normal is 160 color clocks (320 square pixels). Wide exposes the "
+			"central 168 clocks of ANTIC's 48-byte DMA window (336 square "
+			"pixels). In normal ANTIC 4, reserved players and fifth-player "
+			"missiles force the four-clock side strips to hardware black.");
 		ImGui::AlignTextToFramePadding();
 		ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kText));
 		ImGui::Text("%d color clocks - %d square pixels wide (%s playfield)",
-			clocks, clocks * 2, antic4 ? "wide" : "normal");
+			clocks, clocks * 2, wide ? "wide" : "normal");
 		ImGui::PopStyleColor();
 	}
 
@@ -119,7 +124,7 @@ void DrawSourceSection(SetupState& state, FileDialogs& dialogs, SDL_Window* wind
 			+ ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x * 2.0f;
 		ImGui::BeginDisabled(state.height_auto);
 		int height = state.height_auto
-			? ResolveOutputHeight(cfg.graphics_mode, -1,
+			? ResolveOutputHeight(cfg.graphics_mode, cfg.playfield_width, -1,
 				state.input_width, state.input_height)
 			: cfg.height;
 		if (ValueSliderInt("h", &height,
@@ -533,7 +538,8 @@ void DrawDualGroup(SetupState& state)
 	if (!BeginForm("dual"))
 		return;
 
-	const bool unavailable = cfg.graphics_mode == GraphicsMode::Antic4;
+	const bool unavailable = cfg.graphics_mode == GraphicsMode::Antic4
+		|| cfg.playfield_width == PlayfieldWidth::Wide;
 	ImGui::BeginDisabled(unavailable);
 	if (Row("dual", cfg))
 		ImGui::Checkbox("##dual", &cfg.dual_mode);
@@ -626,10 +632,12 @@ std::string SectionSummary(Category category, const Configuration& cfg,
 	switch (category) {
 	case Category::Source:
 		append(value("graphics_mode"));
+		append(value("playfield") + " playfield");
 		if (state.height_auto) {
 			append("auto height ("
 				+ std::to_string(ResolveOutputHeight(cfg.graphics_mode,
-					-1, state.input_width, state.input_height))
+					cfg.playfield_width, -1,
+					state.input_width, state.input_height))
 				+ " lines)");
 		} else {
 			append(value("height") + " lines");

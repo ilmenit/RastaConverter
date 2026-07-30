@@ -6,9 +6,23 @@
 	icl "no_name.h"
 	icl "output.png.opt.h"
 
+	.ifdef PIC_WIDTH
+	.else
+* Headers produced before playfield selection existed are wide ANTIC 4.
+PIC_WIDTH = 168
+PLAYFIELD_WIDE = 1
+PIC_ROW_BYTES = 42
+	eif
+
 A4_CHAR_ROWS = PIC_HEIGHT/8
 A4_CHARSETS = (A4_CHAR_ROWS+2)/3
-A4_SCREEN_BYTES = A4_CHAR_ROWS*48
+A4_VISIBLE_CHARS = PIC_WIDTH/4
+	IFT PLAYFIELD_WIDE=1
+A4_DMA_CHARS = 48
+	ELS
+A4_DMA_CHARS = 40
+	eif
+A4_SCREEN_BYTES = A4_CHAR_ROWS*A4_DMA_CHARS
 A4_DISPLAY_LIST_BYTES = A4_CHAR_ROWS+5
 A4_FONT_BYTES = A4_CHARSETS*$0400
 
@@ -64,7 +78,13 @@ main
 	mva >display_list dlptr+1
 	mva >charset_0 chbase
 	mva #$00 chrctl
+	IFT PLAYFIELD_WIDE=1
 	mva #$00 gtictl
+	ELS
+	* Conflicting PRIOR bits plus fifth-player mode make a reserved player
+	* overlapping a missile resolve to hardware black, independent of COLPF3.
+	mva #$1f gtictl
+	EIF
 	mva >pmgbase pmbase
 	* The evaluator models each player at quadruple width (32 color clocks).
 	* Keep the generated hardware state identical to that model.
@@ -72,8 +92,21 @@ main
 	sta sizep1
 	sta sizep2
 	sta sizep3
+	IFT PLAYFIELD_WIDE=1
 	mva #$02 pmcntl
 	mva #%00111111 dmactl
+	ELS
+	mva #$03 pmcntl
+	mva #%00111110 dmactl
+	* Four color clocks of black immediately outside each normal-playfield
+	* edge. GTIA's missile shifters start four color clocks after the players,
+	* so their HPOS values are four lower to overlap the reserved player bits.
+	mva #$d0 hposp2
+	mva #$cc hposm2
+	mva #$2c hposp3
+	mva #$28 hposm3
+	mva #$f0 sizem
+	EIF
 
 frame
 	* Black out the border before anything else. The display list runs out
@@ -106,6 +139,13 @@ wait_frame_start
 
 	* Restore the evaluator's canonical frame-entry hardware state.
 	icl "output.png.opt.ini"
+	IFT PLAYFIELD_WIDE=1
+	ELS
+	* The generated init restores optimizer state, so reassert the two players
+	* reserved for the normal-width black side masks.
+	mva #$d0 hposp2
+	mva #$2c hposp3
+	EIF
 	mva >charset_0 chbase
 
 	* Wait for the VCOUNT 2->3 transition (ANTIC scanline 6), then use

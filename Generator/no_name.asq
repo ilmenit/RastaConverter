@@ -6,6 +6,14 @@
 	icl "no_name.h"
 	icl "output.png.opt.h"
 
+	.ifdef PIC_WIDTH
+	.else
+* Headers produced before playfield selection existed are normal ANTIC E.
+PIC_WIDTH = 160
+PLAYFIELD_WIDE = 0
+PIC_ROW_BYTES = 40
+	eif
+
 	org $00
 
 fcnt	.ds 2
@@ -24,16 +32,23 @@ zc	.ds ZCOLORS
 
 * ---	MAIN PROGRAM
 	org $2010
-	IFT PIC_HEIGHT>=204
-scr	ins "output.png.mic", 0, 8160
-	:16 .byte 0
-	ins "output.png.mic" , +8160
+* Store every source row in a 64-byte slot. This keeps both 40-byte normal
+* rows and 48-byte wide DMA rows from crossing ANTIC's 4 KiB scan counter.
+SCREEN_STRIDE = 64
+scr
+	.rept PIC_HEIGHT
+	IFT PLAYFIELD_WIDE=1
+		:3 .byte 0
+		ins "output.png.mic", #*PIC_ROW_BYTES, PIC_ROW_BYTES
+		:3 .byte 0
+		:16 .byte 0
 	ELS
-scr	ins "output.png.mic"
-	EIF
-
+		ins "output.png.mic", #*PIC_ROW_BYTES, PIC_ROW_BYTES
+		:SCREEN_STRIDE-PIC_ROW_BYTES .byte 0
+	eif
+	.endr
 	.ifdef nil_used
-nil	:8*40 brk
+nil	:8*PIC_ROW_BYTES brk
 	eif
 
 	.ALIGN $0400
@@ -52,7 +67,11 @@ main
 
 	ift USESPRITES
 	mva >pmg pmbase		;missiles and players data address
+	IFT PLAYFIELD_WIDE=1
+	mva #$02 pmcntl		;enable players
+	ELS
 	mva #$03 pmcntl		;enable players and missiles
+	eif
 	eif
 
 	lda:cmp:req $14		;wait 1 frame
@@ -74,7 +93,11 @@ LOOP	lda vcount		;synchronization for the first screen line
 	cmp #$02
 	bne LOOP
 
-	mva #%00111110 dmactl	;set new screen width
+	IFT PLAYFIELD_WIDE=1
+	mva #%00111111 dmactl	;wide playfield
+	ELS
+	mva #%00111110 dmactl	;normal playfield
+	eif
 	mva <ant dlptr
 	mva >ant dlptr+1
 
@@ -120,12 +143,15 @@ s0	lda #$03
 	sta sizep2
 	sta sizep3
 	mva #$ff sizem
-	sta grafm
-	mva #$20 hposm0
-	mva #$28 hposm1
-	mva #$d0 hposm2
-	mva #$d8 hposm3
+	IFT PLAYFIELD_WIDE=1
 	mva #$02 pmcntl
+	ELS
+	mva #$00 grafm
+	mva #$cc hposm2
+	mva #$28 hposm3
+	mva #$f0 sizem
+	mva #$03 pmcntl
+	eif
 	lda #$14
 	sta gtictl
 
@@ -193,20 +219,9 @@ byt3	brk
 * registers before the first of them becomes visible, which is timing luck
 * rather than a design. Anything that upsets that timing shows the fetched
 * memory as a band of garbage under the picture.
-	IFT PIC_HEIGHT<=204
 	.rept PIC_HEIGHT
-	dta $4e,a(:1+#*40)
+	dta $4e,a(:1+#*SCREEN_STRIDE)
 	.endr
-	ELS
-* Past line 204 the picture data is displaced by the 16 padding bytes that keep
-* it clear of a 4 KiB boundary - see the ins block at scr.
-	.rept 204
-	dta $4e,a(:1+#*40)
-	.endr
-	.rept PIC_HEIGHT-204
-	dta $4e,a(:1+$1FF0+#*40)
-	.endr
-	EIF
 	dta $41,a(:2)
 .ENDM
 
@@ -228,4 +243,3 @@ ZCOLORS	= 0
 .ENDM
 
 USESPRITES = 1
-

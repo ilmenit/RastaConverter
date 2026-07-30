@@ -10,8 +10,10 @@ instructions are in [README.md](README.md).
 
 - Select with `/graphics_mode=antic4` or **ANTIC 4 (text mode)** in the Live UI.
 - ANTIC E remains the default and follows its existing code path.
-- The target is 168 Atari colour clocks wide: 42 visible 4x8 cells in ANTIC's
-  wide playfield. Saved previews are doubled horizontally to 336 square pixels.
+- `/playfield=normal` is the default: 160 colour clocks and 40 cells. P2/P3 are
+  reserved for the black side masks, leaving P0/P1 available to the converter.
+- `/playfield=wide` selects 168 visible colour clocks and 42 cells in the
+  center of the 48-byte DMA window.
 - Heights are complete character rows: 8–240 scanlines in multiples of eight.
   Automatic and explicit heights are rounded to the nearest legal row.
 - ANTIC 4 is single-frame only. `/graphics_mode=antic4 /dual` is rejected, and
@@ -37,22 +39,24 @@ Each screen byte selects one 4x8 glyph:
 
 Bit 7 is therefore a per-cell fourth-colour selector, not general inverse
 video. Five playfield registers exist globally, while one cell can use four of
-them at a time. The optimizer stores one 42-bit attribute mask per character
-row and mutates individual cell choices.
+them at a time. The optimizer stores one 40- or 42-bit attribute mask per
+character row and mutates individual cell choices.
 
 ## Screen and character-set layout
 
-ANTIC fetches 48 screen bytes per wide row. The exported `.a4.scr` row contains:
+The exported `.a4.scr` row is one of:
 
 ```text
-3 hidden bytes | 42 visible cells | 3 hidden bytes
+normal: 40 visible cells
+wide:    3 hidden bytes | 42 visible cells | 3 hidden bytes
 ```
 
-One LMS at the first row is sufficient because the maximum 30 rows occupy only
-1,440 bytes and do not cross ANTIC's 4 KiB playfield wrap.
+One LMS at the first row is sufficient because neither layout crosses ANTIC's
+4 KiB playfield wrap.
 
-Every visible cell receives a private glyph. Three 42-cell rows fit in one
-128-glyph, 1 KiB character set:
+Every visible cell receives a private glyph. Three rows fit in one 128-glyph,
+1 KiB character set. Normal rows use glyph ranges 0–39, 40–79, and 80–119;
+wide rows use:
 
 ```text
 row 0 in group -> glyphs   0..41
@@ -61,7 +65,7 @@ row 2 in group -> glyphs  84..125
 glyphs 126..127 -> unused
 ```
 
-For visible cell `x`, character row `r`, and scanline `y`:
+For a wide-playfield visible cell `x`, character row `r`, and scanline `y`:
 
 ```text
 charset       = r / 3
@@ -77,7 +81,7 @@ needed. The final line never switches to an unused set.
 
 ## DMA and raster timing
 
-The generated display enables wide ANTIC mode 4, one LMS, single-line
+The generated display enables normal or wide ANTIC mode 4, one LMS, single-line
 player/missile DMA, quadruple-width players, and no horizontal scrolling.
 Raster code runs continuously without per-line WSYNC, so each line body plus
 its fixed suffix must consume every available logical CPU slot.
@@ -106,10 +110,31 @@ continuation after a badline (52):
 The line after a wide badline loses its `-8` slot because the badline's ninth
 refresh request is deferred to ANTIC cycle 106.
 
-The playfield starts at ANTIC cycle 22. A slot maps to evaluator colour-clock
-offset `(slot - 22) * 2`. A four-cycle store takes effect on its fourth CPU
-slot; the evaluator resolves that completion through the selected slot map.
-ANTIC E retains its historical timing map and calibrated write behavior.
+Normal DMA begins eight ANTIC cycles later. Its exact slot maps are:
+
+```text
+LMS badline (25):
+  -8,-7,-6,-5,-4,-3,-2,-1,8,9,10,11,12,13,14,15,16,17,19,
+  100,101,102,103,104,105
+
+ordinary badline (27):
+  -8,-7,-6,-5,-4,-3,-2,-1,6,7,8,9,10,11,12,13,14,15,16,17,19,
+  100,101,102,103,104,105
+
+continuation (60):
+  -8,-7,-6,-5,-4,-3,-2,-1,1,6,7,8,9,10,11,12,13,14,15,16,17,
+  18,19,20,22,24,28,32,36,40,44,48,52,56,60,62,64,66,68,70,
+  72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,101,102,103,104,105
+```
+
+Normal DMA services refresh before cycle 106, so the line following a badline
+uses the ordinary 60-slot continuation map.
+
+The wide playfield starts at ANTIC cycle 22 and the normal playfield at cycle
+24. A slot maps to evaluator colour-clock offset `(slot - displayStart) * 2`.
+A four-cycle store takes effect on its fourth CPU slot; the evaluator resolves
+that completion through the selected slot map. ANTIC E retains its calibrated
+write behavior with separate normal and wide DMA maps.
 
 | Line kind | Optimizer cycles | Fixed suffix | Total slots |
 |---|---:|---:|---:|
@@ -119,33 +144,47 @@ ANTIC E retains its historical timing map and calibrated write behavior.
 | ordinary continuation | 48 | 5 | 53 |
 | CHBASE transition | 44 | 9 | 53 |
 
-The transition suffix is `BIT zp` + `LDA #` + `STA CHBASE`. The store completes
-on ANTIC cycle 104; the old character data is fetched at 105 and the queued
-CHBASE value is active before the next line fetch.
+Normal-width budgets are 20+5 slots on the first badline, 22+5 on later
+badlines, 56+4 on continuations, and 50+10 on CHBASE transitions.
+
+The wide transition suffix is `BIT zp` + `LDA #` + `STA CHBASE`; normal uses
+the one-cycle-longer `BIT abs`. The store completes on ANTIC cycle 104; the old
+character data is fetched at 105 and the queued CHBASE value is active before
+the next line fetch.
 
 ## Saved state and generated files
 
 `E_COLOR3` is appended to the target enum so existing serialized target IDs do
 not change. Mode-E serializers omit it. ANTIC 4 raster pictures carry the
-graphics-mode marker and one low-42-bit attribute mask per character row.
+graphics-mode and playfield-width markers and one low-40- or low-42-bit
+attribute mask per character row.
 Attributes participate in candidate copying, validation, cache keys,
 publication, optimizer state, resume, and final export.
 
 An ANTIC 4 save produces:
 
 - `.rp` and `.opt` raster programs with `Graphics Mode: ANTIC 4` metadata;
-- `.optstate`, including the graphics mode and cell attributes;
+- `.optstate`, including the graphics mode, playfield width, and cell
+  attributes;
 - `.pmg` player/missile data;
-- `.a4.scr`, containing 48 bytes per character row;
+- `.a4.scr`, containing 40 bytes per normal row or 48 bytes per wide row;
 - `.a4.fnt`, containing the required 1 KiB character sets;
 - the usual preview, source, destination, CSV, and metadata files.
 
 `Generator/antic4.asq` builds the executable. It installs a mode-4 display
-list, initializes CHACTL, CHBASE, wide DMA, PMG state and colour registers,
+list, initializes CHACTL, CHBASE, selected-width DMA, PMG state and colour
+registers,
 includes the exported data, restores charset zero each frame, and asserts that
 screen, display list, PMG, raster code, fonts, and hardware space do not
 overlap. The Recent view selects this template automatically when both ANTIC 4
 data files are present.
+
+For normal width, the generator reserves P2/P3 and uses them with M2/M3 as
+four-colour-clock black masks at the left and right edges. `PRIOR=$1F` enables
+fifth-player missiles and all four conflicting priority bits. The overlapping
+player/missile signals consequently suppress every colour output, including
+COLPF3, so the masks resolve to hardware black without consuming a palette
+colour.
 
 ## Validation
 
@@ -174,11 +213,11 @@ artifacts with bundled MADS.
 ## Current limitations
 
 - no ANTIC 4 dual-frame output;
-- no arbitrary, narrow, or normal-width mode-4 playfield;
+- no arbitrary or narrow playfield width;
 - no mid-line player movement;
 - no glyph deduplication or character-set compression;
-- no new PRIOR, fifth-player, overlap, or missile behavior beyond the existing
-  evaluator model.
+- normal ANTIC 4 reserves P2/P3 for border masking, leaving P0/P1 available to
+  image conversion.
 
 Unsupported combinations should fail clearly rather than silently falling back
 to ANTIC E.

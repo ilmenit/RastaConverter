@@ -251,13 +251,12 @@ s0	lda #$03
 	sta sizep1
 	sta sizep2
 	sta sizep3
-	mva #$ff sizem
-	sta grafm
-	mva #$20 hposm0
-	mva #$28 hposm1
-	mva #$d0 hposm2
-	mva #$d8 hposm3
-	mva #$02 pmcntl
+	* M2/M3 cover the four colour clocks just outside the normal playfield.
+	* Missile DMA supplies bits 6 and 4 ($50) from both PMG pages.
+	mva #$cc hposm2
+	mva #$28 hposm3
+	mva #$f0 sizem
+	mva #$03 pmcntl
 	lda #$14
 	sta gtictl
 	.ENDM
@@ -352,5 +351,4 @@ CL
 .MACRO	SPRITES_B
 	icl "out_dual_B.pmg"
 .ENDM
-
 
