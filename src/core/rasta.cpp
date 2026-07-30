@@ -724,6 +724,7 @@ void RastaConverter::LoadDetailsMap()
 		published.editable_values = details_mask.EditableValues().data();
 		published.width = static_cast<int>(details_mask.Width());
 		published.height = static_cast<int>(details_mask.Height());
+		published.active = true;
 		gui.PublishDetailsMask(published);
 	}
 	if (cfg.continue_processing && cfg.details_score
@@ -1160,6 +1161,7 @@ bool RastaConverter::ApplyMaskEditLocked(const GuiEditorApply& request)
 	published.editable_values = details_mask.EditableValues().data();
 	published.width = m_width;
 	published.height = m_height;
+	published.active = true;
 	gui.PublishDetailsMask(published);
 	return true;
 }

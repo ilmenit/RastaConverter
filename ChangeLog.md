@@ -17,6 +17,9 @@ RastaConverter1.0-RC3      2026-07-30 [RELEASE CANDIDATE]
 * Added GUI support throughout setup, preview, copied command lines, recent-run
   badges, and XEX freshness detection. Dual-frame controls are disabled because
   ANTIC 4 is currently single-frame only.
+* The in-conversion viewer now hides its Mask display controls when no details
+  mask is active, while retaining the neutral layer needed to start live
+  painting.
 * Preserved the ANTIC E code path and merged the RC2 portability fixes. Unit
   tests, ANTIC E and ANTIC 4 conversion smoke tests, and ANTIC 4 XEX assembly
   all pass after integration.

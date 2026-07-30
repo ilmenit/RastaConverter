@@ -76,7 +76,7 @@ public:
 	// The effective details-mask weights, for the viewer's overlay, plus the
 	// editable source layer the editor paints on.
 	void SetMask(const PreviewImage& mask,
-		const std::vector<unsigned char>& editable_values);
+		const std::vector<unsigned char>& editable_values, bool active);
 	void SetDestinationLayer(const std::vector<unsigned char>& palette_indices,
 		int width, int height);
 	bool TakeEditorApply(GuiEditorApply& request);
@@ -98,6 +98,7 @@ private:
 	void DrawRail();
 
 	ImageViewer viewer_;
+	bool mask_active_ = false;
 	PaintEditor editor_;
 	LiveStats stats_;
 	ProgressTrace trace_;

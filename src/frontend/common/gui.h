@@ -33,6 +33,10 @@ struct GuiDetailsMask {
 	const unsigned char* editable_values = nullptr;
 	int width = 0;
 	int height = 0;
+	// A neutral mask is still published so the live editor can begin painting,
+	// but it is not a meaningful overlay until a file was loaded or a user
+	// edit was applied.
+	bool active = false;
 };
 
 // A completed paint stroke. Changes are coalesced per pixel by the UI, so the

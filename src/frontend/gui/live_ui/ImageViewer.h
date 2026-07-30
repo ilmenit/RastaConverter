@@ -59,6 +59,9 @@ public:
 	// Supplies the details-mask overlay. An invalid image removes it, and the
 	// control disappears with it.
 	void SetMask(const PreviewImage& mask);
+	// Neutral masks remain available to the paint editor but are not useful
+	// viewer overlays.
+	void set_mask_active(bool active) { mask_active_ = active; }
 	bool has_content() const { return content_valid_; }
 
 private:
@@ -87,6 +90,7 @@ private:
 	// Percent, because that is what the slider shows; ImGui does not scale a
 	// 0..1 value for a "%%" format and rendered 0.55 as "1%".
 	float mask_opacity_percent_ = 40.0f;
+	bool mask_active_ = false;
 	int content_width_ = 0;
 	int content_height_ = 0;
 	bool content_valid_ = false;

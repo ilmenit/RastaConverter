@@ -370,13 +370,14 @@ void Dashboard::SetImage(PreviewStage stage, int width, int height,
 }
 
 void Dashboard::SetMask(const PreviewImage& mask,
-	const std::vector<unsigned char>& editable_values)
+	const std::vector<unsigned char>& editable_values, bool active)
 {
 	// Kept in the same content block as the pictures. Setting it straight on
 	// the viewer instead would be undone by the next image publish, because
 	// SetContent re-applies content_.mask - which would still be empty.
 	content_.mask = mask;
 	editor_.SetMaskLayer(editable_values, mask.width, mask.height);
+	mask_active_ = active;
 	content_dirty_ = true;
 }
 
@@ -712,6 +713,7 @@ LiveCommand Dashboard::Draw()
 {
 	if (content_dirty_) {
 		viewer_.SetContent(content_);
+		viewer_.set_mask_active(mask_active_);
 		editor_.SetContent(content_);
 		content_dirty_ = false;
 	}

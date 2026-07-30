@@ -356,7 +356,7 @@ void RastaSDL::PublishDetailsMask(const GuiDetailsMask& mask)
 #if defined(RASTA_ENABLE_LIVE_UI)
 	if (liveOverlay) {
 		liveOverlay->PublishDetailsMask(mask.values, mask.editable_values,
-			mask.width, mask.height);
+			mask.width, mask.height, mask.active);
 		frameDirty = true;
 	}
 #else
