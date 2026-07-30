@@ -96,6 +96,14 @@ wait_frame_start
 	lda vcount
 	bne wait_frame_start
 
+	* A 240-scanline display list leaves no scan line for its JVB. ANTIC
+	* therefore reaches vertical blank before fetching the JVB and resumes
+	* from it on the following frame, which makes the picture appear only
+	* every other frame. Restart the display list explicitly during vertical
+	* blank so all 30 character rows are displayed on every frame.
+	mva <display_list dlptr
+	mva >display_list dlptr+1
+
 	* Restore the evaluator's canonical frame-entry hardware state.
 	icl "output.png.opt.ini"
 	mva >charset_0 chbase

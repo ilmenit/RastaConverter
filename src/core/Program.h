@@ -171,6 +171,52 @@ inline bool EncodeAntic4PlayfieldTarget(
 	}
 }
 
+// Resolve one color clock through GTIA's PRIOR=$00 equations. ANTIC 4 XEX
+// output uses this priority mode, with multiple-color players and fifth-player
+// mode disabled. playerMask bit N means player N is active at this color clock.
+//
+// In mode 0, P0/P1 mix with PF0/PF1 and cover PF2/PF3, while P2/P3 are
+// covered by PF0/PF1 and mix with PF2/PF3. The first active player in hardware
+// priority order wins within each pair. Mixed colors are the bitwise OR of the
+// contributing GTIA color registers.
+inline unsigned char ResolveGtiaPriority0ColorIndex(
+	const unsigned char* colorRegisters, e_target playfield,
+	unsigned playerMask)
+{
+	assert(colorRegisters != nullptr);
+	assert(playfield == E_COLBAK || playfield == E_COLOR0
+		|| playfield == E_COLOR1 || playfield == E_COLOR2
+		|| playfield == E_COLOR3);
+
+	int player = -1;
+	for (int index = 0; index < 4; ++index)
+	{
+		if (playerMask & (1u << index))
+		{
+			player = index;
+			break;
+		}
+	}
+
+	unsigned char color = colorRegisters[playfield];
+	if (player < 0)
+		return static_cast<unsigned char>(color >> 1);
+
+	const unsigned char playerColor =
+		colorRegisters[static_cast<int>(E_COLPM0) + player];
+	if (playfield == E_COLBAK)
+		color = playerColor;
+	else if (player < 2)
+		color = playfield == E_COLOR0 || playfield == E_COLOR1
+			? static_cast<unsigned char>(color | playerColor)
+			: playerColor;
+	else
+		color = playfield == E_COLOR0 || playfield == E_COLOR1
+			? color
+			: static_cast<unsigned char>(color | playerColor);
+	return static_cast<unsigned char>(color >> 1);
+}
+
 inline unsigned char Antic4ScreenCode(
 	int characterRow, int column, bool alternate)
 {

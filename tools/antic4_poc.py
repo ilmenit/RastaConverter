@@ -63,34 +63,16 @@ def make_case(seed: int) -> Case:
     rng = random.Random(seed)
     hpos = (56, 96, 136, 176)
 
-    # Keep the playfield at background under each quadruple-width player. This
-    # leaves player priority out of the first PoC while still checking all four
-    # DMA streams, shapes, positions, and mid-line player color changes.
-    protected_cells: set[int] = set()
-    for pos in hpos:
-        x0 = pos - SCREEN_HPOS
-        protected_cells.update(
-            range(x0 // 4, (x0 + PLAYER_WIDTH - 1) // 4 + 1))
-
     font = bytearray(10 * 1024)
     for i in range(len(font)):
         font[i] = rng.randrange(256)
-    for row in range(HEIGHT // 8):
-        charset = row // 3
-        for cell in protected_cells:
-            glyph = (row % 3) * VISIBLE_CHARS + cell
-            start = charset * 1024 + glyph * 8
-            font[start:start + 8] = bytes(8)
 
     screen = bytearray()
     for row in range(HEIGHT // 8):
         screen.extend(bytes(LEFT_HIDDEN_CHARS))
         for cell in range(VISIBLE_CHARS):
             glyph = (row % 3) * VISIBLE_CHARS + cell
-            if cell in protected_cells:
-                screen.append(glyph)
-            else:
-                screen.append(glyph | (rng.randrange(2) << 7))
+            screen.append(glyph | (rng.randrange(2) << 7))
         screen.extend(bytes(DMA_CHARS - LEFT_HIDDEN_CHARS - VISIBLE_CHARS))
 
     players = tuple(
@@ -316,10 +298,6 @@ def render_local(case: Case) -> list[list[int]]:
                     player = i
                     break
 
-            if player >= 0:
-                frame[y][x] = colors[PM_REGS[player]]
-                continue
-
             code = case.screen[
                 row * DMA_CHARS + LEFT_HIDDEN_CHARS + x // 4]
             charset = row // 3
@@ -334,7 +312,23 @@ def render_local(case: Case) -> list[list[int]]:
                 reg = PF_REGS[1]
             else:
                 reg = PF_REGS[3] if code & 0x80 else PF_REGS[2]
-            frame[y][x] = colors[reg]
+
+            # PRIOR=$00: P0/P1 mix with PF0/PF1 and cover PF2/PF3;
+            # P2/P3 are covered by PF0/PF1 and mix with PF2/PF3.
+            # Lower-numbered active players have priority.
+            if player < 0:
+                color = colors[reg]
+            elif reg == BK_REG:
+                color = colors[PM_REGS[player]]
+            elif player < 2:
+                color = (colors[reg] | colors[PM_REGS[player]]
+                         if reg in PF_REGS[:2]
+                         else colors[PM_REGS[player]])
+            else:
+                color = (colors[reg]
+                         if reg in PF_REGS[:2]
+                         else colors[reg] | colors[PM_REGS[player]])
+            frame[y][x] = color
     return frame
 
 

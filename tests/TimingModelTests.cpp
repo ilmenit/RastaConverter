@@ -258,6 +258,39 @@ void TestAntic4EncodingPrimitives()
 		"next charset must reuse glyph zero");
 }
 
+void TestGtiaPriority0Resolver()
+{
+	unsigned char colors[E_TARGET_MAX + 1]{};
+	colors[E_COLOR0] = 0x22;
+	colors[E_COLOR1] = 0x44;
+	colors[E_COLOR2] = 0x86;
+	colors[E_COLOR3] = 0xA0;
+	colors[E_COLBAK] = 0x08;
+	colors[E_COLPM0] = 0x10;
+	colors[E_COLPM1] = 0x20;
+	colors[E_COLPM2] = 0x40;
+	colors[E_COLPM3] = 0x80;
+
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLOR0, 0) == 0x11,
+		"PRIOR 0 must show an unobstructed PF0 color");
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLOR0, 1) == 0x19,
+		"PRIOR 0 must OR P0 with PF0");
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLOR1, 2) == 0x32,
+		"PRIOR 0 must OR P1 with PF1");
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLOR1, 3) == 0x2A,
+		"P0 must suppress P1 before mixing with PF1");
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLOR2, 1) == 0x08,
+		"P0 must cover PF2 in PRIOR 0");
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLOR0, 4) == 0x11,
+		"PF0 must cover P2 in PRIOR 0");
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLOR2, 4) == 0x63,
+		"PRIOR 0 must OR P2 with PF2");
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLOR3, 12) == 0x70,
+		"P2 must suppress P3 before mixing with PF3");
+	Require(ResolveGtiaPriority0ColorIndex(colors, E_COLBAK, 8) == 0x40,
+		"an active P3 must replace background");
+}
+
 }
 
 int main()
@@ -281,6 +314,7 @@ int main()
 	TestRasterProgramValidation();
 	TestAntic4TimingProfiles();
 	TestAntic4EncodingPrimitives();
+	TestGtiaPriority0Resolver();
 
 	std::cout << "Timing model tests passed\n";
 	return 0;

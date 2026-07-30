@@ -269,7 +269,9 @@ public:
 
 	void Run();
 
-	e_target FindClosestColorRegister(sprites_row_memory_t& spriterow, int index, int x,int y, bool &restart_line, distance_t& error);
+	e_target FindClosestColorRegister(sprites_row_memory_t& spriterow,
+		int index, int x, int y, bool& restart_line, distance_t& error,
+		unsigned char& output_color);
 	e_target FindClosestColorRegisterDual(sprites_row_memory_t& spriterow,
 		const unsigned char* other_row, unsigned picture_row_index, int x,
 		bool& restart_line, distance_t& error);

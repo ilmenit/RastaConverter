@@ -1998,8 +1998,101 @@ void Evaluator::Run() {
 	m_gstate->m_condvar_update.notify_one();
 }
 
-e_target Evaluator::FindClosestColorRegister(sprites_row_memory_t& spriterow, int index, int x,int y, bool &restart_line, distance_t& best_error)
+e_target Evaluator::FindClosestColorRegister(sprites_row_memory_t& spriterow,
+	int index, int x, int y, bool& restart_line, distance_t& best_error,
+	unsigned char& output_color)
 {
+	const bool antic4 = m_active_raster_picture
+		&& m_active_raster_picture->graphics_mode == GraphicsMode::Antic4;
+	if (antic4)
+	{
+		struct PlayerPixel
+		{
+			bool covered = false;
+			bool active = false;
+			int bit = 0;
+		};
+		PlayerPixel players[4];
+		unsigned activeMask = 0;
+		for (int player = 0; player < 4; ++player)
+		{
+			const int spriteX = m_sprite_shift_regs[player]
+				- SpriteScreenColorCycleStart(GraphicsMode::Antic4);
+			const unsigned xOffset = static_cast<unsigned>(x - spriteX);
+			if (xOffset >= sprite_size)
+				continue;
+
+			PlayerPixel& pixel = players[player];
+			pixel.covered = true;
+			pixel.bit = static_cast<int>(xOffset >> 2);
+			assert(pixel.bit >= 0 && pixel.bit < 8);
+			pixel.active = spriterow[player][pixel.bit];
+
+			const int leftover = static_cast<int>(xOffset)
+				+ m_sprite_shift_emitted[player];
+			if (leftover < sprite_size)
+			{
+				const int leftoverBit = leftover >> 2;
+				if (leftoverBit >= 0 && leftoverBit < 8)
+					pixel.active =
+						pixel.active || spriterow[player][leftoverBit];
+			}
+			if (pixel.active)
+				activeMask |= 1u << player;
+		}
+
+		const bool alternate = m_active_raster_picture->antic4_attribute(
+			y / 8, x / 4);
+		const e_target playfieldTargets[4] = {
+			E_COLBAK, E_COLOR0, E_COLOR1,
+			alternate ? E_COLOR3 : E_COLOR2
+		};
+		e_target bestPlayfield = E_COLBAK;
+		int bestAddedPlayer = -1;
+		distance_t bestDistance = DISTANCE_MAX;
+		unsigned char bestColor = 0;
+
+		auto consider = [&](unsigned playerMask, int addedPlayer)
+		{
+			for (e_target playfield : playfieldTargets)
+			{
+				const unsigned char color =
+					ResolveGtiaPriority0ColorIndex(
+						m_mem_regs, playfield, playerMask);
+				const distance_t distance =
+					m_picture_all_errors[color][index];
+				if (distance < bestDistance)
+				{
+					bestDistance = distance;
+					bestPlayfield = playfield;
+					bestAddedPlayer = addedPlayer;
+					bestColor = color;
+				}
+			}
+		};
+
+		consider(activeMask, -1);
+		for (int player = 0; player < 4; ++player)
+		{
+			if (players[player].covered && !players[player].active
+				&& !spriterow[player][players[player].bit])
+			{
+				consider(activeMask | (1u << player), player);
+			}
+		}
+
+		if (bestAddedPlayer >= 0)
+		{
+			PlayerPixel& pixel = players[bestAddedPlayer];
+			assert(pixel.covered && !spriterow[bestAddedPlayer][pixel.bit]);
+			spriterow[bestAddedPlayer][pixel.bit] = true;
+			restart_line = true;
+		}
+		best_error = bestDistance;
+		output_color = bestColor;
+		return bestPlayfield;
+	}
+
 	distance_t distance;
 	int sprite_bit;
 	int best_sprite_bit;
@@ -2055,10 +2148,7 @@ e_target Evaluator::FindClosestColorRegister(sprites_row_memory_t& spriterow, in
 
 	// check standard colors
 
-	const bool antic4 = m_active_raster_picture
-		&& m_active_raster_picture->graphics_mode == GraphicsMode::Antic4;
-	const bool alternate = antic4
-		&& m_active_raster_picture->antic4_attribute(y / 8, x / 4);
+	const bool alternate = false;
 	const e_target playfieldTargets[4] = {
 		E_COLOR0, E_COLOR1, alternate ? E_COLOR3 : E_COLOR2, E_COLBAK
 	};
@@ -2088,6 +2178,7 @@ e_target Evaluator::FindClosestColorRegister(sprites_row_memory_t& spriterow, in
 	}
 
 	best_error = min_distance;
+	output_color = static_cast<unsigned char>(m_mem_regs[result] >> 1);
 
 	return result;
 }
@@ -2349,9 +2440,12 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 				// put pixel closest to one of the current color registers
 				distance_t closest_dist;
-				e_target closest_register = FindClosestColorRegister(spriterow, picture_row_index + x,x,y,restart_line,closest_dist);
+				unsigned char outputColor = 0;
+				e_target closest_register = FindClosestColorRegister(
+					spriterow, picture_row_index + x, x, y, restart_line,
+					closest_dist, outputColor);
 				total_line_error += closest_dist;
-				created_picture_row[x]=m_mem_regs[closest_register] >> 1;
+				created_picture_row[x] = outputColor;
 				created_picture_targets_row[x]=closest_register;
 			}
 		}
@@ -2379,11 +2473,13 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 					bool added_bit = false;
 					distance_t closest_dist;
+					unsigned char outputColor = 0;
 					const e_target closest_register = FindClosestColorRegister(
-						spriterow, picture_row_index + x, x, y, added_bit, closest_dist);
+						spriterow, picture_row_index + x, x, y, added_bit,
+						closest_dist, outputColor);
 					added_bits = added_bits || added_bit;
 					total_line_error += closest_dist;
-					created_picture_row[x] = m_mem_regs[closest_register] >> 1;
+					created_picture_row[x] = outputColor;
 					created_picture_targets_row[x] = closest_register;
 				}
 				if (added_bits)
