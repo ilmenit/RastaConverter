@@ -49,6 +49,15 @@ int main()
 		"an absolute POSIX path must be positional, not an option");
 #endif
 
+#if !defined(_WIN32)
+	{
+		CommandLineParser parser = MakeParser();
+		parser.parseTokens({"pic.png", "--input", "/home/me/other.png"});
+		Require(parser.getValue("input", "") == "/home/me/other.png",
+			"an absolute POSIX path must be accepted as a separate option value");
+	}
+#endif
+
 	// The Windows-style spelling of a real option still is one, on every
 	// platform - recipes and documentation are full of it.
 	{

@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "FreeImage.h"
+#include "FreeImageIO.h"
 
 namespace
 {
@@ -64,11 +65,7 @@ bool DetailsMask::LoadLegacy(const std::string& path, unsigned width,
 		return false;
 	}
 
-	FREE_IMAGE_FORMAT format = FreeImage_GetFileType(path.c_str(), 0);
-	if (format == FIF_UNKNOWN)
-		format = FreeImage_GetFIFFromFilename(path.c_str());
-	FIBITMAP* source = format == FIF_UNKNOWN ? nullptr
-		: FreeImage_Load(format, path.c_str(), 0);
+	FIBITMAP* source = FreeImageLoadUtf8(path);
 	if (!source)
 	{
 		if (error) *error = "unable to load details mask: " + path;
@@ -122,11 +119,7 @@ bool DetailsMask::LoadEditableLayer(const std::string& path, unsigned width,
 	m_coverage.clear();
 	m_source_hash.clear();
 	m_effective_hash.clear();
-	FREE_IMAGE_FORMAT format = FreeImage_GetFileType(path.c_str(), 0);
-	if (format == FIF_UNKNOWN)
-		format = FreeImage_GetFIFFromFilename(path.c_str());
-	FIBITMAP* source = format == FIF_UNKNOWN ? nullptr
-		: FreeImage_Load(format, path.c_str(), 0);
+	FIBITMAP* source = FreeImageLoadUtf8(path);
 	if (!source || width == 0 || height == 0) {
 		if (source) FreeImage_Unload(source);
 		if (error) *error = "unable to load editable details layer: " + path;
@@ -211,9 +204,7 @@ bool DetailsMask::LoadNormalized(const std::string& path, unsigned width,
 	m_layer_values.clear();
 	m_weights.clear();
 	m_coverage.clear();
-	FREE_IMAGE_FORMAT format = FreeImage_GetFileType(path.c_str(), 0);
-	if (format == FIF_UNKNOWN) format = FreeImage_GetFIFFromFilename(path.c_str());
-	FIBITMAP* loaded = format == FIF_UNKNOWN ? nullptr : FreeImage_Load(format, path.c_str(), 0);
+	FIBITMAP* loaded = FreeImageLoadUtf8(path);
 	if (!loaded)
 	{
 		if (error) *error = "unable to load details mask: " + path;
@@ -494,7 +485,7 @@ bool DetailsMask::SaveEffectivePreview(const std::string& path, std::string* err
 			pixel.rgbRed = pixel.rgbGreen = pixel.rgbBlue = At(x, y);
 			FreeImage_SetPixelColor(bitmap, x, m_height - 1 - y, &pixel);
 		}
-	const bool saved = FreeImage_Save(FIF_PNG, bitmap, path.c_str(), 0) != 0;
+	const bool saved = FreeImageSaveUtf8(FIF_PNG, bitmap, path);
 	FreeImage_Unload(bitmap);
 	if (!saved && error) *error = "unable to save effective details preview: " + path;
 	return saved;
@@ -513,7 +504,7 @@ bool DetailsMask::SaveEditableLayer(const std::string& path,
 			pixel.rgbRed = pixel.rgbGreen = pixel.rgbBlue = EditableAt(x, y);
 			FreeImage_SetPixelColor(bitmap, x, m_height - 1 - y, &pixel);
 		}
-	const bool saved = FreeImage_Save(FIF_PNG, bitmap, path.c_str(), 0) != 0;
+	const bool saved = FreeImageSaveUtf8(FIF_PNG, bitmap, path);
 	FreeImage_Unload(bitmap);
 	if (!saved && error) *error = "unable to save editable details layer: " + path;
 	return saved;

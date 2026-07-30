@@ -1,6 +1,59 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC3      2026-07-30 [RELEASE CANDIDATE]
+* Added experimental ANTIC 4 character-mode output. Select it in the Live UI
+  or with `/graphics_mode=antic4`; ANTIC E remains the default.
+* ANTIC 4 uses a 168-colour-clock wide playfield and optimizes all five
+  playfield colours, with each 4x8 cell selecting COLPF2 or COLPF3 for its
+  fourth colour. Heights are complete 8-scanline character rows from 8 to 240.
+* Added hardware-aware ANTIC 4 scheduling for LMS badlines, ordinary badlines,
+  continuation lines, deferred refresh, and CHBASE transitions. The timing
+  model and randomized five-seed differential suite reproduce Altirra output
+  exactly.
+* Added complete ANTIC 4 export: padded screen data, packed character sets,
+  PMG data, raster programs, optimizer state, and a dedicated MADS template.
+  The Recent view recognizes text-mode runs and its XEX action assembles them.
+* Added GUI support throughout setup, preview, copied command lines, recent-run
+  badges, and XEX freshness detection. Dual-frame controls are disabled because
+  ANTIC 4 is currently single-frame only.
+* Preserved the ANTIC E code path and merged the RC2 portability fixes. Unit
+  tests, ANTIC E and ANTIC 4 conversion smoke tests, and ANTIC 4 XEX assembly
+  all pass after integration.
+* Removed an accidentally committed Python bytecode cache and corrected the
+  ANTIC 4 proof tool to use the released wide-playfield timing schedule.
+
+RastaConverter1.0-RC2      2026-07-28 [RELEASE CANDIDATE]
+* Added a persistent Font size control beside Reset in the Live UI. It scales
+  every in-program window from the existing 100% default up to 200%; 200% is
+  the practical limit at the supported 1420x900 minimum window size.
+* Improved UI readability while keeping the warm Atari-inspired visual
+  language. Muted and faint text now have substantially stronger contrast, and
+  the persistent Style menu offers Dark, High contrast and Light themes across
+  Setup, Dashboard, Recent and the editor.
+* Fixed XEX builds on Windows. The assembler and each path argument are now
+  passed directly to SDL's process API, so cmd.exe can no longer reinterpret
+  Generator as a command or break paths containing spaces.
+* Fixed non-ASCII Windows paths throughout image, palette, state, preview and
+  recent-run I/O by using the native wide-character filesystem and FreeImage
+  APIs behind one UTF-8 interface.
+* Fixed absolute Unix paths supplied as separate option values, such as
+  --output /tmp/picture.png, being mistaken for command-line options.
+* Fixed XEX assembler selection on unsupported CPU/OS combinations: native
+  bundled MADS is used only where its binary matches the host, otherwise the
+  portable launcher reports the platform limitation explicitly.
+* Made /quiet conversions genuinely headless even from the GUI build, fixed
+  failures opening a native error dialog, propagated initialization and
+  conversion failures to a non-zero process exit status, and corrected
+  recent-run registration for Windows directory separators.
+* Fixed the installed layout so runtime palettes, generators and the UI font
+  are beside the executable where the application expects them.
+* Removed obsolete bundled SDL2 DLLs and the old monolithic FreeImage DLL from
+  Windows packages. Release packages now contain the consistent vcpkg runtime
+  dependency set actually used by the executable.
+* Expanded smoke coverage for Unicode paths, console-only Windows conversion,
+  installation layout, and command-line parsing across platforms.
+
 RastaConverterBeta22      2026-07-27 [AI RELEASE]
 * New interactive Live UI (built with /livegui, or by launching with no command line):
   - Setup screen with the image picker on top, one continuous grouped form covering

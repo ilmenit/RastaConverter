@@ -23,6 +23,7 @@
 #include "RecentGallery.h"
 #include "RecentRuns.h"
 #include "TargetPreview.h"
+#include "Utf8Path.h"
 
 namespace rc_live_ui {
 namespace setup {
@@ -604,7 +605,8 @@ void DrawTitleBar(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
 		+ ImGui::CalcTextSize("Recent").x + style.FramePadding.x * 2.0f
 		+ ImGui::CalcTextSize("Copy command line").x + style.FramePadding.x * 2.0f
 		+ ImGui::CalcTextSize("Reset").x + style.FramePadding.x * 2.0f
-		+ style.ItemSpacing.x * 5.0f;
+		+ ImGui::CalcTextSize("Style").x + style.FramePadding.x * 2.0f
+		+ ImGui::GetFontSize() * 6.0f + style.ItemSpacing.x * 7.0f;
 
 	// The image row sits on its own panel with breathing room, and that panel
 	// is the drop target, so the affordance and the hit area are the same
@@ -705,6 +707,35 @@ void DrawTitleBar(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
 	}
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Return every option to its default, keeping the file paths.");
+
+	ImGui::SameLine();
+	if (ImGui::Button("Style"))
+		ImGui::OpenPopup("ui_theme_picker");
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Colour theme: %s. Saved for the next launch.",
+			UiThemeName(CurrentUiTheme()));
+	if (ImGui::BeginPopup("ui_theme_picker")) {
+		ImGui::TextUnformatted("Colour theme");
+		ImGui::Separator();
+		for (UiTheme candidate : {UiTheme::Dark, UiTheme::HighContrast,
+				UiTheme::Light}) {
+			if (ImGui::MenuItem(UiThemeName(candidate), nullptr,
+					CurrentUiTheme() == candidate)) {
+				SetUiTheme(candidate);
+			}
+		}
+		ImGui::EndPopup();
+	}
+	ImGui::SameLine();
+	int font_percent = static_cast<int>(UiFontScale() * 100.0f + 0.5f);
+	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+	if (ImGui::SliderInt("##font_size", &font_percent, 100, 200, "%d%%",
+			ImGuiSliderFlags_AlwaysClamp)) {
+		SetUiFontScale(font_percent / 100.0f);
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Global font size for every in-program window. "
+			"Saved for the next launch.");
 
 	if (!state.copied_notice.empty()) {
 		if (NowMs() - state.copied_at > 2200.0) {
@@ -832,7 +863,7 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 			std::fprintf(stderr, "%s\n", error.c_str());
 			return false;
 		}
-		RegisterRecentRun(cfg.output_file.substr(0, cfg.output_file.find_last_of('/')));
+		RegisterRecentRun(DirectoryOf(cfg.output_file));
 		cfg.command_line = BuildCommandLineArgs(cfg);
 		if (cfg.details_layer)
 			cfg.command_line += " /details_layer=on";
@@ -1131,31 +1162,32 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		// folder; otherwise deleting the old run would break this recipe.
 		if (!cfg.continue_processing && !cfg.details_file.empty()) {
 			namespace fs = std::filesystem;
-			const fs::path source(cfg.details_file);
-			const std::string source_name = source.filename().string();
+			const fs::path source = Utf8Path(cfg.details_file);
+			const std::string source_name = Utf8String(source.filename());
 			if (source_name.size() >= 12
 				&& source_name.compare(source_name.size() - 12, 12,
 					"-details.png") == 0) {
-				const fs::path destination(cfg.output_file + "-details.png");
+				const fs::path destination =
+					Utf8Path(cfg.output_file + "-details.png");
 				if (source != destination) {
 					std::error_code ec;
 					fs::copy_file(source, destination,
 						fs::copy_options::overwrite_existing, ec);
 					if (!ec)
-						cfg.details_file = destination.string();
+						cfg.details_file = Utf8String(destination);
 				}
 			}
 		}
 		if (!cfg.continue_processing && !cfg.target_file.empty()) {
 			namespace fs = std::filesystem;
-			const fs::path source(cfg.target_file);
-			const fs::path destination(cfg.output_file + "-target.png");
+			const fs::path source = Utf8Path(cfg.target_file);
+			const fs::path destination = Utf8Path(cfg.output_file + "-target.png");
 			if (source != destination) {
 				std::error_code ec;
 				fs::copy_file(source, destination,
 					fs::copy_options::overwrite_existing, ec);
 				if (!ec)
-					cfg.target_file = destination.string();
+					cfg.target_file = Utf8String(destination);
 			}
 		}
 		// Settings changed in the form never reached the parser, so

@@ -82,7 +82,11 @@ copy test.jpg
 # Windows runtime libraries only exist next to a Windows build; on the other
 # platforms there is nothing to copy and nothing to complain about.
 for dll in "$payload"/*.dll; do
-	[[ -e "$dll" ]] && cp "$dll" "$staging/" || true
+	[[ -e "$dll" ]] || continue
+	case "$(basename "$dll")" in
+		SDL2.dll|SDL2_ttf.dll) continue ;;
+	esac
+	cp "$dll" "$staging/"
 done
 
 # Executable bits survive the archive, which matters for the bundled assembler.

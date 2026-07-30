@@ -2,6 +2,7 @@
 
 #include "WindowIconHelper.h"
 #include "debug_log.h"
+#include "FreeImageIO.h"
 
 
 #include <memory>
@@ -113,9 +114,7 @@ static std::unique_ptr<SDL_Surface, SDLSurfaceDeleter> ConvertToSDLSurface(FIBIT
 
 static std::unique_ptr<FIBITMAP, FreeImageBitmapDeleter> LoadFreeImage(const std::string& path)
 {
-    FREE_IMAGE_FORMAT fif = FreeImage_GetFileType(path.c_str(), 0);
-    if (fif == FIF_UNKNOWN)
-        fif = FreeImage_GetFIFFromFilename(path.c_str());
+    FREE_IMAGE_FORMAT fif = FreeImageFormatUtf8(path);
 
     if (fif == FIF_UNKNOWN)
     {
@@ -123,7 +122,7 @@ static std::unique_ptr<FIBITMAP, FreeImageBitmapDeleter> LoadFreeImage(const std
         return nullptr;
     }
 
-    FIBITMAP* bitmap = FreeImage_Load(fif, path.c_str());
+    FIBITMAP* bitmap = FreeImageLoadUtf8(path);
     if (!bitmap)
     {
         DBG_PRINT("[ICON] FreeImage_Load failed for: %s", path.c_str());
@@ -196,4 +195,3 @@ bool WindowIconHelper::SetWindowIconFromBitmap(SDL_Window* window, FIBITMAP* bit
 }
 
 #endif // NO_GUI
-

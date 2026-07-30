@@ -213,7 +213,9 @@ Install artifacts
 ```
 cmake --install build/<preset> --config Release
 ```
-Installs the binary in `bin/` and resources/docs in `share/`.
+Installs the binary and runtime resources (`Palettes`, `Generator`,
+`GeneratorDual`, and the GUI font) in `bin/`, with documentation in
+`share/doc/rasta/`.
 
 Notes
 -----
@@ -331,7 +333,11 @@ PGO for Intel oneAPI icx (Windows) – LLVM-style (recommended)
 Prerequisites
 - Run from an Intel oneAPI Developer Command Prompt (so that `icx` and `llvm-profdata` are on PATH), or run the oneAPI environment script first:
   - `"C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64`
-- On Windows (Ninja), ensure required runtime DLLs are next to the executable. Prefer automatic copying with `-DCOPY_ALL_RUNTIME_DLLS=ON`. A repo-root `dlls/` directory can also stage host-validated current `FreeImage.dll`, `SDL3.dll`, and `SDL3_ttf.dll` files for post-build copying. The obsolete bundled DLLs were intentionally removed and must not be treated as available until replacements are validated on Windows.
+- On Windows (Ninja), ensure required runtime DLLs are next to the executable
+  with `-DCOPY_ALL_RUNTIME_DLLS=ON`. Runtime DLLs must come from the configured
+  dependency graph; the repo-root legacy `dlls/` directory is not copied,
+  because mixing its monolithic FreeImage and SDL2 binaries with vcpkg's SDL3
+  dependency set produces an inconsistent and needlessly large package.
 - If you keep a `test.jpg` in the repo root, it will be copied to the run directory as well.
 
 Using presets (recommended)

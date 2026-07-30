@@ -132,6 +132,8 @@ set(COMMON_SOURCE_FILES
     src/core/live/ProgressHistory.cpp
     src/app/main.cpp
     src/utils/Interrupt.cpp
+    src/utils/Utf8Path.cpp
+    src/utils/FreeImageIO.cpp
     src/rng/prng_xoroshiro.cpp
     src/core/Program.cpp
     src/core/Cycles.cpp
@@ -393,10 +395,13 @@ if(BUILD_TESTING)
     add_executable(DetailsMaskTests
         tests/DetailsMaskTests.cpp
         src/core/DetailsMask.cpp
+        src/utils/FreeImageIO.cpp
+        src/utils/Utf8Path.cpp
     )
     target_include_directories(DetailsMaskTests PRIVATE
         ${CMAKE_SOURCE_DIR}/src/core
         ${CMAKE_SOURCE_DIR}/src/color
+        ${CMAKE_SOURCE_DIR}/src/utils
         ${RESOLVED_FREEIMAGE_INCLUDES}
     )
     target_link_libraries(DetailsMaskTests PRIVATE ${RESOLVED_FREEIMAGE_LIBS})
@@ -420,7 +425,7 @@ if(NOT BUILD_NO_GUI)
     if(FETCH_SDL3)
         message(STATUS "FETCH_SDL3=ON - skipping find_package(SDL3)")
     else()
-        find_package(SDL3 CONFIG QUIET)
+        find_package(SDL3 3.2 CONFIG QUIET)
     endif()
 
     if(TARGET SDL3::SDL3)
@@ -553,8 +558,12 @@ if(BUILD_STATIC)
     # Add static linking flags
     if(WIN32)
         # Windows static linking
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /NODEFAULTLIB:msvcrt")
-        target_compile_definitions(RastaConverter PRIVATE FREEIMAGE_LIB)
+        if(MSVC)
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /NODEFAULTLIB:msvcrt")
+        endif()
+        if(NOT BUILD_NO_GUI)
+            target_compile_definitions(RastaConverter PRIVATE FREEIMAGE_LIB)
+        endif()
         if(BUILD_NO_GUI)
             target_compile_definitions(RastaConverter-NO_GUI PRIVATE FREEIMAGE_LIB)
         endif()
@@ -803,7 +812,7 @@ if(BUILD_NO_GUI)
     target_link_libraries(RastaConverter-NO_GUI PRIVATE
         ${RESOLVED_FREEIMAGE_LIBS}
         Threads::Threads
-        $<$<PLATFORM_ID:Windows>:Dbghelp>
+        $<$<PLATFORM_ID:Windows>:Dbghelp;shell32>
     )
 endif()
 
@@ -844,14 +853,6 @@ if(NOT BUILD_NO_GUI)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR}/help.txt"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR}/README.md"
     )
-    # Windows only: these are Windows import/runtime libraries, and copying them
-    # beside a Linux or macOS binary just litters the output directory with
-    # files that platform cannot load.
-    if(WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/dlls")
-        add_custom_command(TARGET RastaConverter POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dlls" "${RC_RUNTIME_COPY_DIR}"
-        )
-    endif()
     if(EXISTS "${CMAKE_SOURCE_DIR}/test.jpg")
         add_custom_command(TARGET RastaConverter POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test.jpg" "${RC_RUNTIME_COPY_DIR}/test.jpg"
@@ -873,11 +874,6 @@ if(BUILD_NO_GUI)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR_NO_GUI}/help.txt"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR_NO_GUI}/README.md"
     )
-    if(WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/dlls")
-        add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/dlls" "${RC_RUNTIME_COPY_DIR_NO_GUI}"
-        )
-    endif()
     if(EXISTS "${CMAKE_SOURCE_DIR}/test.jpg")
         add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/test.jpg" "${RC_RUNTIME_COPY_DIR_NO_GUI}/test.jpg"
@@ -916,11 +912,15 @@ else()
     install(TARGETS RastaConverter-NO_GUI RUNTIME DESTINATION bin)
 endif()
 install(FILES README.md ChangeLog.md help.txt DESTINATION share/doc/rasta)
-install(DIRECTORY Palettes DESTINATION share/rasta)
-# The generators travel with the program: the live UI assembles a run into a
-# .xex with the bundled MADS, so they are runtime data, not just samples.
-install(DIRECTORY Generator GeneratorDual DESTINATION share/rasta
+# Runtime resources live beside the executable, matching the release zip and
+# the paths used by the program. A split bin/share install left the installed
+# GUI without its font and made palettes and XEX generators undiscoverable.
+install(DIRECTORY Palettes DESTINATION bin)
+install(DIRECTORY Generator GeneratorDual DESTINATION bin
     USE_SOURCE_PERMISSIONS)
+if(NOT BUILD_NO_GUI)
+    install(FILES src/clacon2.ttf DESTINATION bin)
+endif()
 
 # Summary
 message(STATUS "=== BUILD CONFIGURATION SUMMARY ===")

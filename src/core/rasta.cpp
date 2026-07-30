@@ -63,6 +63,8 @@ const char* program_version = RASTA_CONVERTER_VERSION;
 #include "TargetPicture.h"
 #include "TargetBuilder.h"
 #include "debug_log.h"
+#include "FreeImageIO.h"
+#include "Utf8Path.h"
 
 #ifndef _MSC_EXTENSIONS
 #define __timeb64 timeb
@@ -86,8 +88,11 @@ bool quiet=false;
 
 void RastaConverter::Error(std::string e)
 {
-	gui.Error(e);
 	DBG_PRINT("[RASTA] Fatal error: %s", e.c_str());
+	if (quiet)
+		std::cerr << "Error: " << e << '\n';
+	else
+		gui.Error(e);
 	exit(1);
 }
 
@@ -362,7 +367,7 @@ bool RastaConverter::SavePicture(const std::string& filename, FIBITMAP* to_save)
         return false;
     }
 
-    if (!FreeImage_Save(FIF_PNG, stretched.get(), filename.c_str()))
+    if (!FreeImageSaveUtf8(FIF_PNG, stretched.get(), filename))
     {
         Error(string("Error saving picture.") + filename);
         return false;
@@ -372,7 +377,7 @@ bool RastaConverter::SavePicture(const std::string& filename, FIBITMAP* to_save)
 }
 void RastaConverter::SaveStatistics(const char *fn)
 {
-    std::ofstream out(fn, std::ios::out | std::ios::trunc);
+    std::ofstream out(Utf8Path(fn), std::ios::out | std::ios::trunc);
     if (!out)
     {
         DBG_PRINT("[RASTA] Unable to write statistics to %s", fn);
@@ -395,7 +400,7 @@ void RastaConverter::SaveStatistics(const char *fn)
 }
 
 void RastaConverter::SaveOptimizerState(const char* fn, const raster_picture* picture) {
-    std::ofstream out(fn, std::ios::out | std::ios::trunc);
+    std::ofstream out(Utf8Path(fn), std::ios::out | std::ios::trunc);
     if (!out)
     {
         DBG_PRINT("[RASTA] Unable to write optimizer state to %s", fn);
@@ -455,7 +460,7 @@ void RastaConverter::SaveOptimizerState(const char* fn, const raster_picture* pi
 
 void RastaConverter::LoadOptimizerState(string name)
 {
-    std::ifstream in(name);
+    std::ifstream in(Utf8Path(name));
     if (!in)
         return;
 
@@ -570,12 +575,10 @@ void RastaConverter::LoadOptimizerState(string name)
 bool RastaConverter::LoadInputBitmap()
 {
 	Message("Loading and initializing file");
-	FREE_IMAGE_FORMAT fif = FreeImage_GetFileType(cfg.input_file.c_str(), 0);
-	if (fif == FIF_UNKNOWN)
-		fif = FreeImage_GetFIFFromFilename(cfg.input_file.c_str());
+	FREE_IMAGE_FORMAT fif = FreeImageFormatUtf8(cfg.input_file);
 	if (fif == FIF_UNKNOWN)
 		Error(std::string("Unrecognized input image format: ") + cfg.input_file);
-	input_bitmap = FreeImage_Load(fif, cfg.input_file.c_str());
+	input_bitmap = FreeImageLoadUtf8(cfg.input_file);
 	if (!input_bitmap)
 		Error(string("Error loading input file: ") + cfg.input_file);
 
@@ -816,7 +819,7 @@ bool RastaConverter::SnapshotBeforeMaskEdit()
 	SaveBestSolution();
 	namespace fs = std::filesystem;
 	std::error_code ec;
-	const fs::path output(cfg.output_file);
+	const fs::path output = Utf8Path(cfg.output_file);
 	const fs::path parent = output.has_parent_path() ? output.parent_path() : fs::path(".");
 	auto snapshotName = [](unsigned number) {
 		std::ostringstream name;
@@ -834,7 +837,7 @@ bool RastaConverter::SnapshotBeforeMaskEdit()
 	}
 	bool snapshotComplete = true;
 	std::string snapshotError;
-	const std::string prefix = output.filename().string();
+	const std::string prefix = Utf8String(output.filename());
 	for (const fs::directory_entry& entry : fs::directory_iterator(parent, ec)) {
 		if (ec) {
 			snapshotComplete = false;
@@ -843,7 +846,7 @@ bool RastaConverter::SnapshotBeforeMaskEdit()
 		}
 		if (!entry.is_regular_file())
 			continue;
-		const std::string name = entry.path().filename().string();
+		const std::string name = Utf8String(entry.path().filename());
 		if (name.compare(0, prefix.size(), prefix) != 0)
 			continue;
 		fs::copy_file(entry.path(), snapshot / entry.path().filename(),
@@ -856,7 +859,7 @@ bool RastaConverter::SnapshotBeforeMaskEdit()
 	}
 	std::string error;
 	if (snapshotComplete && !details_mask.SaveEditableLayer(
-		(snapshot / (prefix + "-details.png")).string(), &error)) {
+		Utf8String(snapshot / (prefix + "-details.png")), &error)) {
 		snapshotComplete = false;
 		snapshotError = error.empty()
 			? "could not save the details layer" : error;
@@ -869,14 +872,14 @@ bool RastaConverter::SnapshotBeforeMaskEdit()
 	const fs::path snapshotOutput =
 		fs::absolute(snapshot / prefix, ec).lexically_normal();
 	const std::string snapshotPrefix = ec
-		? (snapshot / prefix).string() : snapshotOutput.string();
+		? Utf8String(snapshot / prefix) : Utf8String(snapshotOutput);
 	for (const char* extension : {".opt", ".rp"}) {
 		const fs::path recipeFile = snapshot / (prefix + extension);
 		if (!snapshotComplete)
 			break;
 		if (!fs::exists(recipeFile, ec) || ec) {
 			snapshotComplete = false;
-			snapshotError = "missing saved recipe " + recipeFile.string();
+			snapshotError = "missing saved recipe " + Utf8String(recipeFile);
 			break;
 		}
 		if (!ReplaceTextInFile(recipeFile, cfg.output_file, snapshotPrefix)) {
@@ -1280,7 +1283,7 @@ void RastaConverter::SaveEditedTargetArtifact()
 			RGBQUAD color = RGB2PIXEL(m_picture[y][x]);
 			FreeImage_SetPixelColor(bitmap, x, m_height - 1 - y, &color);
 		}
-	const bool saved = FreeImage_Save(FIF_PNG, bitmap, artifact.c_str(), 0) != 0;
+	const bool saved = FreeImageSaveUtf8(FIF_PNG, bitmap, artifact);
 	FreeImage_Unload(bitmap);
 	if (!saved) {
 		Message("Could not save edited destination artifact.");
@@ -1431,11 +1434,7 @@ bool RastaConverter::PrepareDestinationPicture()
 	// preprocessing and is snapped back to the active hardware palette.
 	if (!cfg.target_file.empty())
 	{
-		FREE_IMAGE_FORMAT format = FreeImage_GetFileType(cfg.target_file.c_str(), 0);
-		if (format == FIF_UNKNOWN)
-			format = FreeImage_GetFIFFromFilename(cfg.target_file.c_str());
-		FIBITMAP* loaded = format == FIF_UNKNOWN ? nullptr
-			: FreeImage_Load(format, cfg.target_file.c_str(), 0);
+		FIBITMAP* loaded = FreeImageLoadUtf8(cfg.target_file);
 		// Rescaling an already exact-sized, palette-quantized PNG is not a
 		// no-op in every FreeImage build: FILTER_BOX can round channels by one,
 		// which then remaps pixels to a different Atari entry. Preserve exact
@@ -1635,16 +1634,19 @@ bool RastaConverter::ProcessInit()
 {
 	DBG_PRINT("[RASTA] ProcessInit start (dual=%d quiet=%d)", (int)cfg.dual_mode, (int)quiet);
 #ifdef NO_GUI
-	gui.Init(cfg.command_line);
+	if (!gui.Init(cfg.command_line))
+		return false;
 #elif defined(RASTA_ENABLE_LIVE_UI)
 	// Always the dashboard, whatever brought us here. /livegui decides whether
 	// the setup screen appears first, not how a run is displayed: a conversion
 	// started from the command line has the same three pictures to show and the
 	// same questions to answer about them, and the legacy three-blit display
 	// answered fewer of them. It survives only in builds without the live UI.
-	gui.Init(cfg.command_line, true);
+	if (!gui.Init(cfg.command_line, true))
+		return false;
 #else
-	gui.Init(cfg.command_line, false);
+	if (!gui.Init(cfg.command_line, false))
+		return false;
 #endif
 
 	DBG_PRINT("[RASTA] LoadAtariPalette");
@@ -1826,7 +1828,7 @@ unsigned char ConvertColorRegisterToRawData(e_target t)
 bool RastaConverter::SaveScreenData(const char *filename)
 {
     int x,y,a=0,b=0,c=0,d=0;
-    std::ofstream out(filename, std::ios::out | std::ios::binary | std::ios::trunc);
+    std::ofstream out(Utf8Path(filename), std::ios::out | std::ios::binary | std::ios::trunc);
     if (!out)
         Error("Error saving MIC screen data");
 
@@ -3395,7 +3397,7 @@ void RastaConverter::SavePMG(string name)
     unsigned char b;
     Message("Saving sprites (PMG)");
 
-    std::ofstream out(name, std::ios::out | std::ios::trunc);
+    std::ofstream out(Utf8Path(name), std::ios::out | std::ios::trunc);
     if (!out)
         Error("Error saving PMG handler");
 
@@ -3779,7 +3781,7 @@ bool RastaConverter::Resume()
 
 	// Prefer dual if both A and B exist; fallback to single-frame
 	auto file_exists = [](const std::string& path) -> bool {
-		FILE* f = fopen(path.c_str(), "rb"); if (f) { fclose(f); return true; } return false;
+		FILE* f = FopenUtf8(path, "rb"); if (f) { fclose(f); return true; } return false;
 	};
 
 	bool has_dual = file_exists(df_a_rp) && file_exists(df_b_rp);
@@ -3847,7 +3849,7 @@ bool RastaConverter::RunStructuredFixtureScreen(
 		|| m_eval_gstate.m_best_pic.raster_lines.size()
 			!= static_cast<std::size_t>(m_height))
 		return false;
-	std::ofstream csv(csv_path, std::ios::out | std::ios::trunc);
+	std::ofstream csv(Utf8Path(csv_path), std::ios::out | std::ios::trunc);
 	if (!csv)
 		return false;
 	csv << "profile,first_line,line_count,beam_width,diversity_per_state,"
@@ -3944,7 +3946,7 @@ bool RastaConverter::RunPhase7RetainedWindowScreen(
 		|| m_eval_gstate.m_best_pic.raster_lines.size() != static_cast<size_t>(m_height)
 		|| m_best_pic_B.raster_lines.size() != static_cast<size_t>(m_height))
 		return false;
-	std::ofstream csv(csvPath, std::ios::out | std::ios::trunc);
+	std::ofstream csv(Utf8Path(csvPath), std::ios::out | std::ios::trunc);
 	if (!csv) return false;
 	csv << "profile,first_line,line_count,slots,choices,joint_feasible,"
 		"alternating_feasible,joint_legal_a,joint_legal_b,alternating_legal_a,"
@@ -4149,7 +4151,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
     Message("Saving Raster Program");
 
     {
-        std::ofstream iniOut(name + ".ini", std::ios::out | std::ios::trunc);
+        std::ofstream iniOut(Utf8Path(name + ".ini"), std::ios::out | std::ios::trunc);
         if (!iniOut)
             Error("Error saving Raster Program");
 
@@ -4183,7 +4185,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
     }
 
     {
-        std::ofstream heightOut(name + ".h", std::ios::out | std::ios::trunc);
+        std::ofstream heightOut(Utf8Path(name + ".h"), std::ios::out | std::ios::trunc);
         if (!heightOut)
             Error("Error saving picture height header file");
         heightOut << "; Set proper picture height\n";
@@ -4192,7 +4194,7 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
             Error("Error finalizing picture height header file");
     }
 
-    std::ofstream asmOut(name, std::ios::out | std::ios::trunc);
+    std::ofstream asmOut(Utf8Path(name), std::ios::out | std::ios::trunc);
     if (!asmOut)
         Error("Error saving DLI handler");
 

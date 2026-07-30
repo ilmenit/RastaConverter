@@ -13,6 +13,8 @@
 
 using namespace std;
 
+extern bool quiet;
+
 RastaSDL::RastaSDL() = default;
 
 RastaSDL::~RastaSDL()
@@ -31,6 +33,14 @@ RastaSDL::~RastaSDL()
 bool RastaSDL::Init(std::string command_line, bool enable_live_ui)
 {
 	DBG_PRINT("[SDL] Init start. cmdline='%s'", command_line.c_str());
+	// A GUI build is also the normal command-line executable. /quiet must be
+	// genuinely headless: macOS has no SDL "offscreen" video backend, and a
+	// batch conversion has no reason to create a window, renderer or font.
+	if (quiet) {
+		headless = true;
+		DBG_PRINT("[SDL] Quiet conversion: skipping video initialization");
+		return true;
+	}
 	// The program handles SIGINT/SIGTERM itself, turning them into a save-and-
 	// stop. SDL would otherwise install its own handlers and convert them into
 	// a quit event that only some of the loops read.
@@ -199,6 +209,8 @@ SDL_Surface* RastaSDL::FIBitmapLineToSDLSurface(FIBITMAP* fiBitmap, int line_y) 
 
 // Function to display a single line of FIBITMAP on SDL_Window at (x, y)
 void RastaSDL::DisplayBitmapLine(int x, int y, int line_y, FIBITMAP* fiBitmap) {
+	if (headless)
+		return;
 	SDL_Surface* lineSurface = FIBitmapLineToSDLSurface(fiBitmap, line_y);
 	if (lineSurface == NULL) {
 		// Handle error
@@ -241,6 +253,8 @@ SDL_Surface* RastaSDL::FIBitmapToSDLSurface(FIBITMAP* fiBitmap) {
 // Function to display FIBITMAP on SDL_Window at (x, y)
 void RastaSDL::DisplayBitmap(int x, int y, FIBITMAP* fiBitmap)
 {
+	if (headless)
+		return;
 	SDL_Surface* surface = FIBitmapToSDLSurface(fiBitmap);
 	if (!surface) return;
 	SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -372,11 +386,15 @@ bool RastaSDL::LiveUiActive() const
 
 bool RastaSDL::SetIcon(FIBITMAP* bitmap)
 {
+	if (headless)
+		return true;
 	return WindowIconHelper::SetWindowIconFromBitmap(window, bitmap);
 }
 
 void RastaSDL::Present()
 {
+	if (headless)
+		return;
 #if defined(RASTA_ENABLE_LIVE_UI)
 	if (liveOverlay) {
 		// The dashboard draws the whole window, including the images, so the
@@ -438,6 +456,8 @@ void Wait(int t)
 
 GUI_command RastaSDL::NextFrame()
 {
+	if (headless)
+		return GUI_command::CONTINUE;
 	SDL_Event e;
 
 	while (SDL_PollEvent(&e) > 0)

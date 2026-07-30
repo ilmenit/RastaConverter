@@ -313,7 +313,13 @@ void CommandLineParser::parseTokens(const std::vector<std::string>& tokens)
 
 		if (val.empty() && idx + 1 < tokens.size()) {
 			std::string next = tokens[idx + 1];
-			if (!isPrefixed(next) || isSignedNumberToken(next)) {
+			// A POSIX absolute path begins with '/', just like the legacy
+			// Windows option spelling. Consume it as a value unless it actually
+			// names a registered option; --output /tmp/result.png must work as
+			// advertised, while --output /threads=8 must still diagnose the
+			// missing output value.
+			if (!isPrefixed(next) || !looksLikeOption(next)
+				|| isSignedNumberToken(next)) {
 				val = next;
 				++idx;
 			}
@@ -497,4 +503,3 @@ std::vector<std::string> CommandLineParser::allOptionNames() const
     for (const auto &s : optionSpecs) out.push_back(s.canonicalName);
     return out;
 }
-

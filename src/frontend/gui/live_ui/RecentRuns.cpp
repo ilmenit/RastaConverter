@@ -23,6 +23,9 @@
 #undef FREEIMAGE_H_BOOL_OVERRIDE
 #endif
 
+#include "FreeImageIO.h"
+#include "Utf8Path.h"
+
 namespace rc_live_ui {
 
 namespace {
@@ -93,7 +96,7 @@ std::vector<std::string> ReadIndex()
 	const std::string path = IndexPath();
 	if (path.empty())
 		return folders;
-	std::ifstream in(path.c_str());
+	std::ifstream in(Utf8Path(path));
 	std::string line;
 	while (std::getline(in, line)) {
 		while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
@@ -111,7 +114,7 @@ void WriteIndex(const std::vector<std::string>& folders)
 		return;
 	// Written whole each time; the list is short and this keeps a partial
 	// write from corrupting the order.
-	std::ofstream out(path.c_str(), std::ios::trunc);
+	std::ofstream out(Utf8Path(path), std::ios::trunc);
 	for (const std::string& folder : folders)
 		out << folder << '\n';
 }
@@ -130,12 +133,10 @@ using BitmapPtr = std::unique_ptr<FIBITMAP, BitmapDeleter>;
 // buffers, which already live in scanline order).
 bool LoadThumbnail(const std::string& path, PreviewImage* out)
 {
-	FREE_IMAGE_FORMAT format = FreeImage_GetFileType(path.c_str(), 0);
-	if (format == FIF_UNKNOWN)
-		format = FreeImage_GetFIFFromFilename(path.c_str());
+	FREE_IMAGE_FORMAT format = FreeImageFormatUtf8(path);
 	if (format == FIF_UNKNOWN)
 		return false;
-	BitmapPtr loaded(FreeImage_Load(format, path.c_str(), 0));
+	BitmapPtr loaded(FreeImageLoadUtf8(path));
 	if (!loaded)
 		return false;
 
@@ -323,7 +324,7 @@ size_t ClearRecentRuns(bool delete_folders, size_t* skipped)
 				continue;
 			}
 			std::error_code ec;
-			const uintmax_t count = std::filesystem::remove_all(folder, ec);
+			const uintmax_t count = std::filesystem::remove_all(Utf8Path(folder), ec);
 			if (ec || count == 0)
 				++left;
 			else
@@ -368,7 +369,7 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 			// /o was the .opt path without its extension.
 			summary.output_base = opt.substr(0, opt.size() - 4);
 
-			std::ifstream in(opt.c_str());
+			std::ifstream in(Utf8Path(opt));
 			std::string line;
 			// Everything wanted is in the leading comment block.
 			while (std::getline(in, line)) {

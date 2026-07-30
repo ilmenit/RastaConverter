@@ -34,7 +34,7 @@ VISIBLE_CHARS = 42
 DMA_CHARS = 48
 LEFT_HIDDEN_CHARS = 3
 SCREEN_HPOS = 44
-RASTER_ORIGIN = 36
+RASTER_ORIGIN = 44
 
 COLOR_REGS = tuple(range(0xD012, 0xD01B))
 PF_REGS = (0xD016, 0xD017, 0xD018, 0xD019)
@@ -102,8 +102,8 @@ def make_case(seed: int) -> Case:
     lines: list[list[Insn]] = [[] for _ in range(HEIGHT)]
     for y in range(HEIGHT):
         transition = y < 216 and y % 24 == 23
-        limit = 8 if y == 0 else (
-            10 if y % 8 == 0 else (44 if transition else 50))
+        limit = 6 if y == 0 else (
+            8 if y % 8 == 0 else (44 if transition else 48))
         insns: list[Insn] = [Insn("lda", rng.randrange(128) * 2)]
         cycles = 2
         while cycles < limit:
@@ -171,11 +171,11 @@ def build_kernel(case: Case) -> bytes:
 
         transition = y < 216 and y % 24 == 23
         if y == 0:
-            limit = 8
+            limit = 6
         elif y % 8 == 0:
-            limit = 10
+            limit = 8
         else:
-            limit = 44 if transition else 50
+            limit = 44 if transition else 48
         if body_cycles > limit or (limit - body_cycles) % 2:
             raise AssertionError(
                 f"line {y} body cannot fill {limit}-cycle budget")
@@ -184,12 +184,16 @@ def build_kernel(case: Case) -> bytes:
         if transition:
             next_charset = y // 24 + 1
             code.extend((
-                0x2C, 0xFF, 0xFF,  # BIT abs: four-cycle CHBASE safety delay
+                0x24, 0x00,        # BIT zp: three-cycle CHBASE safety delay
                 0xA9, (FONT_ADDR >> 8) + next_charset * 4,
                 0x8D, 0x09, 0xD4,
             ))
-        else:
+        elif y > 0 and (y - 1) % 8 == 0:
+            # The final delayed refresh from the preceding wide badline steals
+            # the first slot of this logical line, leaving a four-cycle suffix.
             code.extend((0x2C, 0xFF, 0xFF))
+        else:
+            code.extend((0x24, 0x00, 0xEA))
 
     code.extend((
         0xA9, FONT_ADDR >> 8,
@@ -206,6 +210,10 @@ def dma_stolen(output_y: int, x: int) -> bool:
     """Wide mode 4 + single-line P/M DMA, no horizontal scroll."""
     stolen = {0, 2, 3, 4, 5}  # missile and four players
     badline = output_y % 8 == 0
+    # The ninth refresh request on a wide badline cannot run before cycle 106,
+    # which belongs to the following logical raster line.
+    if badline and x == 106:
+        return True
     if badline:
         stolen.add(1)  # display-list opcode
         if output_y == 0:

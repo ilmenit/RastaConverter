@@ -2,13 +2,14 @@ name: Build
 
 # Every push builds and tests all three platforms and uploads the packaged zips
 # as artifacts, so the packaging is exercised continuously rather than only on
-# release day. Pushing a Beta* tag additionally publishes those same zips as a
-# GitHub release - the release is the CI output, not a separately built thing.
+# release day. Pushing a Beta* or 1.0-* tag additionally publishes those same
+# zips as a GitHub release - the release is the CI output, not a separately
+# built thing.
 
 on:
   push:
     branches: [master]
-    tags: ['Beta*']
+    tags: ['Beta*', '1.0-*']
   pull_request:
     branches: [master]
   workflow_dispatch:
@@ -106,6 +107,39 @@ jobs:
           cd build/Release
           ./RastaConverter.exe --version
 
+      # Exercise the real Windows conversion path without requiring a desktop.
+      # This also keeps the console-only CMake configuration healthy.
+      - name: Configure console smoke build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cmake -S . -B build-console -DBUILD_NO_GUI=ON \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build console smoke binary (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --build build-console --config Release --parallel
+
+      - name: Smoke test conversion (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          cd build-console/Release-NO_GUI
+          ./RastaConverter-NO_GUI.exe test.jpg --h 40 --threads 2 \
+            --dither none --quiet --max_evals 20000 \
+            --palette Palettes/laoo.act --output "smoke unicode ü.png"
+          test -f "smoke unicode ü.png.opt"
+
+      - name: Verify install layout
+        shell: bash
+        run: |
+          prefix="$RUNNER_TEMP/rasta-install"
+          cmake --install build --config Release --prefix "$prefix"
+          test -d "$prefix/bin/Palettes"
+          test -d "$prefix/bin/Generator"
+          test -d "$prefix/bin/GeneratorDual"
+
       - name: Package
         id: package
         shell: bash
@@ -122,7 +156,7 @@ jobs:
   release:
     name: Publish release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/Beta')
+    if: startsWith(github.ref, 'refs/tags/Beta') || startsWith(github.ref, 'refs/tags/1.0-')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -139,7 +173,7 @@ jobs:
           version="${GITHUB_REF_NAME}"
           awk -v v="RastaConverter${version}" '
             $0 ~ "^"v { found=1; next }
-            found && /^RastaConverter[A-Za-z0-9]+ / { exit }
+            found && /^RastaConverter[^ ]+ / { exit }
             found { print }
           ' ChangeLog.md > notes.md
           if [ ! -s notes.md ]; then

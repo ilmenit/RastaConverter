@@ -2,6 +2,7 @@
 #include "TargetPicture.h"
 #include "rgb.h"
 #include "Distance.h"
+#include "Utf8Path.h"
 
 using namespace std;
 
@@ -13,16 +14,16 @@ bool LoadAtariPalette(const std::string& filename)
 	size_t i;
 	rgb col;
 	col.a=0;
-	FILE *fp=fopen(filename.c_str(),"rb");
+	FILE *fp=FopenUtf8(filename, "rb");
 	if (!fp)
 	{
-		fp=fopen((string("Palettes/")+filename).c_str(),"rb");
+		fp=FopenUtf8(string("Palettes/") + filename, "rb");
 		if (!fp)
 		{
-			fp=fopen((string("Palettes/")+filename+string(".act")).c_str(),"rb");
+			fp=FopenUtf8(string("Palettes/") + filename + ".act", "rb");
 			if (!fp)
 			{
-				fp=fopen((string("Palettes/")+filename+string(".pal")).c_str(),"rb");
+				fp=FopenUtf8(string("Palettes/") + filename + ".pal", "rb");
 				if (!fp)
 					return false;
 			}

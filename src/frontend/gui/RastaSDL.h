@@ -36,6 +36,7 @@ private:
     SDL_Renderer* renderer = nullptr;
     TTF_Font* font = nullptr;
     bool frameDirty = false;
+    bool headless = false;
     bool abortRequested = false;
     bool screenshotDone = false;
     SDL_Texture* framebufferTexture = nullptr; // retained backbuffer to avoid flicker
