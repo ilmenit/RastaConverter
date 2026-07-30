@@ -312,7 +312,7 @@ void ImageViewer::DrawToolbar()
 	if (SegmentedButton("compare", &compare_index, kCompareLabels, kCompareHints, 3))
 		compare_ = static_cast<Compare>(compare_index);
 
-	if (mask_texture_ != nullptr) {
+	if (mask_texture_ != nullptr && mask_active_) {
 		ImGui::SameLine(0.0f, 16.0f);
 		ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kTextMuted));
 		ImGui::TextUnformatted("Mask");
@@ -487,7 +487,7 @@ void ImageViewer::DrawCanvas()
 
 	// The mask sits on top of the picture rather than replacing a stage, so it
 	// can be judged against the image it is steering.
-	if (mask_texture_ != nullptr && mask_view_ != MaskView::Off) {
+	if (mask_texture_ != nullptr && mask_active_ && mask_view_ != MaskView::Off) {
 		const float alpha = mask_view_ == MaskView::Only
 			? 1.0f : mask_opacity_percent_ / 100.0f;
 		const ImU32 tint = IM_COL32(0xFF, 0xC8, 0x78,

@@ -59,6 +59,20 @@ void TestReclaimableLineArena()
 	Require(stats.allocated_by_type[linear_allocator::LINE_CACHE_ENTRY] == allocated_entries,
 		"allocation attribution must remain cumulative after reclaim");
 }
+
+void TestAntic4AttributeRowIsPartOfKey()
+{
+	antic4_line_cache_key normal{};
+	antic4_line_cache_key alternate = normal;
+	alternate.attribute_row = uint64_t{1} << 39;
+	Require(!(normal == alternate),
+		"ANTIC 4 attribute-row changes must not reuse a line result");
+	Require(normal.hash() != alternate.hash(),
+		"ANTIC 4 attribute-row changes should perturb the cache hash");
+	Require(sizeof(line_cache::value_type)
+			< sizeof(std::pair<antic4_line_cache_key, line_cache_result>),
+		"mode E cache entries must not carry the ANTIC 4 attribute payload");
+}
 }
 
 int main()
@@ -66,6 +80,7 @@ int main()
 	TestPackedTargetRow(160);
 	TestPackedTargetRow(159);
 	TestReclaimableLineArena();
+	TestAntic4AttributeRowIsPartOfKey();
 	std::cout << "LineCache tests passed\n";
 	return 0;
 }

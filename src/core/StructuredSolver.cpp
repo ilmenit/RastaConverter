@@ -78,9 +78,14 @@ bool IsPmgTarget(e_target target)
 int StructuredInstructionEffectPixel(int startCycle)
 {
 	assert(startCycle >= 0 && startCycle <= raster_program_cycle_limit);
-	// Evaluator instructions execute while offset < x, immediately before x is
-	// rendered. Therefore an instruction at offset N first affects pixel N+1.
-	return screen_cycles[startCycle].offset + 1;
+	SRasterInstruction store{};
+	store.loose.instruction = E_RASTER_STA;
+	// The evaluator executes an instruction while its offset is < x, immediately
+	// before the first affected pixel is rendered. This is the mode-E path, and
+	// the mode-E map already carries the store's four-cycle completion delay in
+	// its display-start constant - see RasterInstructionCompletionOffset.
+	return RasterInstructionCompletionOffset(
+		screen_cycles, startCycle, store, false) + 1;
 }
 
 bool BuildStructuredSourceSegment(

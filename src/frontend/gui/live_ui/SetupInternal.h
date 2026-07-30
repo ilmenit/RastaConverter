@@ -55,6 +55,9 @@ struct SetupState {
 	bool section_open[kCategoryCount] = {};
 
 	bool height_auto = true;
+	bool antic_e_dual_mode = false;
+	int input_width = 0;
+	int input_height = 0;
 	bool seed_random = true;
 	int seed_value = 0;
 	bool max_evals_unlimited = true;

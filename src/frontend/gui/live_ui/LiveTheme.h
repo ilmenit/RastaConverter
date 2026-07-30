@@ -38,6 +38,14 @@ extern ImU32 kSurfaceHigh;
 extern ImU32 kSurfaceLow;
 extern ImU32 kBorder;
 
+// Category badges: a matched pair that reads as one set. Both sit mid-way up
+// the lightness range, dark enough to carry kTextStrong at better than 4.5:1
+// and light enough to stay legible against a light surface, so they survive a
+// light theme without a second palette. Neither may be grey: the badge has to
+// say "this is a kind of thing", which a neutral cannot.
+constexpr ImU32 kBadgeText   = IM_COL32(0x2C, 0x77, 0x42, 0xFF); // green - ANTIC 4
+constexpr ImU32 kBadgeGfx    = IM_COL32(0x33, 0x6F, 0xAB, 0xFF); // blue - ANTIC E
+
 ImVec4 ToVec4(ImU32 packed);
 
 } // namespace theme

@@ -235,6 +235,19 @@ if(BUILD_TESTING)
     )
     add_test(NAME VisualObjectiveTests COMMAND VisualObjectiveTests)
 
+    add_executable(ConfigModelTests
+        tests/ConfigModelTests.cpp
+        src/app/CommandLineParser.cpp
+        src/frontend/gui/live_ui/ConfigModel.cpp
+    )
+    target_include_directories(ConfigModelTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/app
+        ${CMAKE_SOURCE_DIR}/src/core
+        ${CMAKE_SOURCE_DIR}/src/color
+        ${CMAKE_SOURCE_DIR}/src/frontend/gui/live_ui
+    )
+    add_test(NAME ConfigModelTests COMMAND ConfigModelTests)
+
 endif()
 
 set(HEADER_FILES
@@ -372,6 +385,14 @@ else()
 endif()
 
 if(BUILD_TESTING)
+    # ConfigModel includes config.h, whose public types include FreeImage's
+    # rescale-filter enum. Imported targets carry that include directory; the
+    # fallback path is supplied explicitly for Homebrew and other installations.
+    target_include_directories(ConfigModelTests PRIVATE
+        ${RESOLVED_FREEIMAGE_INCLUDES}
+    )
+    target_link_libraries(ConfigModelTests PRIVATE ${RESOLVED_FREEIMAGE_LIBS})
+
     add_executable(CommandLineParserTests
         tests/CommandLineParserTests.cpp
         src/app/CommandLineParser.cpp
@@ -819,13 +840,22 @@ if(BUILD_NO_GUI)
     )
 endif()
 
-# Post-build: copy resources (Palettes, Generator, and docs) next to the executables
+# Runtime generators are inputs to XEX creation, not passive documentation.
+# A TARGET POST_BUILD command only runs when the executable is relinked, so a
+# template-only edit can otherwise leave an older generator beside an
+# up-to-date executable. Make resource synchronization an explicit dependency
+# that runs whenever the application target is requested.
 if(NOT BUILD_NO_GUI)
     set(RC_RUNTIME_COPY_DIR "$<TARGET_FILE_DIR:RastaConverter>")
-    add_custom_command(TARGET RastaConverter POST_BUILD
+    add_custom_target(RastaConverterResources
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Palettes" "${RC_RUNTIME_COPY_DIR}/Palettes"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Generator" "${RC_RUNTIME_COPY_DIR}/Generator"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/GeneratorDual" "${RC_RUNTIME_COPY_DIR}/GeneratorDual"
+        COMMENT "Synchronizing RastaConverter runtime resources"
+        VERBATIM
+    )
+    add_dependencies(RastaConverter RastaConverterResources)
+    add_custom_command(TARGET RastaConverter POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/clacon2.ttf" "${RC_RUNTIME_COPY_DIR}/clacon2.ttf"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/ChangeLog.md" "${RC_RUNTIME_COPY_DIR}/ChangeLog.md"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR}/help.txt"
@@ -839,10 +869,15 @@ if(NOT BUILD_NO_GUI)
 endif()
 if(BUILD_NO_GUI)
     set(RC_RUNTIME_COPY_DIR_NO_GUI "$<TARGET_FILE_DIR:RastaConverter-NO_GUI>")
-    add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
+    add_custom_target(RastaConverterNoGuiResources
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Palettes" "${RC_RUNTIME_COPY_DIR_NO_GUI}/Palettes"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Generator" "${RC_RUNTIME_COPY_DIR_NO_GUI}/Generator"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/GeneratorDual" "${RC_RUNTIME_COPY_DIR_NO_GUI}/GeneratorDual"
+        COMMENT "Synchronizing RastaConverter-NO_GUI runtime resources"
+        VERBATIM
+    )
+    add_dependencies(RastaConverter-NO_GUI RastaConverterNoGuiResources)
+    add_custom_command(TARGET RastaConverter-NO_GUI POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/ChangeLog.md" "${RC_RUNTIME_COPY_DIR_NO_GUI}/ChangeLog.md"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/help.txt" "${RC_RUNTIME_COPY_DIR_NO_GUI}/help.txt"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "${RC_RUNTIME_COPY_DIR_NO_GUI}/README.md"

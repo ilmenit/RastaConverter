@@ -150,7 +150,7 @@ void Overlay::PublishBitmap(ImageSlot slot, FIBITMAP* bitmap)
 }
 
 void Overlay::PublishDetailsMask(const unsigned char* values,
-	const unsigned char* editable_values, int width, int height)
+	const unsigned char* editable_values, int width, int height, bool active)
 {
 	if (!impl_->dashboard)
 		return;
@@ -170,7 +170,7 @@ void Overlay::PublishDetailsMask(const unsigned char* values,
 	if (editable_values != nullptr && width > 0 && height > 0)
 		editable.assign(editable_values,
 			editable_values + static_cast<size_t>(width) * height);
-	impl_->dashboard->SetMask(mask, editable);
+	impl_->dashboard->SetMask(mask, editable, active);
 }
 
 bool Overlay::TakeEditorApply(GuiEditorApply& request)

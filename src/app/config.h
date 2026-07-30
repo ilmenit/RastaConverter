@@ -18,6 +18,7 @@
 #include "CommandLineParser.h"
 #include <assert.h>
 #include "rgb.h"
+#include "Program.h"
 
 enum e_init_type {
 	E_INIT_RANDOM,
@@ -108,6 +109,7 @@ struct Configuration {
 	int threads;
 	int width;
 	int height;
+	GraphicsMode graphics_mode = GraphicsMode::AnticE;
 	unsigned long long max_evals;
 	FREE_IMAGE_FILTER rescale_filter;
 	e_init_type init_type;

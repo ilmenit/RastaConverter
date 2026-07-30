@@ -158,7 +158,10 @@ XexBuildResult BuildRunXex(const std::string& output_base)
 	const std::string folder = DirectoryOf(output_base);
 	const bool dual = IsDualRun(folder);
 	const std::string generator = BundledPath(dual ? "GeneratorDual" : "Generator");
-	const std::string source = generator + "/no_name.asq";
+	const bool antic4 = !dual && Exists(output_base + ".a4.scr")
+		&& Exists(output_base + ".a4.fnt");
+	const std::string source = generator
+		+ (antic4 ? "/antic4.asq" : "/no_name.asq");
 	if (!Exists(source)) {
 		result.log = "The bundled generator is missing: no " + source
 			+ ". It ships in the " + (dual ? std::string("GeneratorDual")

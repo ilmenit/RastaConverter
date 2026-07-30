@@ -44,7 +44,7 @@ public:
 	void PublishBitmap(ImageSlot slot, FIBITMAP* bitmap);
 	// One grey level per target pixel; null clears the overlay.
 	void PublishDetailsMask(const unsigned char* values,
-		const unsigned char* editable_values, int width, int height);
+		const unsigned char* editable_values, int width, int height, bool active);
 	void PublishDestinationLayer(const unsigned char* palette_indices,
 		int width, int height);
 	bool TakeEditorApply(GuiEditorApply& request);

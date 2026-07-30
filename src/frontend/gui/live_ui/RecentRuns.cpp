@@ -382,9 +382,16 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 				}
 				if (summary.command_line.empty()) {
 					const std::string value = ValueAfter(line, "; CmdLine:");
-					if (!value.empty())
+					if (!value.empty()) {
 						summary.command_line = value;
+						if (value.find("/graphics_mode=antic4")
+							!= std::string::npos)
+							summary.text_mode = true;
+					}
 				}
+				if (line.find("; Graphics Mode: ANTIC 4")
+					!= std::string::npos)
+					summary.text_mode = true;
 				const std::string evaluations = ValueAfter(line, "; Evaluations:");
 				if (!evaluations.empty())
 					summary.evaluations = std::strtoull(evaluations.c_str(), nullptr, 10);

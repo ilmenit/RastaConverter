@@ -40,6 +40,9 @@ Key capabilities
 - Performance: multi-threaded execution with per-thread line caches and configurable cache size.
 - Image pipeline: resize filters (box, bilinear, bicubic, bspline, Catmull–Rom, Lanczos3) plus brightness, contrast, gamma, saturation and vibrance adjustments.
 - Hardware control: fine-grained control over Atari registers, including enabling/disabling hardware sprites (players/missiles) per scanline.
+- Graphics modes: the established ANTIC E bitmap output remains the default;
+  experimental ANTIC 4 character-mode output adds a cell-selectable fifth
+  playfield colour and complete screen/font/XEX export.
 - Details mask: provide a mask image to emphasize selected regions and bring out fine details in the result. Legacy, normalized and refined weighting modes, with strength reaching the classic 4x and 16x emphasis, and an overlay in the GUI showing the effective weight map.
 - Interfaces: an interactive setup screen and live dashboard for every run, and a headless console mode for scripting. (The pre-2025 three-thumbnail display remains only in `-DENABLE_LIVE_UI=OFF` builds.)
 - Palette selection: choose target palette files via Adobe ACT to match different monitors and CRT settings.
@@ -50,6 +53,32 @@ Key capabilities
 - Extras: scripts and generators to assemble Atari executables.
 
 The converter uses Late Acceptance Hill Climbing (LAHC) and [Diversified Late Acceptance Search](https://doi.org/10.1007/978-3-030-03991-2_29).
+
+ANTIC 4 character mode
+----------------------
+
+Choose **ANTIC 4 (text mode)** under *Source and destination* in the Live UI,
+or pass `/graphics_mode=antic4` on the command line:
+
+```sh
+RastaConverter photo.jpg /graphics_mode=antic4 /h=200 /threads=8
+```
+
+This mode uses ANTIC's wide playfield: 42 visible character cells, or 168 Atari
+colour clocks shown as 336 square preview pixels. Every 4x8 cell has four
+colours selected from COLBK, COLPF0, COLPF1, and either COLPF2 or COLPF3. The
+optimizer searches that per-cell choice as well as raster colour changes and
+player/missile graphics.
+
+ANTIC 4 output is currently single-frame only. Its height is rounded to a
+complete 8-scanline character row and clamped to 8–240; selecting it in the UI
+temporarily disables dual-frame output. A save produces the usual `.rp`,
+`.opt`, `.pmg`, and optimizer-state files plus `.a4.scr` and `.a4.fnt`.
+The **XEX** action in Recent automatically selects the bundled ANTIC 4 MADS
+template and assembles a runnable executable.
+
+See [ANTIC 4 implementation reference](ANTIC_4_IMPLEMENTATION_SPECIFICATION.md)
+for the memory layout, timing contract, limitations, and validation procedure.
 
 Interactive Live UI
 -------------------

@@ -22,8 +22,8 @@
 
 namespace rc_live_ui {
 
-// A preview surface in SDL_PIXELFORMAT_ABGR8888 order, at Atari resolution
-// (160 x height). Display doubles the width to honour the pixel aspect.
+// A preview surface in SDL_PIXELFORMAT_ABGR8888 order, at Atari color-clock
+// resolution (160 wide for ANTIC E, 168 wide for wide-playfield ANTIC 4).
 struct PreviewImage {
 	int width = 0;
 	int height = 0;
@@ -42,12 +42,20 @@ enum class PreviewStage {
 
 const char* PreviewStageName(PreviewStage stage);
 
+// Mirrors the converter's automatic-height rule. Exposed so the setup control
+// can display the same resolved value as the preview and conversion.
+int ResolveTargetHeight(int configured, int input_width, int input_height);
+int ResolveOutputHeight(GraphicsMode mode, int configured,
+	int input_width, int input_height);
+
 struct PreviewResult {
 	// Which job produced this; increases per dispatched job.
 	std::uint64_t generation = 0;
 	// Increases on every publish, including the partial ones a single job
 	// emits as its stages finish. This is what Fetch() compares against.
 	std::uint64_t revision = 0;
+	int input_width = 0;
+	int input_height = 0;
 	PreviewImage source;
 	PreviewImage corrected;
 	PreviewImage quantized;
@@ -117,6 +125,7 @@ private:
 	struct Inputs {
 		std::string input_file;
 		std::string palette_file;
+		GraphicsMode graphics_mode = GraphicsMode::AnticE;
 		int height = -1;
 		FREE_IMAGE_FILTER filter = FILTER_BOX;
 		int brightness = 0;

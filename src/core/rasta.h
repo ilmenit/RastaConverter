@@ -191,9 +191,11 @@ private:
 	void SaveRasterProgram(string name, raster_picture *pic);
 	void SavePMG(string name);
 	bool SaveScreenData(const char *filename);
+	bool SaveAntic4Data(const std::string& screenFilename,
+		const std::string& fontFilename, const raster_picture& picture);
 	bool SavePicture(const std::string& filename, FIBITMAP* to_save);
 	void SaveStatistics(const char *filename);
-	void SaveOptimizerState(const char *filename);
+	void SaveOptimizerState(const char *filename, const raster_picture* picture = nullptr);
 
 	void LoadRegInits(string name);
 	void LoadRasterProgram(string name);

@@ -102,6 +102,13 @@ General options:
 
 Input:
 
+/graphics_mode=e|antic4
+  Output display format. ANTIC E bitmap mode is the default. ANTIC 4 is an
+  experimental 168-colour-clock wide character mode with five global playfield
+  colours; each 4x8 cell selects COLPF2 or COLPF3 as its fourth colour.
+  ANTIC 4 is single-frame only and cannot be combined with /dual.
+  Aliases: --graphics_mode
+
 /i=Input File
   File to process. All the formats of the FreeImage library supported, including JPG, PNG, GIF and BMP.
   Warning: it is not possible to load 16 colors pictures (4 bits per pixel). Increase the color depth first
@@ -109,8 +116,9 @@ Input:
   Aliases: -i, --input
 
 /h=Output Height
-  Default: Proportional to picture size rescaled to 320xheight or 240.
-  Generated file height. The speed of the optimization process depends on the height.
+  Default: Proportional to picture size at the selected mode width, or 240.
+  Generated file height. ANTIC 4 rounds this to a complete 8-scanline character
+  row and clamps it to 8-240. The speed of optimization depends on the height.
   Aliases: -h
   
 /pal=Palette File
@@ -202,7 +210,8 @@ Input:
 
 /filter=Resize filter
   Default: box
-  Filter used to resize the picture to the Atari width=160 color pixels (40 bytes). 
+  Filter used to resize the picture to the selected Atari width: 160 colour
+  clocks for ANTIC E or 168 for wide-playfield ANTIC 4.
 	Possible filters are: lanczos, box, bicubic, bilinear, bspline, catmullrom
   Aliases: --filter
 

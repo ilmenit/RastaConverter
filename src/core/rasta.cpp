@@ -273,6 +273,7 @@ const char *mem_regs_names[E_TARGET_MAX+1]=
 	"HPOSP1",
 	"HPOSP2",
 	"HPOSP3",
+	"COLOR3",
 	"HITCLR",
 };
 
@@ -290,6 +291,7 @@ const char *mutation_names[E_MUTATION_MAX]=
 	"Change Value  ",
 	"Chg Val to Col",
 	"Dual Complement",
+	"Flip A4 Attr  ",
 };
 
 void resize_rgb_picture(vector < screen_line > *picture, size_t width, size_t height)
@@ -397,7 +399,7 @@ void RastaConverter::SaveStatistics(const char *fn)
     }
 }
 
-void RastaConverter::SaveOptimizerState(const char* fn) {
+void RastaConverter::SaveOptimizerState(const char* fn, const raster_picture* picture) {
     std::ofstream out(Utf8Path(fn), std::ios::out | std::ios::trunc);
     if (!out)
     {
@@ -436,6 +438,19 @@ void RastaConverter::SaveOptimizerState(const char* fn) {
     {
         out << static_cast<long double>(value) << '\n';
     }
+	if (picture && picture->graphics_mode == GraphicsMode::Antic4)
+	{
+		if (picture->antic4_attributes.empty()
+			|| picture->antic4_attributes.size() > 30)
+			Error("Cannot save malformed ANTIC 4 attribute state");
+		out << "ANTIC4_STATE 1\n";
+		out << "graphics_mode antic4\n";
+		out << "attribute_rows " << picture->antic4_attributes.size() << '\n';
+		out << std::hex << std::setfill('0');
+		for (uint64_t row : picture->antic4_attributes)
+			out << std::setw(11) << row << '\n';
+		out << std::dec;
+	}
 
     if (!out)
     {
@@ -522,6 +537,39 @@ void RastaConverter::LoadOptimizerState(string name)
     m_eval_gstate.m_cost_max = static_cast<double>(cost_max);
     m_eval_gstate.m_N = N;
     m_eval_gstate.m_current_cost = static_cast<double>(current_cost);
+
+	if (!std::getline(in, line))
+		return; // Legacy mode-E optimizer state.
+	if (line != "ANTIC4_STATE 1")
+		Error("Unknown optimizer-state extension: " + line);
+	if (!read_line(line) || lowercase(line) != "graphics_mode antic4")
+		Error("Invalid ANTIC 4 optimizer-state graphics mode");
+	if (!read_line(line))
+		Error("Invalid ANTIC 4 optimizer-state row count");
+	std::istringstream rowCountParser(line);
+	std::string rowCountName;
+	int attributeRows = 0;
+	if (!(rowCountParser >> rowCountName >> attributeRows)
+		|| rowCountName != "attribute_rows"
+		|| attributeRows < 1 || attributeRows > 30)
+		Error("Invalid ANTIC 4 optimizer-state row count");
+	raster_picture& picture = m_eval_gstate.m_best_pic;
+	picture.graphics_mode = GraphicsMode::Antic4;
+	picture.antic4_attributes.assign(attributeRows, 0);
+	for (int rowIndex = 0; rowIndex < attributeRows; ++rowIndex)
+	{
+		if (!read_line(line) || (line.size() != 10 && line.size() != 11))
+			Error("Invalid ANTIC 4 optimizer-state attribute row");
+		unsigned long long mask = 0;
+		std::istringstream parser(line);
+		if (!(parser >> std::hex >> mask)
+			|| (mask >> antic4_visible_characters) != 0)
+			Error("Invalid ANTIC 4 optimizer-state attribute mask");
+		char extra = 0;
+		if (parser >> extra)
+			Error("Invalid ANTIC 4 optimizer-state attribute mask");
+		picture.antic4_attributes[rowIndex] = mask;
+	}
 }
 
 bool RastaConverter::LoadInputBitmap()
@@ -536,19 +584,23 @@ bool RastaConverter::LoadInputBitmap()
 
 	unsigned int input_width=FreeImage_GetWidth(input_bitmap);
 	unsigned int input_height=FreeImage_GetHeight(input_bitmap);
-
+	cfg.width = cfg.graphics_mode == GraphicsMode::Antic4
+		? antic4_visible_width : 160;
 	if (cfg.height==-1) // set height automatic to keep screen proportions
 	{
 		double iw= (double) input_width;
 		double ih= (double) input_height;
-		if ( iw/ih > (320.0/240.0) ) // 4:3 = 320:240
+		const double outputWidth = static_cast<double>(cfg.width * 2);
+		if (iw / ih > outputWidth / 240.0)
 		{
-			ih=input_height / (input_width/320.0);
+			ih = input_height / (input_width / outputWidth);
 			cfg.height=(int) ih;
 		}
 		else
 			cfg.height=240;
 	}
+	if (cfg.graphics_mode == GraphicsMode::Antic4)
+		cfg.height = NormalizeAntic4Height(cfg.height);
 	
     {
         FIBITMAP* rescaled = FreeImage_Rescale(input_bitmap, cfg.width, cfg.height, cfg.rescale_filter);
@@ -672,6 +724,7 @@ void RastaConverter::LoadDetailsMap()
 		published.editable_values = details_mask.EditableValues().data();
 		published.width = static_cast<int>(details_mask.Width());
 		published.height = static_cast<int>(details_mask.Height());
+		published.active = true;
 		gui.PublishDetailsMask(published);
 	}
 	if (cfg.continue_processing && cfg.details_score
@@ -1108,6 +1161,7 @@ bool RastaConverter::ApplyMaskEditLocked(const GuiEditorApply& request)
 	published.editable_values = details_mask.EditableValues().data();
 	published.width = m_width;
 	published.height = m_height;
+	published.active = true;
 	gui.PublishDetailsMask(published);
 	return true;
 }
@@ -1811,6 +1865,64 @@ bool RastaConverter::SaveScreenData(const char *filename)
     return true;
 }
 
+bool RastaConverter::SaveAntic4Data(const std::string& screenFilename,
+	const std::string& fontFilename, const raster_picture& picture)
+{
+	if (m_width != antic4_visible_width || m_height < 8 || m_height > 240
+		|| m_height % 8 != 0
+		|| m_eval_gstate.m_created_picture_targets.size()
+			!= static_cast<size_t>(m_height))
+		Error("ANTIC 4 export requires a complete 168-pixel-wide target map "
+			"with a whole number of 8-scanline character rows");
+
+	const int characterRows = m_height / 8;
+	const int charsetCount = (characterRows + 2) / 3;
+	std::vector<unsigned char> screen(
+		characterRows * antic4_dma_characters);
+	std::vector<unsigned char> fonts(charsetCount * 1024);
+	for (int characterRow = 0; characterRow < characterRows; ++characterRow)
+	{
+		for (int cell = 0; cell < antic4_visible_characters; ++cell)
+		{
+			const bool alternate = picture.antic4_attribute(characterRow, cell);
+			const int glyph =
+				(characterRow % 3) * antic4_visible_characters + cell;
+			screen[characterRow * antic4_dma_characters
+				+ antic4_screen_left_hidden_characters + cell] =
+				Antic4ScreenCode(characterRow, cell, alternate);
+			for (int glyphRow = 0; glyphRow < 8; ++glyphRow)
+			{
+				unsigned char value = 0;
+				const int y = characterRow * 8 + glyphRow;
+				for (int pixel = 0; pixel < 4; ++pixel)
+				{
+					const int x = cell * 4 + pixel;
+					e_target target = static_cast<e_target>(
+						m_eval_gstate.m_created_picture_targets[y][x]);
+					unsigned char encoded = 0;
+					if (!EncodeAntic4PlayfieldTarget(target, alternate, encoded))
+						Error("ANTIC 4 target map contains an illegal cell target");
+					value |= static_cast<unsigned char>(encoded << (6 - pixel * 2));
+				}
+				const int charset = characterRow / 3;
+				fonts[charset * 1024 + glyph * 8 + glyphRow] = value;
+			}
+		}
+	}
+
+	std::ofstream screenOut(screenFilename,
+		std::ios::out | std::ios::binary | std::ios::trunc);
+	std::ofstream fontOut(fontFilename,
+		std::ios::out | std::ios::binary | std::ios::trunc);
+	if (!screenOut || !fontOut)
+		Error("Unable to create ANTIC 4 screen/font output");
+	screenOut.write(reinterpret_cast<const char*>(screen.data()), screen.size());
+	fontOut.write(reinterpret_cast<const char*>(fonts.data()), fonts.size());
+	if (!screenOut || !fontOut)
+		Error("Error writing ANTIC 4 screen/font output");
+	return true;
+}
+
 
 void RastaConverter::SetConfig(Configuration &a_c)
 {
@@ -2347,7 +2459,8 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 			// lda
 			i.loose.instruction=(e_raster_instruction) (E_RASTER_LDA+k%3); // k%3 to cycle through A,X,Y regs
 			if (k>E_COLBAK && y%2==1 && dest_colors>4)
-				i.loose.value=(e_target) color_position[k]+sprite_screen_color_cycle_start; // sprite position
+				i.loose.value=(e_target) color_position[k]
+					+ SpriteScreenColorCycleStart(r->graphics_mode); // sprite position
 			else
 				i.loose.value=FindAtariColorIndex(color)*2;
 			i.loose.target=E_COLOR0;
@@ -2385,19 +2498,20 @@ void RastaConverter::CreateRandomRasterPicture(raster_picture *r)
 
 	x=random(m_width); 
 	r->mem_regs_init[E_COLPM0]=FindAtariColorIndex(m_picture[0][x])*2;
-	r->mem_regs_init[E_HPOSP0]=x+sprite_screen_color_cycle_start;
+	const int spriteStart = SpriteScreenColorCycleStart(r->graphics_mode);
+	r->mem_regs_init[E_HPOSP0]=x+spriteStart;
 
 	x=random(m_width); 
 	r->mem_regs_init[E_COLPM1]=FindAtariColorIndex(m_picture[0][x])*2;
-	r->mem_regs_init[E_HPOSP1]=x+sprite_screen_color_cycle_start;
+	r->mem_regs_init[E_HPOSP1]=x+spriteStart;
 
 	x=random(m_width); 
 	r->mem_regs_init[E_COLPM2]=FindAtariColorIndex(m_picture[0][x])*2;
-	r->mem_regs_init[E_HPOSP2]=x+sprite_screen_color_cycle_start;
+	r->mem_regs_init[E_HPOSP2]=x+spriteStart;
 
 	x=random(m_width); 
 	r->mem_regs_init[E_COLPM3]=FindAtariColorIndex(m_picture[0][x])*2;
-	r->mem_regs_init[E_HPOSP3]=x+sprite_screen_color_cycle_start;
+	r->mem_regs_init[E_HPOSP3]=x+spriteStart;
 
 	for (size_t y=0;y<r->raster_lines.size();++y)
 	{
@@ -2504,6 +2618,15 @@ void RastaConverter::OptimizeRasterProgram(raster_picture *pic)
 
 		}	
 	}
+
+	// Dead-load elimination changes the executable instruction stream. Cached
+	// line keys/results still describe the pre-optimized stream unless every
+	// line is rehashed and recached before export.
+	for (raster_line& line : pic->raster_lines)
+	{
+		line.rehash();
+		line.cache_key = nullptr;
+	}
 }
 
 void RastaConverter::FindPossibleColors()
@@ -2530,9 +2653,26 @@ void RastaConverter::Init()
 	if (!cfg.continue_processing)
 	{
 		raster_picture m(m_height);
+		m.graphics_mode = cfg.graphics_mode;
 		init_finished=false;
 
-		if (color_indexes_on_dst_picture.size()<5)
+		if (cfg.graphics_mode == GraphicsMode::Antic4)
+		{
+			CreateEmptyRasterPicture(&m);
+			m.antic4_attributes.assign(m_height / 8, 0);
+			const e_target initialTargets[5] = {
+				E_COLOR0, E_COLOR1, E_COLOR2, E_COLBAK, E_COLOR3
+			};
+			size_t targetIndex = 0;
+			for (unsigned char color : color_indexes_on_dst_picture)
+			{
+				if (targetIndex == std::size(initialTargets))
+					break;
+				m.mem_regs_init[initialTargets[targetIndex++]] =
+					static_cast<unsigned char>(color * 2);
+			}
+		}
+		else if (color_indexes_on_dst_picture.size()<5)
 			CreateLowColorRasterPicture(&m);
 		else if (cfg.init_type==E_INIT_RANDOM)
 			CreateRandomRasterPicture(&m);
@@ -2572,6 +2712,7 @@ void RastaConverter::ApplyInternalStructuredPass(
 		return;
 	}
 	if (cfg.dual_mode || m_evaluators.empty()
+		|| cfg.graphics_mode == GraphicsMode::Antic4
 		|| m_eval_gstate.m_best_pic.raster_lines.size()
 			!= static_cast<std::size_t>(m_height))
 		return;
@@ -2704,7 +2845,9 @@ std::string RastaConverter::BuildConfigRecap() const
 		<< "\n" << "objective " << kObjective[cfg.visual_objective]
 		<< "  |  optimizer " << kOptimizer[cfg.optimizer]
 		<< "  |  history " << solutions
-		<< "  |  init " << kInit[cfg.init_type];
+		<< "  |  init " << kInit[cfg.init_type]
+		<< "  |  graphics "
+		<< (cfg.graphics_mode == GraphicsMode::Antic4 ? "ANTIC 4" : "ANTIC E");
 	if (cfg.dual_mode)
 		out << "\n" << "dual frame on, blending " << cfg.dual_blending;
 	if (!cfg.details_file.empty())
@@ -2738,6 +2881,9 @@ void RastaConverter::PublishLiveStats(bool preprocessing, bool finished)
 
 	for (int i = 0; i < E_MUTATION_MAX; ++i) {
 		if (!cfg.dual_mode && i == E_MUTATION_COMPLEMENT_VALUE_DUAL)
+			continue;
+		if (cfg.graphics_mode != GraphicsMode::Antic4
+			&& i == E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE)
 			continue;
 		LiveStats::MutationStat stat;
 		stat.name = mutation_names[i];
@@ -2827,6 +2973,8 @@ void RastaConverter::ShowMutationStats()
 	{
 		// Show dual-only mutation stat only in dual mode
 		if (!cfg.dual_mode && i == E_MUTATION_COMPLEMENT_VALUE_DUAL) continue;
+		if (cfg.graphics_mode != GraphicsMode::Antic4
+			&& i == E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE) continue;
 		gui.DisplayText(0, status_top + mutation_line_height * row,
 			string(mutation_names[i]) + string("  ")
 			+ format_with_commas(m_eval_gstate.m_mutation_stats[i]));
@@ -2895,33 +3043,23 @@ void RastaConverter::SaveBestSolution()
 			std::atomic_load_explicit(&m_eval_gstate.m_best_snapshot, std::memory_order_acquire);
 		raster_picture pic = snapshot ? snapshot->picture : m_eval_gstate.m_best_pic;
 
-		// A Continue can legitimately stop before running another mutation (for
-		// example when its saved evaluation count already exceeds /max_evals).
-		// In that case no worker has published the derived pixel/target rows in
-		// this process yet. Re-render the exact picture being saved when those
-		// rows are absent so output, MIC and PMG data are valid. Normal live
-		// saves retain the worker-published rows and do not touch a busy worker.
-		bool renderedRowsComplete =
-			m_eval_gstate.m_created_picture.size() == static_cast<size_t>(m_height)
-			&& m_eval_gstate.m_created_picture_targets.size()
-				== static_cast<size_t>(m_height);
-		for (int y = 0; renderedRowsComplete && y < m_height; ++y)
-			renderedRowsComplete =
-				m_eval_gstate.m_created_picture[y].size()
-					== static_cast<size_t>(m_width)
-				&& m_eval_gstate.m_created_picture_targets[y].size()
-					== static_cast<size_t>(m_width);
-		if (!renderedRowsComplete)
-			RenderCreatedPicture(pic);
-		ShowLastCreatedPicture();
 		SaveRasterProgram(string(cfg.output_file+".rp"), &pic);
 		OptimizeRasterProgram(&pic);
+		// Export every derived artifact from the exact optimized program that
+		// will be assembled into the XEX, never from a worker's pre-optimization
+		// cache rows.
+		RenderCreatedPicture(pic);
+		ShowLastCreatedPicture();
 		SaveRasterProgram(string(cfg.output_file+".opt"), &pic);
 		SavePMG(string(cfg.output_file+".pmg"));
-		SaveScreenData  (string(cfg.output_file+".mic").c_str());
+		if (pic.graphics_mode == GraphicsMode::Antic4)
+			SaveAntic4Data(cfg.output_file + ".a4.scr",
+				cfg.output_file + ".a4.fnt", pic);
+		else
+			SaveScreenData(string(cfg.output_file+".mic").c_str());
 		SavePicture     (cfg.output_file,output_bitmap);
 		SaveStatistics((cfg.output_file+".csv").c_str());
-		SaveOptimizerState((cfg.output_file+".optstate").c_str());
+		SaveOptimizerState((cfg.output_file+".optstate").c_str(), &pic);
 		m_mask_edited_since_save = false;
 		m_ever_saved = true;
 		m_last_save_time = std::chrono::steady_clock::now();
@@ -3211,10 +3349,14 @@ void RastaConverter::MainLoop()
 
 void RastaConverter::RenderCreatedPicture(raster_picture& picture)
 {
-	if (m_evaluators.empty())
+	if (!m_reporting_evaluator)
 		return;
 	std::vector<const line_cache_result*> results(m_height, nullptr);
-	Evaluator& evaluator = m_evaluators.front();
+	Evaluator& evaluator = *m_reporting_evaluator;
+	// Published pictures can still carry instruction identities owned by a
+	// worker evaluator. Re-intern them in the reporting evaluator before
+	// rendering so saving never reads worker cache storage.
+	evaluator.RecachePicture(&picture, true);
 	evaluator.EvaluateSingle(&picture, results.data());
 	m_eval_gstate.m_created_picture.resize(m_height);
 	m_eval_gstate.m_created_picture_targets.resize(m_height);
@@ -3446,9 +3588,64 @@ void RastaConverter::LoadRasterProgram(string name)
 	current_raster_line.cycles=0;
 	size_t pos;
 	bool line_started = false;
+	bool fixed_antic4_block = false;
+	std::vector<std::string> fixed_antic4_lines;
+	std::vector<int> fixed_antic4_rows;
+	auto normalizedAsm = [](std::string value) {
+		const size_t comment = value.find(';');
+		if (comment != std::string::npos)
+			value.resize(comment);
+		const size_t first = value.find_first_not_of(" \t\r\n");
+		const size_t last = value.find_last_not_of(" \t\r\n");
+		if (first == std::string::npos)
+			return std::string();
+		value = value.substr(first, last - first + 1);
+		std::transform(value.begin(), value.end(), value.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		return value;
+	};
 	
 	while( getline( f, line)) 
 	{
+		if (line.find("ANTIC4_FIXED_CHBASE_BEGIN") != string::npos)
+		{
+			if (fixed_antic4_block || !line_started
+				|| m_eval_gstate.m_best_pic.graphics_mode != GraphicsMode::Antic4)
+				Error("Malformed ANTIC4 fixed CHBASE block");
+			fixed_antic4_block = true;
+			fixed_antic4_lines.clear();
+			continue;
+		}
+		if (line.find("ANTIC4_FIXED_CHBASE_END") != string::npos)
+		{
+			if (!fixed_antic4_block)
+				Error("Unexpected ANTIC4 fixed CHBASE block end");
+			const int y = static_cast<int>(
+				m_eval_gstate.m_best_pic.raster_lines.size());
+			const std::string expectedLoad = "lda #>charset_"
+				+ std::to_string(y / 24 + 1);
+			if (y < 0 || y % 24 != 23
+				|| fixed_antic4_lines.size() != 3
+				|| fixed_antic4_lines[0] != "bit byt2"
+				|| fixed_antic4_lines[1] != expectedLoad
+				|| fixed_antic4_lines[2] != "sta chbase")
+				Error("Invalid ANTIC4 fixed CHBASE instructions");
+			fixed_antic4_rows.push_back(y);
+			fixed_antic4_block = false;
+			current_raster_line.rehash();
+			m_eval_gstate.m_best_pic.raster_lines.push_back(current_raster_line);
+			current_raster_line.cycles = 0;
+			current_raster_line.instructions.clear();
+			line_started = false;
+			continue;
+		}
+		if (fixed_antic4_block)
+		{
+			const std::string instruction = normalizedAsm(line);
+			if (!instruction.empty())
+				fixed_antic4_lines.push_back(instruction);
+			continue;
+		}
 		// skip filler
 		if (line.find("; filler")!=string::npos)
 			continue;
@@ -3486,6 +3683,13 @@ void RastaConverter::LoadRasterProgram(string name)
 		if (pos!=string::npos)
 			m_snapshot_count=String2Value<unsigned>(line.substr(pos+12));
 
+		if (line.find("; Graphics Mode: ANTIC 4") != string::npos)
+		{
+			m_eval_gstate.m_best_pic.graphics_mode = GraphicsMode::Antic4;
+			// The required tagged optstate block supplies the attributes.
+			m_eval_gstate.m_best_pic.antic4_attributes.clear();
+		}
+
 		if (line.compare(0, 4, "line", 4) == 0)
 		{
 			line_started = true;
@@ -3494,6 +3698,16 @@ void RastaConverter::LoadRasterProgram(string name)
 
 		if (!line_started)
 			continue;
+
+		if (line.find("ANTIC4_FIXED_LINE_END") != string::npos)
+		{
+			current_raster_line.rehash();
+			m_eval_gstate.m_best_pic.raster_lines.push_back(current_raster_line);
+			current_raster_line.cycles = 0;
+			current_raster_line.instructions.clear();
+			line_started = false;
+			continue;
+		}
 
 		// if next raster line
 		if (line.find("cmp byt2")!=string::npos && current_raster_line.cycles>0)
@@ -3512,6 +3726,25 @@ void RastaConverter::LoadRasterProgram(string name)
 			current_raster_line.cycles+=GetInstructionCycles(instr);
 			current_raster_line.instructions.push_back(instr);
 		}
+	}
+	if (fixed_antic4_block)
+		Error("Unterminated ANTIC4 fixed CHBASE block");
+	if (m_eval_gstate.m_best_pic.graphics_mode == GraphicsMode::Antic4)
+	{
+		const int pictureHeight = static_cast<int>(
+			m_eval_gstate.m_best_pic.raster_lines.size());
+		size_t fixedIndex = 0;
+		for (int y = 0; y < pictureHeight; ++y)
+		{
+			if (!IsAntic4ChbaseTransitionLine(y, pictureHeight))
+				continue;
+			if (fixedIndex >= fixed_antic4_rows.size()
+				|| fixed_antic4_rows[fixedIndex] != y)
+				Error("Missing or misplaced ANTIC4 fixed CHBASE block");
+			++fixedIndex;
+		}
+		if (fixedIndex != fixed_antic4_rows.size())
+			Error("Unexpected ANTIC4 fixed CHBASE block");
 	}
 }
 
@@ -3602,6 +3835,12 @@ bool RastaConverter::Resume()
 	cfg.live_gui = live_gui;
 	m_needs_history_reconfigure = cfg.resume_optimizer_changed || cfg.resume_solutions_changed || cfg.resume_distance_changed || cfg.resume_predistance_changed || cfg.resume_dither_changed || cfg.resume_objective_changed;
 	if (keep_cli_out) cfg.output_file = cli_out;
+	const raster_picture& resumed = m_eval_gstate.m_best_pic;
+	if ((cfg.graphics_mode == GraphicsMode::Antic4)
+		!= (resumed.graphics_mode == GraphicsMode::Antic4))
+		Error("Resume graphics mode does not match the saved raster program");
+	if (ValidateRasterPicture(resumed) != E_RASTER_VALID)
+		Error("Saved raster program or ANTIC 4 attribute state is invalid");
 	return true;
 }
 
@@ -3926,6 +4165,8 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
         iniOut << std::uppercase << std::hex;
         for (size_t y = 0; y < sizeof(pic->mem_regs_init); ++y)
         {
+			if (pic->graphics_mode == GraphicsMode::AnticE && y == E_COLOR3)
+				continue;
             iniOut << "\tlda #$" << std::setw(2) << std::setfill('0') << static_cast<int>(pic->mem_regs_init[y]) << '\n';
             iniOut << "\tsta " << mem_regs_names[y] << '\n';
         }
@@ -3935,8 +4176,11 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
         iniOut << "\ttax\n";
         iniOut << "\ttay\n";
 
-        iniOut << "\n; Set proper count of wsyncs \n";
-        iniOut << "\n\t:2 sta wsync\n";
+		if (pic->graphics_mode == GraphicsMode::AnticE)
+		{
+			iniOut << "\n; Set proper count of wsyncs \n";
+			iniOut << "\n\t:2 sta wsync\n";
+		}
 
         if (!iniOut)
             Error("Error finalizing Raster Program ini file");
@@ -4044,6 +4288,23 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	asmOut << "; Cache Recomputed Lines: " << m_eval_gstate.m_cache_recomputed_lines.load(std::memory_order_relaxed) << '\n';
 	asmOut << "; Cache Mean Recomputed Lines: " << (cacheEvaluations ?
 		static_cast<double>(m_eval_gstate.m_cache_recomputed_lines.load(std::memory_order_relaxed)) / cacheEvaluations : 0.0) << '\n';
+	if (pic->graphics_mode == GraphicsMode::Antic4)
+	{
+		const unsigned long long attributeEvaluations =
+			m_eval_gstate.m_antic4_attribute_cache_evaluations.load(
+				std::memory_order_relaxed);
+		const unsigned long long attributeLines =
+			m_eval_gstate.m_antic4_attribute_recomputed_lines.load(
+				std::memory_order_relaxed);
+		asmOut << "; ANTIC4 Attribute Cache Evaluations: "
+			<< attributeEvaluations << '\n';
+		asmOut << "; ANTIC4 Attribute Recomputed Lines: "
+			<< attributeLines << '\n';
+		asmOut << "; ANTIC4 Attribute Mean Recomputed Lines: "
+			<< (attributeEvaluations
+				? static_cast<double>(attributeLines) / attributeEvaluations
+				: 0.0) << '\n';
+	}
 	asmOut << "; Cache Max Recomputed Lines: " << m_eval_gstate.m_cache_max_recomputed_lines.load(std::memory_order_relaxed) << '\n';
 	asmOut << "; Cache Propagation Span: " << m_eval_gstate.m_cache_propagation_span.load(std::memory_order_relaxed) << '\n';
 	asmOut << "; Cache Mean Propagation Span: " << (cacheEvaluations ?
@@ -4057,18 +4318,31 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	unsigned long long timingProgramCycles = 0;
 	unsigned timingMaxProgramCycles = 0;
 	unsigned timingLinesAtLimit = 0;
-	for (const raster_line& line : pic->raster_lines)
+	for (size_t y = 0; y < pic->raster_lines.size(); ++y)
 	{
-		assert(line.cycles >= 0 && line.cycles <= raster_program_cycle_limit);
+		const raster_line& line = pic->raster_lines[y];
+		const RasterLineSchedule schedule =
+			GetRasterLineSchedule(pic->graphics_mode, static_cast<int>(y),
+				static_cast<int>(pic->raster_lines.size()));
+		assert(line.cycles >= 0 && line.cycles <= schedule.optimizer_cycle_limit);
 		assert((line.cycles & 1) == 0);
 		timingProgramCycles += static_cast<unsigned>(line.cycles);
 		timingMaxProgramCycles = std::max(timingMaxProgramCycles, static_cast<unsigned>(line.cycles));
-		if (line.cycles == raster_program_cycle_limit)
+		if (line.cycles == schedule.optimizer_cycle_limit)
 			++timingLinesAtLimit;
 	}
-	asmOut << "; Timing CPU Slots: " << raster_cpu_slots << '\n';
-	asmOut << "; Timing Program Cycle Limit: " << raster_program_cycle_limit << '\n';
-	asmOut << "; Timing Tail Cycles: " << raster_tail_cycles << '\n';
+	if (pic->graphics_mode == GraphicsMode::AnticE)
+	{
+		asmOut << "; Timing CPU Slots: " << raster_cpu_slots << '\n';
+		asmOut << "; Timing Program Cycle Limit: " << raster_program_cycle_limit << '\n';
+		asmOut << "; Timing Tail Cycles: " << raster_tail_cycles << '\n';
+	}
+	else
+	{
+		asmOut << "; Graphics Mode: ANTIC 4\n";
+		asmOut << "; Timing CPU Slots: per-line 11/13/52/53\n";
+		asmOut << "; Timing Program Cycle Limit: per-line 6/8/48/48/44\n";
+	}
 	asmOut << "; Timing Mean Program Cycles: " << (pic->raster_lines.empty() ? 0.0 :
 		static_cast<double>(timingProgramCycles) / pic->raster_lines.size()) << '\n';
 	asmOut << "; Timing Max Program Cycles: " << timingMaxProgramCycles << '\n';
@@ -4082,6 +4356,9 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	asmOut << std::setprecision(17);
 	for (int i = 0; i < E_MUTATION_MAX; ++i)
 	{
+		if (pic->graphics_mode != GraphicsMode::Antic4
+			&& i == E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE)
+			continue;
 		const unsigned long long improving =
 			m_eval_gstate.m_mutation_improving[i].load(std::memory_order_relaxed);
 		const double improvementCredit =
@@ -4101,8 +4378,11 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	asmOut << std::setprecision(mutationPrecision);
     asmOut << "; ---------------------------------- \n";
 
-    asmOut << "; Proper offset \n";
-    asmOut << "\tnop\n\tnop\n\tnop\n\tnop\n\tcmp byt2;\n";
+	if (pic->graphics_mode == GraphicsMode::AnticE)
+	{
+		asmOut << "; Proper offset \n";
+		asmOut << "\tnop\n\tnop\n\tnop\n\tnop\n\tcmp byt2;\n";
+	}
 
     int h = FreeImage_GetHeight(input_bitmap);
 
@@ -4110,6 +4390,8 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
     for (int y = 0; y < h; ++y)
     {
         asmOut << "line" << y << '\n';
+		const RasterLineSchedule schedule =
+			GetRasterLineSchedule(pic->graphics_mode, y, h);
         size_t prog_len = pic->raster_lines[y].instructions.size();
         for (size_t i = 0; i < prog_len; ++i)
         {
@@ -4158,18 +4440,50 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
             }
             else if (save_target)
             {
-                if (instr.loose.target > E_TARGET_MAX)
+                if (instr.loose.target >= E_TARGET_MAX)
                     Error("Unknown target in instruction!");
                 asmOut << mem_regs_names[instr.loose.target];
             }
             asmOut << '\n';
         }
         asmOut << std::dec;
-        for (int cycle = pic->raster_lines[y].cycles; cycle < raster_program_cycle_limit; cycle += 2)
+        for (int cycle = pic->raster_lines[y].cycles;
+			cycle < schedule.optimizer_cycle_limit; cycle += 2)
         {
             asmOut << "\tnop ; filler\n";
         }
-        asmOut << "\tcmp byt2; on zero page so 3 cycles\n";
+		// The suffix has to spend exactly fixed_suffix_cycles: the kernel never
+		// resynchronizes with WSYNC, so a line that is one cycle short or long
+		// shifts every remaining line of the frame.
+		if (pic->graphics_mode == GraphicsMode::AnticE)
+		{
+			assert(schedule.fixed_suffix_cycles == 3);
+			asmOut << "\tcmp byt2; on zero page so 3 cycles\n";
+		}
+		else if (schedule.chbase_transition)
+		{
+			// 3 + 2 + 4: the store writes CHBASE on the line's last CPU slot,
+			// ANTIC cycle 104. The final character-data fetch of this line
+			// happens at 105 and still sees the old charset; the queued update
+			// becomes effective at 106, before the next line fetches anything.
+			assert(schedule.fixed_suffix_cycles == 9);
+			const int charset = y / 24 + 1;
+			asmOut << "; ANTIC4_FIXED_CHBASE_BEGIN\n";
+			asmOut << "\tbit byt2 ; 3-cycle CHBASE safety delay\n";
+			asmOut << "\tlda #>charset_" << charset << '\n';
+			asmOut << "\tsta CHBASE\n";
+			asmOut << "; ANTIC4_FIXED_CHBASE_END\n";
+		}
+		else if (schedule.fixed_suffix_cycles == 5)
+		{
+			asmOut << "\tbit byt2 ; ANTIC4_FIXED_LINE_END, 3 cycles\n";
+			asmOut << "\tnop ; ANTIC4_FIXED_LINE_END, 2 cycles\n";
+		}
+		else
+		{
+			assert(schedule.fixed_suffix_cycles == 4);
+			asmOut << "\tbit $ffff ; ANTIC4_FIXED_LINE_END, 4 cycles\n";
+		}
         asmOut << std::uppercase << std::hex;
     }
     asmOut << std::nouppercase << std::dec;

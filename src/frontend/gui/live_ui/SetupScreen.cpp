@@ -108,7 +108,8 @@ std::string DeriveOutputName(const std::string& input, bool subfolder)
 bool OutputArtifactsExist(const std::string& output, std::string* found)
 {
 	static const char* const kSuffixes[] = {
-		".opt", ".mic", ".opt.h", ".opt.ini", ".pmg", "-dst.png"};
+		".opt", ".mic", ".a4.scr", ".a4.fnt", ".opt.h", ".opt.ini",
+		".pmg", "-dst.png"};
 	if (output.empty())
 		return false;
 	for (const char* suffix : kSuffixes) {
@@ -139,6 +140,8 @@ void AdoptInputFile(SetupState& state, const std::string& path)
 	Configuration& cfg = *state.cfg;
 	state.input.Set(path);
 	cfg.input_file = state.input.Get();
+	state.input_width = 0;
+	state.input_height = 0;
 	if (!state.output_touched) {
 		cfg.output_file = DeriveOutputName(cfg.input_file, cfg.run_subfolder);
 		state.output.Set(cfg.output_file);
@@ -155,7 +158,17 @@ void SyncStateFromConfig(SetupState& state)
 	state.palette.Set(cfg.palette_file);
 	state.details.Set(cfg.details_file);
 	state.onoff.Set(cfg.on_off_file);
+	state.input_width = 0;
+	state.input_height = 0;
 
+	if (cfg.graphics_mode == GraphicsMode::Antic4) {
+		if (cfg.height > 0)
+			cfg.height = NormalizeAntic4Height(cfg.height);
+		state.antic_e_dual_mode = false;
+		cfg.dual_mode = false;
+	} else {
+		state.antic_e_dual_mode = cfg.dual_mode;
+	}
 	state.height_auto = cfg.height <= 0;
 	state.cache_mb = std::max(1, cfg.cache_size / (1024 * 1024));
 	state.solutions = GetSolutions();
@@ -683,6 +696,7 @@ void DrawTitleBar(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
 		SetSolutions(1);
 		state.solutions = 1;
 		state.height_auto = true;
+		state.antic_e_dual_mode = false;
 		state.seed_random = true;
 		state.cache_mb = 64;
 		state.max_evals_unlimited = true;
@@ -1029,8 +1043,13 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		}
 
 		preview.Request(cfg);
-		if (preview.Fetch(&latest))
+		if (preview.Fetch(&latest)) {
+			if (latest.input_width > 0 && latest.input_height > 0) {
+				state.input_width = latest.input_width;
+				state.input_height = latest.input_height;
+			}
 			viewer.SetContent(latest);
+		}
 
 		ImGui_ImplSDLRenderer3_NewFrame();
 		ImGui_ImplSDL3_NewFrame();

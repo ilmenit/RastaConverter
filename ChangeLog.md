@@ -1,6 +1,31 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC3      2026-07-30 [RELEASE CANDIDATE]
+* Added experimental ANTIC 4 character-mode output. Select it in the Live UI
+  or with `/graphics_mode=antic4`; ANTIC E remains the default.
+* ANTIC 4 uses a 168-colour-clock wide playfield and optimizes all five
+  playfield colours, with each 4x8 cell selecting COLPF2 or COLPF3 for its
+  fourth colour. Heights are complete 8-scanline character rows from 8 to 240.
+* Added hardware-aware ANTIC 4 scheduling for LMS badlines, ordinary badlines,
+  continuation lines, deferred refresh, and CHBASE transitions. The timing
+  model and randomized five-seed differential suite reproduce Altirra output
+  exactly.
+* Added complete ANTIC 4 export: padded screen data, packed character sets,
+  PMG data, raster programs, optimizer state, and a dedicated MADS template.
+  The Recent view recognizes text-mode runs and its XEX action assembles them.
+* Added GUI support throughout setup, preview, copied command lines, recent-run
+  badges, and XEX freshness detection. Dual-frame controls are disabled because
+  ANTIC 4 is currently single-frame only.
+* The in-conversion viewer now hides its Mask display controls when no details
+  mask is active, while retaining the neutral layer needed to start live
+  painting.
+* Preserved the ANTIC E code path and merged the RC2 portability fixes. Unit
+  tests, ANTIC E and ANTIC 4 conversion smoke tests, and ANTIC 4 XEX assembly
+  all pass after integration.
+* Removed an accidentally committed Python bytecode cache and corrected the
+  ANTIC 4 proof tool to use the released wide-playfield timing schedule.
+
 RastaConverter1.0-RC2      2026-07-28 [RELEASE CANDIDATE]
 * Added a persistent Font size control beside Reset in the Live UI. It scales
   every in-program window from the existing 100% default up to 200%; 200% is

@@ -299,6 +299,9 @@ parser.addOption("predistance", {}, "yuv|euclid|ciede|cie94|oklab|rasta", "ciede
 	parser.addOption("optimizer", {"opt"}, "lahc|dlas|legacy", "lahc",
 		"Select optimization algorithm: lahc (late acceptance, default), dlas (delayed acceptance), or legacy (legacy LAHC behavior).",
 		"General options");
+	parser.addOption("graphics_mode", {}, "e|antic4", "e",
+		"Output graphics mode: ANTIC E bitmap (default) or ANTIC 4 character mode.",
+		"General options");
 
     // Aggressive search threshold (0 = never escalate)
     parser.addOption("unstuck_after", {"ua"}, "N", "0",
@@ -691,7 +694,22 @@ else if (dst_name=="yuv")
 		bad_arguments = true;
 	}
 
-	width=160; // constant in RastaConverter!
+	{
+		std::string mode = parser.getValue("graphics_mode", "e");
+		std::transform(mode.begin(), mode.end(), mode.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		if (mode == "e")
+			graphics_mode = GraphicsMode::AnticE;
+		else if (mode == "antic4")
+			graphics_mode = GraphicsMode::Antic4;
+		else
+		{
+			error_messages.push_back("/graphics_mode must be e or antic4.");
+			graphics_mode = GraphicsMode::AnticE;
+		}
+	}
+	width = graphics_mode == GraphicsMode::Antic4
+		? antic4_visible_width : 160;
 
 	string rescale_filter_value = parser.getValue("filter","box");
 	if (rescale_filter_value=="box")
@@ -812,6 +830,23 @@ else if (dst_name=="yuv")
 		warning_messages.push_back("Source-referenced objectives are single-frame experiments; using legacy for dual mode.");
 		visual_objective = E_OBJECTIVE_LEGACY_TARGET;
 	}
+
+	if (graphics_mode == GraphicsMode::Antic4)
+	{
+		if (dual_mode)
+			error_messages.push_back("ANTIC 4 currently supports single-frame conversion only; disable /dual.");
+		if (height != -1)
+		{
+			const int normalized = NormalizeAntic4Height(height);
+			if (normalized != height)
+				warning_messages.push_back("ANTIC 4 height adjusted to "
+					+ std::to_string(normalized)
+					+ " scanlines (complete 8-scanline character rows).");
+			height = normalized;
+		}
+	}
+	if (!error_messages.empty())
+		bad_arguments = true;
 
 	if (!captureOverrides) {
 		if (!resume_have_baseline) {

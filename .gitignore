@@ -4,6 +4,8 @@
 .codex/
 .claude/
 AltirraBridge*/
+__pycache__/
+*.py[cod]
 
 # User-specific files
 *.suo
