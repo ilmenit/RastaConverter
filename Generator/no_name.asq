@@ -96,8 +96,11 @@ LOOP	lda vcount		;synchronization for the first screen line
 
 raster_program_end
 
-	lda >fnt+$400*$00
-	sta chbase
+* Blank the playfield before anything else. This runs during the scanline
+* right after the last picture line, so every cycle spent ahead of it is a
+* cycle of that line drawn in the colours the picture ended on. Getting all
+* five registers written inside horizontal blank is what keeps the border
+* clean; CHBASE can wait, since it only matters again at the next frame.
 c0	lda #$00
 	sta colbak
 c1	lda #$00
@@ -108,6 +111,9 @@ c3	lda #$00
 	sta color2
 c4	lda #$00
 	sta color3
+
+	lda >fnt+$400*$00
+	sta chbase
 s0	lda #$03
 	sta sizep0
 	sta sizep1
@@ -177,37 +183,30 @@ byt3	brk
 ;---
 
 .MACRO	ANTIC_PROGRAM
-	:+8 dta $4e,a(:1+$0000+#*40)
-	:+8 dta $4e,a(:1+$0140+#*40)
-	:+8 dta $4e,a(:1+$0280+#*40)
-	:+8 dta $4e,a(:1+$03C0+#*40)
-	:+8 dta $4e,a(:1+$0500+#*40)
-	:+8 dta $4e,a(:1+$0640+#*40)
-	:+8 dta $4e,a(:1+$0780+#*40)
-	:+8 dta $4e,a(:1+$08C0+#*40)
-	:+8 dta $4e,a(:1+$0A00+#*40)
-	:+8 dta $4e,a(:1+$0B40+#*40)
-	:+8 dta $4e,a(:1+$0C80+#*40)
-	:+8 dta $4e,a(:1+$0DC0+#*40)
-	:+8 dta $4e,a(:1+$0F00+#*40)
-	:+8 dta $4e,a(:1+$1040+#*40)
-	:+8 dta $4e,a(:1+$1180+#*40)
-	:+8 dta $4e,a(:1+$12C0+#*40)
-	:+8 dta $4e,a(:1+$1400+#*40)
-	:+8 dta $4e,a(:1+$1540+#*40)
-	:+8 dta $4e,a(:1+$1680+#*40)
-	:+8 dta $4e,a(:1+$17C0+#*40)
-	:+8 dta $4e,a(:1+$1900+#*40)
-	:+8 dta $4e,a(:1+$1A40+#*40)
-	:+8 dta $4e,a(:1+$1B80+#*40)
-	:+8 dta $4e,a(:1+$1CC0+#*40)
-	:+8 dta $4e,a(:1+$1E00+#*40)
-	:+4 dta $4e,a(:1+$1F40+#*40)
-	:+4 dta $4e,a(:1+$1FF0+#*40)
-	:+8 dta $4e,a(:1+$2090+#*40)
-	:+8 dta $4e,a(:1+$21D0+#*40)
-	:+8 dta $4e,a(:1+$2310+#*40)
-	:+8 dta $4e,a(:1+$2450+#*40)
+* One mode-E line per picture scanline, then jump back to the top.
+*
+* This list used to be a fixed 240 lines whatever PIC_HEIGHT was. For a shorter
+* picture ANTIC went on fetching playfield past the end of the picture data -
+* through the display list itself and into the font and PMG area - and drew
+* those bytes for the remaining scanlines. They only looked like a black border
+* because the frame epilogue happens to zero all four playfield colour
+* registers before the first of them becomes visible, which is timing luck
+* rather than a design. Anything that upsets that timing shows the fetched
+* memory as a band of garbage under the picture.
+	IFT PIC_HEIGHT<=204
+	.rept PIC_HEIGHT
+	dta $4e,a(:1+#*40)
+	.endr
+	ELS
+* Past line 204 the picture data is displaced by the 16 padding bytes that keep
+* it clear of a 4 KiB boundary - see the ins block at scr.
+	.rept 204
+	dta $4e,a(:1+#*40)
+	.endr
+	.rept PIC_HEIGHT-204
+	dta $4e,a(:1+$1FF0+#*40)
+	.endr
+	EIF
 	dta $41,a(:2)
 .ENDM
 

@@ -443,7 +443,7 @@ void RastaConverter::SaveOptimizerState(const char* fn, const raster_picture* pi
 		out << "attribute_rows " << picture->antic4_attributes.size() << '\n';
 		out << std::hex << std::setfill('0');
 		for (uint64_t row : picture->antic4_attributes)
-			out << std::setw(10) << row << '\n';
+			out << std::setw(11) << row << '\n';
 		out << std::dec;
 	}
 
@@ -553,11 +553,12 @@ void RastaConverter::LoadOptimizerState(string name)
 	picture.antic4_attributes.assign(attributeRows, 0);
 	for (int rowIndex = 0; rowIndex < attributeRows; ++rowIndex)
 	{
-		if (!read_line(line) || line.size() != 10)
+		if (!read_line(line) || (line.size() != 10 && line.size() != 11))
 			Error("Invalid ANTIC 4 optimizer-state attribute row");
 		unsigned long long mask = 0;
 		std::istringstream parser(line);
-		if (!(parser >> std::hex >> mask) || (mask >> 40) != 0)
+		if (!(parser >> std::hex >> mask)
+			|| (mask >> antic4_visible_characters) != 0)
 			Error("Invalid ANTIC 4 optimizer-state attribute mask");
 		char extra = 0;
 		if (parser >> extra)
@@ -580,13 +581,16 @@ bool RastaConverter::LoadInputBitmap()
 
 	unsigned int input_width=FreeImage_GetWidth(input_bitmap);
 	unsigned int input_height=FreeImage_GetHeight(input_bitmap);
+	cfg.width = cfg.graphics_mode == GraphicsMode::Antic4
+		? antic4_visible_width : 160;
 	if (cfg.height==-1) // set height automatic to keep screen proportions
 	{
 		double iw= (double) input_width;
 		double ih= (double) input_height;
-		if ( iw/ih > (320.0/240.0) ) // 4:3 = 320:240
+		const double outputWidth = static_cast<double>(cfg.width * 2);
+		if (iw / ih > outputWidth / 240.0)
 		{
-			ih=input_height / (input_width/320.0);
+			ih = input_height / (input_width / outputWidth);
 			cfg.height=(int) ih;
 		}
 		else
@@ -1860,24 +1864,27 @@ bool RastaConverter::SaveScreenData(const char *filename)
 bool RastaConverter::SaveAntic4Data(const std::string& screenFilename,
 	const std::string& fontFilename, const raster_picture& picture)
 {
-	if (m_width != 160 || m_height < 8 || m_height > 240
+	if (m_width != antic4_visible_width || m_height < 8 || m_height > 240
 		|| m_height % 8 != 0
 		|| m_eval_gstate.m_created_picture_targets.size()
 			!= static_cast<size_t>(m_height))
-		Error("ANTIC 4 export requires a complete 160-pixel-wide target map "
+		Error("ANTIC 4 export requires a complete 168-pixel-wide target map "
 			"with a whole number of 8-scanline character rows");
 
 	const int characterRows = m_height / 8;
 	const int charsetCount = (characterRows + 2) / 3;
-	std::vector<unsigned char> screen(characterRows * 40);
+	std::vector<unsigned char> screen(
+		characterRows * antic4_dma_characters);
 	std::vector<unsigned char> fonts(charsetCount * 1024);
 	for (int characterRow = 0; characterRow < characterRows; ++characterRow)
 	{
-		for (int cell = 0; cell < 40; ++cell)
+		for (int cell = 0; cell < antic4_visible_characters; ++cell)
 		{
 			const bool alternate = picture.antic4_attribute(characterRow, cell);
-			const int glyph = (characterRow % 3) * 40 + cell;
-			screen[characterRow * 40 + cell] =
+			const int glyph =
+				(characterRow % 3) * antic4_visible_characters + cell;
+			screen[characterRow * antic4_dma_characters
+				+ antic4_screen_left_hidden_characters + cell] =
 				Antic4ScreenCode(characterRow, cell, alternate);
 			for (int glyphRow = 0; glyphRow < 8; ++glyphRow)
 			{
@@ -2448,7 +2455,8 @@ void RastaConverter::CreateSmartRasterPicture(raster_picture *r)
 			// lda
 			i.loose.instruction=(e_raster_instruction) (E_RASTER_LDA+k%3); // k%3 to cycle through A,X,Y regs
 			if (k>E_COLBAK && y%2==1 && dest_colors>4)
-				i.loose.value=(e_target) color_position[k]+sprite_screen_color_cycle_start; // sprite position
+				i.loose.value=(e_target) color_position[k]
+					+ SpriteScreenColorCycleStart(r->graphics_mode); // sprite position
 			else
 				i.loose.value=FindAtariColorIndex(color)*2;
 			i.loose.target=E_COLOR0;
@@ -2486,19 +2494,20 @@ void RastaConverter::CreateRandomRasterPicture(raster_picture *r)
 
 	x=random(m_width); 
 	r->mem_regs_init[E_COLPM0]=FindAtariColorIndex(m_picture[0][x])*2;
-	r->mem_regs_init[E_HPOSP0]=x+sprite_screen_color_cycle_start;
+	const int spriteStart = SpriteScreenColorCycleStart(r->graphics_mode);
+	r->mem_regs_init[E_HPOSP0]=x+spriteStart;
 
 	x=random(m_width); 
 	r->mem_regs_init[E_COLPM1]=FindAtariColorIndex(m_picture[0][x])*2;
-	r->mem_regs_init[E_HPOSP1]=x+sprite_screen_color_cycle_start;
+	r->mem_regs_init[E_HPOSP1]=x+spriteStart;
 
 	x=random(m_width); 
 	r->mem_regs_init[E_COLPM2]=FindAtariColorIndex(m_picture[0][x])*2;
-	r->mem_regs_init[E_HPOSP2]=x+sprite_screen_color_cycle_start;
+	r->mem_regs_init[E_HPOSP2]=x+spriteStart;
 
 	x=random(m_width); 
 	r->mem_regs_init[E_COLPM3]=FindAtariColorIndex(m_picture[0][x])*2;
-	r->mem_regs_init[E_HPOSP3]=x+sprite_screen_color_cycle_start;
+	r->mem_regs_init[E_HPOSP3]=x+spriteStart;
 
 	for (size_t y=0;y<r->raster_lines.size();++y)
 	{
@@ -3619,6 +3628,11 @@ void RastaConverter::LoadRasterProgram(string name)
 				Error("Invalid ANTIC4 fixed CHBASE instructions");
 			fixed_antic4_rows.push_back(y);
 			fixed_antic4_block = false;
+			current_raster_line.rehash();
+			m_eval_gstate.m_best_pic.raster_lines.push_back(current_raster_line);
+			current_raster_line.cycles = 0;
+			current_raster_line.instructions.clear();
+			line_started = false;
 			continue;
 		}
 		if (fixed_antic4_block)
@@ -3680,6 +3694,16 @@ void RastaConverter::LoadRasterProgram(string name)
 
 		if (!line_started)
 			continue;
+
+		if (line.find("ANTIC4_FIXED_LINE_END") != string::npos)
+		{
+			current_raster_line.rehash();
+			m_eval_gstate.m_best_pic.raster_lines.push_back(current_raster_line);
+			current_raster_line.cycles = 0;
+			current_raster_line.instructions.clear();
+			line_started = false;
+			continue;
+		}
 
 		// if next raster line
 		if (line.find("cmp byt2")!=string::npos && current_raster_line.cycles>0)
@@ -4312,8 +4336,8 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 	else
 	{
 		asmOut << "; Graphics Mode: ANTIC 4\n";
-		asmOut << "; Timing CPU Slots: per-line 25/27/60\n";
-		asmOut << "; Timing Program Cycle Limit: per-line 22/24/54/48\n";
+		asmOut << "; Timing CPU Slots: per-line 11/13/52/53\n";
+		asmOut << "; Timing Program Cycle Limit: per-line 6/8/48/48/44\n";
 	}
 	asmOut << "; Timing Mean Program Cycles: " << (pic->raster_lines.empty() ? 0.0 :
 		static_cast<double>(timingProgramCycles) / pic->raster_lines.size()) << '\n';
@@ -4362,6 +4386,8 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
     for (int y = 0; y < h; ++y)
     {
         asmOut << "line" << y << '\n';
+		const RasterLineSchedule schedule =
+			GetRasterLineSchedule(pic->graphics_mode, y, h);
         size_t prog_len = pic->raster_lines[y].instructions.size();
         for (size_t i = 0; i < prog_len; ++i)
         {
@@ -4417,15 +4443,26 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
             asmOut << '\n';
         }
         asmOut << std::dec;
-		const RasterLineSchedule schedule =
-			GetRasterLineSchedule(pic->graphics_mode, y, h);
         for (int cycle = pic->raster_lines[y].cycles;
 			cycle < schedule.optimizer_cycle_limit; cycle += 2)
         {
             asmOut << "\tnop ; filler\n";
         }
-		if (schedule.chbase_transition)
+		// The suffix has to spend exactly fixed_suffix_cycles: the kernel never
+		// resynchronizes with WSYNC, so a line that is one cycle short or long
+		// shifts every remaining line of the frame.
+		if (pic->graphics_mode == GraphicsMode::AnticE)
 		{
+			assert(schedule.fixed_suffix_cycles == 3);
+			asmOut << "\tcmp byt2; on zero page so 3 cycles\n";
+		}
+		else if (schedule.chbase_transition)
+		{
+			// 3 + 2 + 4: the store writes CHBASE on the line's last CPU slot,
+			// ANTIC cycle 104. The final character-data fetch of this line
+			// happens at 105 and still sees the old charset; the queued update
+			// becomes effective at 106, before the next line fetches anything.
+			assert(schedule.fixed_suffix_cycles == 9);
 			const int charset = y / 24 + 1;
 			asmOut << "; ANTIC4_FIXED_CHBASE_BEGIN\n";
 			asmOut << "\tbit byt2 ; 3-cycle CHBASE safety delay\n";
@@ -4433,10 +4470,16 @@ void RastaConverter::SaveRasterProgram(string name, raster_picture *pic)
 			asmOut << "\tsta CHBASE\n";
 			asmOut << "; ANTIC4_FIXED_CHBASE_END\n";
 		}
-        asmOut << "\tcmp byt2; on zero page so 3 cycles\n";
-		if (pic->graphics_mode == GraphicsMode::Antic4
-			&& !IsAntic4Badline(y) && !schedule.chbase_transition)
-			asmOut << "\tcmp byt2; continuation second 3-cycle tail\n";
+		else if (schedule.fixed_suffix_cycles == 5)
+		{
+			asmOut << "\tbit byt2 ; ANTIC4_FIXED_LINE_END, 3 cycles\n";
+			asmOut << "\tnop ; ANTIC4_FIXED_LINE_END, 2 cycles\n";
+		}
+		else
+		{
+			assert(schedule.fixed_suffix_cycles == 4);
+			asmOut << "\tbit $ffff ; ANTIC4_FIXED_LINE_END, 4 cycles\n";
+		}
         asmOut << std::uppercase << std::hex;
     }
     asmOut << std::nouppercase << std::dec;

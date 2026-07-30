@@ -22,8 +22,8 @@
 
 namespace rc_live_ui {
 
-// A preview surface in SDL_PIXELFORMAT_ABGR8888 order, at Atari resolution
-// (160 x height). Display doubles the width to honour the pixel aspect.
+// A preview surface in SDL_PIXELFORMAT_ABGR8888 order, at Atari color-clock
+// resolution (160 wide for ANTIC E, 168 wide for wide-playfield ANTIC 4).
 struct PreviewImage {
 	int width = 0;
 	int height = 0;

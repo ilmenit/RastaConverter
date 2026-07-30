@@ -12,6 +12,7 @@
 #include "ColorCorrection.h"
 #include "TargetBuilder.h"
 #include "DetailsMask.h"
+#include "Program.h"
 #include "TargetPicture.h"
 #include "rgb.h"
 
@@ -23,10 +24,6 @@ namespace {
 // a slider drag produces a handful of jobs rather than one per frame, short
 // enough to feel immediate.
 constexpr double kDebounceMs = 90.0;
-
-// The converter always works at 160 pixels wide (rasta.cpp: "constant in
-// RastaConverter").
-constexpr int kAtariWidth = 160;
 
 double NowMs()
 {
@@ -91,8 +88,16 @@ int ResolveTargetHeight(int configured, int input_width, int input_height)
 int ResolveOutputHeight(GraphicsMode mode, int configured,
 	int input_width, int input_height)
 {
-	const int height =
-		ResolveTargetHeight(configured, input_width, input_height);
+	int height = configured > 0 ? std::min(240, configured) : 240;
+	if (configured <= 0 && input_width > 0 && input_height > 0)
+	{
+		const double outputWidth =
+			mode == GraphicsMode::Antic4 ? 336.0 : 320.0;
+		const double aspect = static_cast<double>(input_width) / input_height;
+		if (aspect > outputWidth / 240.0)
+			height = std::max(1, static_cast<int>(
+				input_height / (input_width / outputWidth)));
+	}
 	return mode == GraphicsMode::Antic4
 		? NormalizeAntic4Height(height) : height;
 }
@@ -338,9 +343,11 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 	result.input_height = source_height;
 	const int height = ResolveOutputHeight(inputs.graphics_mode,
 		inputs.height, source_width, source_height);
+	const int width = inputs.graphics_mode == GraphicsMode::Antic4
+		? antic4_visible_width : 160;
 
 	// Same rescale + 24-bit conversion the converter performs.
-	BitmapPtr scaled(FreeImage_Rescale(loaded.get(), kAtariWidth, height, inputs.filter));
+	BitmapPtr scaled(FreeImage_Rescale(loaded.get(), width, height, inputs.filter));
 	if (!scaled) {
 		fail("Could not rescale the source image.");
 		return;
@@ -354,9 +361,9 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 		return;
 
 	auto make_image = [&](PreviewImage& image) {
-		image.width = kAtariWidth;
+		image.width = width;
 		image.height = height;
-		image.pixels.assign(static_cast<size_t>(kAtariWidth) * height, 0xFF000000u);
+		image.pixels.assign(static_cast<size_t>(width) * height, 0xFF000000u);
 	};
 	make_image(result.source);
 
@@ -365,9 +372,9 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 
 	for (int y = 0; y < height; ++y) {
 		const BYTE* row = FreeImage_GetScanLine(rgb24.get(), row_of(y));
-		for (int x = 0; x < kAtariWidth; ++x) {
+		for (int x = 0; x < width; ++x) {
 			const BYTE* pixel = row + x * 3;
-			result.source.pixels[static_cast<size_t>(y) * kAtariWidth + x] =
+			result.source.pixels[static_cast<size_t>(y) * width + x] =
 				PackRGBA(pixel[FI_RGBA_RED], pixel[FI_RGBA_GREEN], pixel[FI_RGBA_BLUE]);
 		}
 	}
@@ -377,11 +384,11 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 	FreeImage_AdjustContrast(rgb24.get(), inputs.contrast);
 	FreeImage_AdjustGamma(rgb24.get(), inputs.gamma);
 
-	std::vector<std::vector<rgb>> corrected(height, std::vector<rgb>(kAtariWidth));
+	std::vector<std::vector<rgb>> corrected(height, std::vector<rgb>(width));
 	make_image(result.corrected);
 	for (int y = 0; y < height; ++y) {
 		const BYTE* row = FreeImage_GetScanLine(rgb24.get(), row_of(y));
-		for (int x = 0; x < kAtariWidth; ++x) {
+		for (int x = 0; x < width; ++x) {
 			const BYTE* pixel = row + x * 3;
 			rasta::RGB8 color{pixel[FI_RGBA_RED], pixel[FI_RGBA_GREEN], pixel[FI_RGBA_BLUE]};
 			if (inputs.saturation != 0 || inputs.vibrance != 0)
@@ -391,7 +398,7 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 			target.g = color.g;
 			target.b = color.b;
 			target.a = 0;
-			result.corrected.pixels[static_cast<size_t>(y) * kAtariWidth + x] =
+			result.corrected.pixels[static_cast<size_t>(y) * width + x] =
 				PackRGBA(color.r, color.g, color.b);
 		}
 	}
@@ -411,19 +418,19 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 			// Refined mode derives importance from the corrected source.
 			std::vector<screen_line> rows(height);
 			for (int y = 0; y < height; ++y) {
-				rows[y].Resize(kAtariWidth);
-				for (int x = 0; x < kAtariWidth; ++x)
+				rows[y].Resize(width);
+				for (int x = 0; x < width; ++x)
 					rows[y][x] = corrected[y][x];
 			}
-			loaded = mask.LoadRefined(inputs.details_file, kAtariWidth, height,
+			loaded = mask.LoadRefined(inputs.details_file, width, height,
 				rows.data(), inputs.details_strength, inputs.details_floor,
 				inputs.details_feather, inputs.details_refine_mix, &mask_error);
 		} else if (inputs.details_mode == "normalized") {
-			loaded = mask.LoadNormalized(inputs.details_file, kAtariWidth, height,
+			loaded = mask.LoadNormalized(inputs.details_file, width, height,
 				inputs.details_strength, inputs.details_floor,
 				inputs.details_feather, &mask_error);
 		} else {
-			loaded = mask.LoadLegacy(inputs.details_file, kAtariWidth, height,
+			loaded = mask.LoadLegacy(inputs.details_file, width, height,
 				&mask_error);
 		}
 
@@ -433,12 +440,12 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 		} else if (!mask.Empty()) {
 			make_image(result.mask);
 			for (int y = 0; y < height; ++y) {
-				for (int x = 0; x < kAtariWidth; ++x) {
+				for (int x = 0; x < width; ++x) {
 					const unsigned char level = mask.At(
 						static_cast<unsigned>(x), static_cast<unsigned>(y));
 					// Alpha follows the weight so unemphasised regions stay
 					// readable underneath the overlay.
-					result.mask.pixels[static_cast<size_t>(y) * kAtariWidth + x] =
+					result.mask.pixels[static_cast<size_t>(y) * width + x] =
 						static_cast<std::uint32_t>(level)
 						| (static_cast<std::uint32_t>(level) << 8)
 						| (static_cast<std::uint32_t>(level) << 16)
@@ -510,9 +517,9 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 	{
 		PaletteLookup lookup;
 		for (int y = 0; y < height; ++y) {
-			for (int x = 0; x < kAtariWidth; ++x) {
+			for (int x = 0; x < width; ++x) {
 				const rgb mapped = atari_palette[lookup(corrected[y][x])];
-				result.quantized.pixels[static_cast<size_t>(y) * kAtariWidth + x] =
+				result.quantized.pixels[static_cast<size_t>(y) * width + x] =
 					PackRGBA(mapped.r, mapped.g, mapped.b);
 			}
 			if (cancelled())
@@ -541,7 +548,7 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 			"press Update.";
 	}
 
-	std::vector<std::vector<rgb>> target(height, std::vector<rgb>(kAtariWidth));
+	std::vector<std::vector<rgb>> target(height, std::vector<rgb>(width));
 	std::set<unsigned char> used;
 	// A private RNG keeps the preview from disturbing the run's reproducible
 	// sequence, and keeps a dragged slider from changing the noise every frame.
@@ -556,18 +563,18 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 	// Knoll has its own ordered-dither core; everything else goes through the
 	// error-diffusion path. Both are the code the conversion itself runs.
 	const bool cancelled_during_build = (knoll && !approximate_knoll)
-		? rasta::BuildKnollTarget(corrected, kAtariWidth, height, params,
+		? rasta::BuildKnollTarget(corrected, width, height, params,
 			target, used, on_row, jitter)
-		: rasta::BuildQuantizedTarget(corrected, kAtariWidth, height, params,
+		: rasta::BuildQuantizedTarget(corrected, width, height, params,
 			target, used, on_row, jitter);
 	if (cancelled_during_build)
 		return;
 
 	make_image(result.dithered);
 	for (int y = 0; y < height; ++y) {
-		for (int x = 0; x < kAtariWidth; ++x) {
+		for (int x = 0; x < width; ++x) {
 			const rgb& pixel = target[y][x];
-			result.dithered.pixels[static_cast<size_t>(y) * kAtariWidth + x] =
+			result.dithered.pixels[static_cast<size_t>(y) * width + x] =
 				PackRGBA(pixel.r, pixel.g, pixel.b);
 		}
 	}
@@ -576,7 +583,7 @@ void TargetPreview::Compute(const Inputs& inputs, std::uint64_t generation)
 	{
 		PaletteLookup lookup;
 		for (int y = 0; y < height; ++y) {
-			for (int x = 0; x < kAtariWidth; ++x)
+			for (int x = 0; x < width; ++x)
 				++result.palette_histogram[lookup(target[y][x])];
 		}
 	}

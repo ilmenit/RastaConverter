@@ -12,6 +12,11 @@
 
 const int sprite_screen_color_cycle_start=48;
 const int sprite_size=32;
+constexpr int antic4_visible_width = 168;
+constexpr int antic4_visible_characters = 42;
+constexpr int antic4_dma_characters = 48;
+constexpr int antic4_screen_left_hidden_characters = 3;
+constexpr int antic4_sprite_screen_color_cycle_start = 44;
 
 // The emitted display uses ANTIC mode E, normal-width playfield DMA, LMS on
 // every line, and single-line player/missile DMA. That fixed profile leaves 57
@@ -28,6 +33,13 @@ enum class GraphicsMode : unsigned char
 	AnticE,
 	Antic4,
 };
+
+inline int SpriteScreenColorCycleStart(GraphicsMode mode)
+{
+	return mode == GraphicsMode::Antic4
+		? antic4_sprite_screen_color_cycle_start
+		: sprite_screen_color_cycle_start;
+}
 
 typedef unsigned char sprites_row_memory_t[4][8];
 typedef sprites_row_memory_t sprites_memory_t[240]; // we convert it to 240 bytes of PMG memory at the end of processing.
@@ -48,6 +60,7 @@ enum class DmaTimingKind : unsigned char
 	Antic4LmsBadline,
 	Antic4Badline,
 	Antic4Continuation,
+	Antic4ContinuationAfterBadline,
 };
 
 struct DmaTimingProfile
@@ -161,7 +174,8 @@ inline bool EncodeAntic4PlayfieldTarget(
 inline unsigned char Antic4ScreenCode(
 	int characterRow, int column, bool alternate)
 {
-	const int glyph = (characterRow % 3) * 40 + column;
+	const int glyph =
+		(characterRow % 3) * antic4_visible_characters + column;
 	return static_cast<unsigned char>(glyph | (alternate ? 0x80 : 0));
 }
 
@@ -369,11 +383,25 @@ inline int GetInstructionCycles(const SRasterInstruction &instr)
 	return 4;
 }
 
+// A store reaches GTIA on its last cycle, so its effect belongs to the slot
+// three CPU cycles after the opcode fetch. ANTIC 4 needs that resolved by
+// lookup: refresh holes and badline blackouts make its slots unevenly spaced,
+// so no fixed constant can stand in for the delay.
+//
+// Mode E must NOT apply it. Its slot map is phase-shifted by three slots
+// relative to the physical timeline - the historical "- 24" in Cycles.cpp was
+// calibrated against the opcode-fetch slot, absorbing the store delay into the
+// table itself. Applying the delay on top shifts every mode-E write three slots
+// late, which is invisible in the preview (the preview renders the same wrong
+// model) but shears the generated .xex. Measured on hardware via AltirraBridge:
+// mode E agrees with Altirra on 94.4% of playfield color clocks without the
+// delay and 89.8% with it.
 inline int RasterInstructionCompletionOffset(const ScreenCycle* cycles,
-	int startCycle, const SRasterInstruction& instruction)
+	int startCycle, const SRasterInstruction& instruction,
+	bool applyCompletionDelay)
 {
-	const int completionCycle =
-		startCycle + GetInstructionCycles(instruction) - 1;
+	const int completionCycle = applyCompletionDelay
+		? startCycle + GetInstructionCycles(instruction) - 1 : startCycle;
 	assert(startCycle >= 0 && completionCycle < CYCLES_MAX);
 	return cycles[completionCycle].offset;
 }
@@ -440,7 +468,7 @@ inline unsigned ValidateRasterPicture(const raster_picture& picture)
 		else
 		{
 			for (uint64_t row : picture.antic4_attributes)
-				if ((row >> 40) != 0)
+				if ((row >> antic4_visible_characters) != 0)
 					errors |= E_RASTER_INVALID_ANTIC4_ATTRIBUTES;
 		}
 	}

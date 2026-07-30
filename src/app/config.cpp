@@ -694,7 +694,6 @@ else if (dst_name=="yuv")
 		bad_arguments = true;
 	}
 
-	width=160; // constant in RastaConverter!
 	{
 		std::string mode = parser.getValue("graphics_mode", "e");
 		std::transform(mode.begin(), mode.end(), mode.begin(),
@@ -709,6 +708,8 @@ else if (dst_name=="yuv")
 			graphics_mode = GraphicsMode::AnticE;
 		}
 	}
+	width = graphics_mode == GraphicsMode::Antic4
+		? antic4_visible_width : 160;
 
 	string rescale_filter_value = parser.getValue("filter","box");
 	if (rescale_filter_value=="box")

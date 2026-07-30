@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Iterable
 
 
-WIDTH = 160
+WIDTH = 168
 HEIGHT = 240
 DL_ADDR = 0x1000
 SCREEN_ADDR = 0x2000
@@ -30,6 +30,11 @@ FRAME_MARKER = 0x0600
 FRAME_SIGNATURE = 0x0601
 PLAYER_SCALE = 4
 PLAYER_WIDTH = 8 * PLAYER_SCALE
+VISIBLE_CHARS = 42
+DMA_CHARS = 48
+LEFT_HIDDEN_CHARS = 3
+SCREEN_HPOS = 44
+RASTER_ORIGIN = 36
 
 COLOR_REGS = tuple(range(0xD012, 0xD01B))
 PF_REGS = (0xD016, 0xD017, 0xD018, 0xD019)
@@ -63,7 +68,7 @@ def make_case(seed: int) -> Case:
     # DMA streams, shapes, positions, and mid-line player color changes.
     protected_cells: set[int] = set()
     for pos in hpos:
-        x0 = pos - 48
+        x0 = pos - SCREEN_HPOS
         protected_cells.update(
             range(x0 // 4, (x0 + PLAYER_WIDTH - 1) // 4 + 1))
 
@@ -73,18 +78,20 @@ def make_case(seed: int) -> Case:
     for row in range(HEIGHT // 8):
         charset = row // 3
         for cell in protected_cells:
-            glyph = (row % 3) * 40 + cell
+            glyph = (row % 3) * VISIBLE_CHARS + cell
             start = charset * 1024 + glyph * 8
             font[start:start + 8] = bytes(8)
 
     screen = bytearray()
     for row in range(HEIGHT // 8):
-        for cell in range(40):
-            glyph = (row % 3) * 40 + cell
+        screen.extend(bytes(LEFT_HIDDEN_CHARS))
+        for cell in range(VISIBLE_CHARS):
+            glyph = (row % 3) * VISIBLE_CHARS + cell
             if cell in protected_cells:
                 screen.append(glyph)
             else:
                 screen.append(glyph | (rng.randrange(2) << 7))
+        screen.extend(bytes(DMA_CHARS - LEFT_HIDDEN_CHARS - VISIBLE_CHARS))
 
     players = tuple(
         bytes(rng.randrange(256) for _ in range(HEIGHT))
@@ -95,8 +102,8 @@ def make_case(seed: int) -> Case:
     lines: list[list[Insn]] = [[] for _ in range(HEIGHT)]
     for y in range(HEIGHT):
         transition = y < 216 and y % 24 == 23
-        limit = 22 if y == 0 else (
-            24 if y % 8 == 0 else (48 if transition else 54))
+        limit = 8 if y == 0 else (
+            10 if y % 8 == 0 else (44 if transition else 50))
         insns: list[Insn] = [Insn("lda", rng.randrange(128) * 2)]
         cycles = 2
         while cycles < limit:
@@ -117,7 +124,7 @@ def make_case(seed: int) -> Case:
 
 
 def build_display_list() -> bytes:
-    # One LMS is sufficient: 30*40 bytes do not cross ANTIC's 4K scan-counter
+    # One LMS is sufficient: 30*48 bytes do not cross ANTIC's 4K scan-counter
     # wrap.  The JVB points back to the same list.
     return bytes((0x44, SCREEN_ADDR & 0xFF, SCREEN_ADDR >> 8)
                  + (0x04,) * 29
@@ -164,11 +171,11 @@ def build_kernel(case: Case) -> bytes:
 
         transition = y < 216 and y % 24 == 23
         if y == 0:
-            limit = 22
+            limit = 8
         elif y % 8 == 0:
-            limit = 24
+            limit = 10
         else:
-            limit = 48 if transition else 54
+            limit = 44 if transition else 50
         if body_cycles > limit or (limit - body_cycles) % 2:
             raise AssertionError(
                 f"line {y} body cannot fill {limit}-cycle budget")
@@ -177,15 +184,12 @@ def build_kernel(case: Case) -> bytes:
         if transition:
             next_charset = y // 24 + 1
             code.extend((
-                0x24, 0x00,  # BIT zp: keep CHBASE away from the final cell
+                0x2C, 0xFF, 0xFF,  # BIT abs: four-cycle CHBASE safety delay
                 0xA9, (FONT_ADDR >> 8) + next_charset * 4,
                 0x8D, 0x09, 0xD4,
             ))
-            code.extend((0xC5, 0x00))  # CMP zp completes the 60-slot line
         else:
-            code.extend((0xC5, 0x00))
-            if y % 8 != 0:
-                code.extend((0xC5, 0x00))
+            code.extend((0x2C, 0xFF, 0xFF))
 
     code.extend((
         0xA9, FONT_ADDR >> 8,
@@ -199,15 +203,15 @@ def build_kernel(case: Case) -> bytes:
 
 
 def dma_stolen(output_y: int, x: int) -> bool:
-    """Normal-width mode 4 + single-line P/M DMA, no horizontal scroll."""
+    """Wide mode 4 + single-line P/M DMA, no horizontal scroll."""
     stolen = {0, 2, 3, 4, 5}  # missile and four players
     badline = output_y % 8 == 0
     if badline:
         stolen.add(1)  # display-list opcode
         if output_y == 0:
             stolen.update((6, 7))  # the only LMS
-        stolen.update(range(18, 98, 2))   # 40 character names
-    stolen.update(range(21, 101, 2))      # 40 character row bytes
+        stolen.update(range(10, 105, 2))  # 48 character names
+    stolen.update(range(13, 105, 2))      # visible character row DMA
 
     # ANTIC refresh: nine requests, delayed to the first free cycle.  A
     # request is dropped when the prior delayed refresh reaches its due time.
@@ -261,7 +265,7 @@ def raster_events(case: Case) -> tuple[list[dict[int, int]], list[list[tuple[int
             elif insn.op in ("sta", "stx", "sty"):
                 stored = cpu[insn.op[-1]] & 0xFE
                 line_delta, antic_x = divmod(write_pos, 114)
-                effect_x = antic_x * 2 + 1 - 48
+                effect_x = antic_x * 2 + 1 - RASTER_ORIGIN
                 if line_delta < 0 or effect_x < 0:
                     state[insn.value] = stored
                 elif line_delta == 0 and effect_x < WIDTH:
@@ -297,7 +301,7 @@ def render_local(case: Case) -> list[list[int]]:
 
             player = -1
             for i, pos in enumerate(case.hpos):
-                offset = x - (pos - 48)
+                offset = x - (pos - SCREEN_HPOS)
                 bit = offset // PLAYER_SCALE
                 if (0 <= offset < PLAYER_WIDTH
                         and case.players[i][y] & (0x80 >> bit)):
@@ -308,7 +312,8 @@ def render_local(case: Case) -> list[list[int]]:
                 frame[y][x] = colors[PM_REGS[player]]
                 continue
 
-            code = case.screen[row * 40 + x // 4]
+            code = case.screen[
+                row * DMA_CHARS + LEFT_HIDDEN_CHARS + x // 4]
             charset = row // 3
             glyph = case.font[
                 charset * 1024 + (code & 0x7F) * 8 + glyph_y]
@@ -393,7 +398,7 @@ def render_bridge(case: Case, bridge_dir: Path):
             for addr, value in writes:
                 a.hwpoke(addr, value)
 
-            a.hwpoke(0xD400, 0x3E)
+            a.hwpoke(0xD400, 0x3F)
             a.memload(0x060F, bytes((0x4C, CODE_ADDR & 0xFF, CODE_ADDR >> 8)))
             a.frame(3)
             marker = a.peek(FRAME_MARKER, 1)[0]
@@ -429,7 +434,7 @@ def crop_bridge(raw) -> bytes:
     out = bytearray()
     pitch = raw.width * 4
     for y in range(HEIGHT):
-        start = y * pitch + 8 * 4
+        start = y * pitch
         out.extend(raw.pixels[start:start + WIDTH * 2 * 4])
     return bytes(out)
 

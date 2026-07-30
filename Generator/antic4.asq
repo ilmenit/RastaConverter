@@ -8,7 +8,7 @@
 
 A4_CHAR_ROWS = PIC_HEIGHT/8
 A4_CHARSETS = (A4_CHAR_ROWS+2)/3
-A4_SCREEN_BYTES = A4_CHAR_ROWS*40
+A4_SCREEN_BYTES = A4_CHAR_ROWS*48
 A4_DISPLAY_LIST_BYTES = A4_CHAR_ROWS+5
 A4_FONT_BYTES = A4_CHARSETS*$0400
 
@@ -73,9 +73,29 @@ main
 	sta sizep2
 	sta sizep3
 	mva #$02 pmcntl
-	mva #%00111110 dmactl
+	mva #%00111111 dmactl
 
 frame
+	* Black out the border before anything else. The display list runs out
+	* after the last character row, so ANTIC shows plain background for the
+	* rest of the frame - and the raster program left the colour registers
+	* wherever the final picture line happened to need them. Without this the
+	* area under a picture shorter than the full screen shows that leftover
+	* colour. Mode E does the same thing at the end of its raster program.
+	lda #$00
+	sta colbak
+	sta color0
+	sta color1
+	sta color2
+	sta color3
+
+	* Only restore the picture's entry state once the next frame has actually
+	* started. Restoring it here, straight after the picture, would repaint the
+	* border with the first line's background and undo the blanking above.
+wait_frame_start
+	lda vcount
+	bne wait_frame_start
+
 	* Restore the evaluator's canonical frame-entry hardware state.
 	icl "output.png.opt.ini"
 	mva >charset_0 chbase

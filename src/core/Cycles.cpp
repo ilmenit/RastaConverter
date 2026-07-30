@@ -7,20 +7,26 @@
 
 namespace
 {
-std::array<DmaTimingProfile, 4> profiles;
+std::array<DmaTimingProfile, 5> profiles;
 bool profiles_initialized = false;
 
+// One entry per CPU slot the line actually offers. The slot an instruction is
+// scheduled on is where its opcode fetch happens; a store only reaches GTIA on
+// its last cycle, which RasterInstructionCompletionOffset() resolves by looking
+// the completion slot up in this same table. AltirraBridge confirms the result:
+// for a store starting on slot c the first color clock showing the new value is
+// exactly (slots[c + 3] - displayStart) * 2 + 1, on badlines and continuation
+// lines alike. The evaluator supplies the trailing +1 through its offset < x
+// test.
 void BuildProfile(DmaTimingProfile& profile, DmaTimingKind kind,
-	const int* slots, int slotCount)
+	const int* slots, int slotCount, int displayStart)
 {
 	profile.kind = kind;
 	profile.cpu_slots = slotCount;
 	for (int index = 0; index < slotCount; ++index)
 	{
-		// Normal-width ANTIC playfield pixel zero begins at cycle 24.
-		// GTIA register writes become visible one color clock after their CPU
-		// write slot, which the evaluator adds through its offset < x test.
-		profile.cycles[index].offset = (slots[index] - 24) * 2;
+		// The playfield's first visible color clock is selected by displayStart.
+		profile.cycles[index].offset = (slots[index] - displayStart) * 2;
 		const int next = index + 1 < slotCount ? slots[index + 1] : 115;
 		profile.cycles[index].length = (next - slots[index]) * 2;
 	}
@@ -31,20 +37,38 @@ void InitializeProfiles()
 	if (profiles_initialized)
 		return;
 
-	// Canonical logical ANTIC slots. Negative values execute at the end of the
-	// preceding scanline after WSYNC release.
+	// Canonical logical ANTIC slots for the wide playfield, derived from
+	// Altirra's UpdateDMAPattern()/ATAnticSetRefreshCycles() and confirmed on
+	// AltirraBridge by a 200-line program built to exactly these counts, which
+	// runs a whole frame without drifting a single cycle.
+	//
+	// Wide mode-4 DMA: character names on even cycles 10..104 (badlines only),
+	// character data on odd cycles 13..105 every line, missile 0, players 2-5,
+	// display-list opcode 1 and LMS address 6-7 on character-row starts, and
+	// nine refresh cycles from 25 every 4 pushed onto the next free cycle.
+	// Negative values execute at the end of the preceding scanline after WSYNC
+	// release.
+	//
+	// Data at 105 and names at 12 are DMA cycles, not free ones.
 	static const int antic4Lms[] = {
-		-8,-7,-6,-5,-4,-3,-2,-1, 8,9,10,11,12,13,14,15,16,17,19,
-		100,101,102,103,104,105
+		-8,-7,-6,-5,-4,-3,-2,-1, 8,9,11
 	};
 	static const int antic4Badline[] = {
-		-8,-7,-6,-5,-4,-3,-2,-1, 6,7,8,9,10,11,12,13,14,15,16,17,19,
-		100,101,102,103,104,105
+		-8,-7,-6,-5,-4,-3,-2,-1, 6,7,8,9,11
 	};
 	static const int antic4Continuation[] = {
-		-8,-7,-6,-5,-4,-3,-2,-1, 1, 6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,
-		22,24,28,32,36,40,44,48,52,56,60,62,64,66,68,70,72,74,76,78,80,82,
-		84,86,88,90,92,94,96,98,100,101,102,103,104,105
+		-8,-7,-6,-5,-4,-3,-2,-1, 1, 6,7,8,9,10,11,12,
+		14,16,18,20,22,24,28,32,36,40,44,48,52,56,60,62,64,66,68,70,
+		72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,102,104
+	};
+	// A wide badline is contended solidly from cycle 10 to 105, so its last
+	// refresh cannot be placed until cycle 106 - the slot the following logical
+	// line would otherwise open with. Every line after a badline is one CPU
+	// slot shorter than an ordinary continuation line.
+	static const int antic4ContinuationAfterBadline[] = {
+		-7,-6,-5,-4,-3,-2,-1, 1, 6,7,8,9,10,11,12,
+		14,16,18,20,22,24,28,32,36,40,44,48,52,56,60,62,64,66,68,70,
+		72,74,76,78,80,82,84,86,88,90,92,94,96,98,100,102,104
 	};
 
 	// Preserve the proven mode-E map byte-for-byte.
@@ -79,13 +103,18 @@ void InitializeProfiles()
 
 	BuildProfile(profiles[static_cast<int>(DmaTimingKind::Antic4LmsBadline)],
 		DmaTimingKind::Antic4LmsBadline, antic4Lms,
-		static_cast<int>(std::size(antic4Lms)));
+		static_cast<int>(std::size(antic4Lms)), 22);
 	BuildProfile(profiles[static_cast<int>(DmaTimingKind::Antic4Badline)],
 		DmaTimingKind::Antic4Badline, antic4Badline,
-		static_cast<int>(std::size(antic4Badline)));
+		static_cast<int>(std::size(antic4Badline)), 22);
 	BuildProfile(profiles[static_cast<int>(DmaTimingKind::Antic4Continuation)],
 		DmaTimingKind::Antic4Continuation, antic4Continuation,
-		static_cast<int>(std::size(antic4Continuation)));
+		static_cast<int>(std::size(antic4Continuation)), 22);
+	BuildProfile(
+		profiles[static_cast<int>(DmaTimingKind::Antic4ContinuationAfterBadline)],
+		DmaTimingKind::Antic4ContinuationAfterBadline,
+		antic4ContinuationAfterBadline,
+		static_cast<int>(std::size(antic4ContinuationAfterBadline)), 22);
 	profiles_initialized = true;
 }
 }
@@ -111,13 +140,22 @@ RasterLineSchedule GetRasterLineSchedule(GraphicsMode mode, int y,
 {
 	if (mode == GraphicsMode::AnticE)
 		return {&GetDmaTimingProfile(DmaTimingKind::AnticE), 54, 3, false};
+	// Every raster instruction costs 2 or 4 cycles, so an optimizer limit has to
+	// be even; the odd slot left over on each line goes to the fixed suffix.
+	// limit + suffix must equal the profile's cpu_slots exactly, or the
+	// WSYNC-free kernel drifts against ANTIC for the rest of the frame.
 	if (y == 0)
-		return {&GetDmaTimingProfile(DmaTimingKind::Antic4LmsBadline), 22, 3, false};
+		return {&GetDmaTimingProfile(DmaTimingKind::Antic4LmsBadline), 6, 5, false};
 	if (IsAntic4Badline(y))
-		return {&GetDmaTimingProfile(DmaTimingKind::Antic4Badline), 24, 3, false};
+		return {&GetDmaTimingProfile(DmaTimingKind::Antic4Badline), 8, 5, false};
+	if (IsAntic4Badline(y - 1))
+		return {&GetDmaTimingProfile(
+			DmaTimingKind::Antic4ContinuationAfterBadline), 48, 4, false};
+	// CHBASE transitions land on y % 24 == 23, which is always y % 8 == 7 and
+	// therefore always a full-length continuation line.
 	const bool transition = IsAntic4ChbaseTransitionLine(y, pictureHeight);
 	return {&GetDmaTimingProfile(DmaTimingKind::Antic4Continuation),
-		transition ? 48 : 54, transition ? 12 : 6, transition};
+		transition ? 44 : 48, transition ? 9 : 5, transition};
 }
 
 void create_cycles_table()

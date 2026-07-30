@@ -84,6 +84,33 @@ void DrawSourceSection(SetupState& state, FileDialogs& dialogs, SDL_Window* wind
 		}
 	}
 
+	// Width is decided by the graphics mode, so it is shown rather than edited.
+	// It sits above Height because the pair reads as one output size, and
+	// because the wide playfield is the surprising half of the ANTIC 4 choice.
+	if (!FilterActive()) {
+		const bool antic4 = cfg.graphics_mode == GraphicsMode::Antic4;
+		const int clocks = antic4 ? antic4_visible_width : 160;
+		FormRow("Width",
+			"Fixed by the graphics mode - there is nothing to choose here.\n\n"
+			"An Atari color clock is twice as wide as a scanline is tall, so the "
+			"picture is stored one pixel per color clock and displayed at double "
+			"width. Each color clock becomes 2 square pixels, which is what makes "
+			"the result look correctly proportioned rather than squashed.\n\n"
+			"ANTIC E uses the normal playfield: 160 color clocks, shown as 320 "
+			"square pixels. The narrow strips of border left at each side are "
+			"painted over by missiles.\n\n"
+			"ANTIC 4 uses the wide playfield: 168 color clocks, shown as 336 "
+			"square pixels. It spends every playfield color register on the "
+			"character cells, so no register is left to make those side strips "
+			"black. Instead of hiding the border, the picture is made wide "
+			"enough to fill it.");
+		ImGui::AlignTextToFramePadding();
+		ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kText));
+		ImGui::Text("%d color clocks - %d square pixels wide (%s playfield)",
+			clocks, clocks * 2, antic4 ? "wide" : "normal");
+		ImGui::PopStyleColor();
+	}
+
 	if (Row("height", cfg)) {
 		ImGui::PushID("height");
 		const float check_width = ImGui::CalcTextSize("Auto").x
@@ -169,8 +196,8 @@ void DrawSourceSection(SetupState& state, FileDialogs& dialogs, SDL_Window* wind
 	EndForm();
 
 	if (!FilterActive() && cfg.graphics_mode == GraphicsMode::Antic4)
-		InlineNote("ANTIC 4 uses 160-pixel-wide text graphics and complete "
-			"8-scanline character rows. It supports one frame.",
+		InlineNote("ANTIC 4 draws complete 8-scanline character rows, so the "
+			"height is rounded to a whole number of rows. It supports one frame.",
 			theme::kTextMuted);
 }
 

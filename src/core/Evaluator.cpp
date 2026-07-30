@@ -726,7 +726,7 @@ RASTA_ALWAYS_INLINE e_target Evaluator::FindClosestColorRegisterDual(sprites_row
 	for (int target = E_COLPM0; target <= E_COLPM3; ++target)
 	{
 		const int sprite_pos = m_sprite_shift_regs[target - E_COLPM0];
-		const int sprite_x = sprite_pos - sprite_screen_color_cycle_start;
+		const int sprite_x = sprite_pos - SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE);
 		const unsigned x_offset = static_cast<unsigned>(x - sprite_x);
 		if (x_offset >= sprite_size)
 			continue;
@@ -949,7 +949,7 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
         restart_line=false; ip=0; cycle=0;
 		next_instr_offset = rastinsncnt
 			? RasterInstructionCompletionOffset(
-				screen_cycles, cycle, rastinsns[ip])
+				screen_cycles, cycle, rastinsns[ip], false)
 			: 1000;
         memset(m_sprite_shift_regs,0,sizeof(m_sprite_shift_regs));
 
@@ -957,9 +957,12 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
         distance_accum_t total_line_error = 0;
         sprites_row_memory_t& spriterow = m_sprites_memory[y];
 
-        for (x=-sprite_screen_color_cycle_start;x<176;++x)
+        for (x = -SpriteScreenColorCycleStart(
+				m_active_raster_picture ? m_active_raster_picture->graphics_mode
+					: GraphicsMode::AnticE);
+			x < static_cast<int>(m_width) + 16; ++x)
         {
-            const int sprite_check_x = x + sprite_screen_color_cycle_start;
+            const int sprite_check_x = x + SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE);
             const unsigned char sprite_start_mask = m_sprite_shift_start_array[sprite_check_x];
             if (sprite_start_mask)
             {
@@ -979,8 +982,8 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
 					const int new_x = StoredRegisterValue(
 						*instr, m_reg_a, m_reg_x, m_reg_y);
 					const int old_x = m_mem_regs[instr->loose.target];
-					const int visible_left = sprite_screen_color_cycle_start - sprite_size;
-					const int visible_right = sprite_screen_color_cycle_start + 160 - 1;
+					const int visible_left = SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE) - sprite_size;
+					const int visible_right = SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE) + m_width - 1;
 					if (new_x >= 0 && old_x != new_x
 						&& new_x >= visible_left && new_x <= visible_right)
 					{
@@ -996,7 +999,7 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
                 cycle+=GetInstructionCycles(*instr);
                 next_instr_offset = ip < rastinsncnt
 					? RasterInstructionCompletionOffset(
-						screen_cycles, cycle, rastinsns[ip])
+						screen_cycles, cycle, rastinsns[ip], false)
 					: 1000;
             }
 
@@ -2012,7 +2015,7 @@ e_target Evaluator::FindClosestColorRegister(sprites_row_memory_t& spriterow, in
 	{
 		int sprite_pos=m_sprite_shift_regs[temp-E_COLPM0];
 
-		int sprite_x=sprite_pos-sprite_screen_color_cycle_start;
+		int sprite_x=sprite_pos-SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE);
 
 		unsigned x_offset = (unsigned)(x - sprite_x);
 		if (x_offset < sprite_size)		// (x>=sprite_x && x<sprite_x+sprite_size)
@@ -2181,6 +2184,8 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 	for (y=0; y<(int)m_height; ++y)
 	{
+		const RasterLineSchedule lineSchedule =
+			GetRasterLineSchedule(pic->graphics_mode, y, m_height);
 		pmg_hpos_event_count = 0;
 		if (restart_line)
 		{
@@ -2250,12 +2255,11 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 		restart_line=false;
 		ip=0;
 		cycle=0;
-		const RasterLineSchedule lineSchedule =
-			GetRasterLineSchedule(pic->graphics_mode, y, m_height);
 		const ScreenCycle* lineCycles = lineSchedule.timing->cycles.data();
+		const bool antic4Timing = pic->graphics_mode == GraphicsMode::Antic4;
 		next_instr_offset = rastinsncnt
 			? RasterInstructionCompletionOffset(
-				lineCycles, cycle, rastinsns[ip])
+				lineCycles, cycle, rastinsns[ip], antic4Timing)
 			: 1000;
 
 		// on new line clear sprite shifts and wait to be taken from mem_regs
@@ -2267,10 +2271,13 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 
 		sprites_row_memory_t& spriterow = m_sprites_memory[y];
 
-		for (x=-sprite_screen_color_cycle_start;x<176;++x)
+		for (x = -SpriteScreenColorCycleStart(
+				m_active_raster_picture ? m_active_raster_picture->graphics_mode
+					: GraphicsMode::AnticE);
+			x < static_cast<int>(m_width) + 16; ++x)
 		{
 			// check position of sprites
-			const int sprite_check_x = x + sprite_screen_color_cycle_start;
+			const int sprite_check_x = x + SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE);
 
 			const unsigned char sprite_start_mask = m_sprite_shift_start_array[sprite_check_x];
 
@@ -2303,8 +2310,8 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 					const int new_x = StoredRegisterValue(
 						*instr, m_reg_a, m_reg_x, m_reg_y);
 					const int old_x = m_mem_regs[instr->loose.target];
-					const int visible_left = sprite_screen_color_cycle_start - sprite_size;
-					const int visible_right = sprite_screen_color_cycle_start + 160 - 1;
+					const int visible_left = SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE) - sprite_size;
+					const int visible_right = SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE) + m_width - 1;
 					if (new_x >= 0 && old_x != new_x
 						&& new_x >= visible_left && new_x <= visible_right)
 					{
@@ -2322,7 +2329,7 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 				cycle+=GetInstructionCycles(*instr);
 				next_instr_offset = ip < rastinsncnt
 					? RasterInstructionCompletionOffset(
-						lineCycles, cycle, rastinsns[ip])
+						lineCycles, cycle, rastinsns[ip], antic4Timing)
 					: 1000;
 			}
 
@@ -2493,8 +2500,8 @@ inline void Evaluator::ExecuteInstruction(const SRasterInstruction &instr, int s
 			// make the problem horizontal lines show on screen when RastaConverter is running.
 			const int sprite_old_x = m_mem_regs[instr.loose.target];
 			const int sprite_new_x = reg_value;
-			const int sprites_visible_left = sprite_screen_color_cycle_start - sprite_size;
-			const int sprites_visible_right = sprite_screen_color_cycle_start + 160-1;
+			const int sprites_visible_left = SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE) - sprite_size;
+			const int sprites_visible_right = SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE) + m_width-1;
 			if (sprite_old_x != sprite_new_x && sprite_new_x >= sprites_visible_left && sprite_new_x <= sprites_visible_right)
 			{
 				// check if anything to display
@@ -2560,7 +2567,7 @@ void Evaluator::MutateLine(raster_line& prog, raster_picture& pic)
     for (int i = 0; i < mutation_count; ++i) {
         MutateOnce(prog, pic);
     }
-    prog.rehash();
+	prog.rehash();
 }
 
 void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
@@ -2772,7 +2779,7 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 		++m_mutation_attempt_count[E_MUTATION_CHANGE_VALUE_TO_COLOR];
 		if ((prog.instructions[i1].loose.target >= E_HPOSP0 && prog.instructions[i1].loose.target <= E_HPOSP3))
 		{
-			x = m_mem_regs[prog.instructions[i1].loose.target] - sprite_screen_color_cycle_start;
+			x = m_mem_regs[prog.instructions[i1].loose.target] - SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE);
 			x += Random(sprite_size);
 		}
 		else
@@ -2819,7 +2826,7 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 				int xx;
 				if ((prog.instructions[i1].loose.target >= E_HPOSP0 && prog.instructions[i1].loose.target <= E_HPOSP3))
 				{
-					xx = m_mem_regs[prog.instructions[i1].loose.target] - sprite_screen_color_cycle_start;
+					xx = m_mem_regs[prog.instructions[i1].loose.target] - SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE);
 					xx += Random(sprite_size);
 				}
 				else
@@ -2851,7 +2858,7 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 			// Compute approximate (x,y) like CHANGE_VALUE_TO_COLOR
 			if ((prog.instructions[i1].loose.target >= E_HPOSP0 && prog.instructions[i1].loose.target <= E_HPOSP3))
 			{
-				x = m_mem_regs[prog.instructions[i1].loose.target] - sprite_screen_color_cycle_start;
+				x = m_mem_regs[prog.instructions[i1].loose.target] - SpriteScreenColorCycleStart(m_active_raster_picture ? m_active_raster_picture->graphics_mode : GraphicsMode::AnticE);
 				x += Random(sprite_size);
 			}
 			else
@@ -3009,7 +3016,7 @@ void Evaluator::MutateRasterProgram(raster_picture* pic, RasterMutationTransacti
 			transaction->SaveMemory();
 		const int characterRow =
 			Random(static_cast<int>(pic->antic4_attributes.size()));
-		const int column = Random(40);
+		const int column = Random(antic4_visible_characters);
 		pic->set_antic4_attribute(characterRow, column,
 			!pic->antic4_attribute(characterRow, column));
 		m_current_mutations[E_MUTATION_TOGGLE_ANTIC4_ATTRIBUTE]++;

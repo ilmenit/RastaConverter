@@ -380,7 +380,7 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 			badge_max.x - badge_text.x - badge_padding.x * 2.0f,
 			band_min.y + 7.0f);
 		draw->AddRectFilled(badge_min, badge_max,
-			run.text_mode ? theme::kAccent : theme::kSurfaceHigh, 5.0f);
+			run.text_mode ? theme::kBadgeText : theme::kBadgeGfx, 5.0f);
 		draw->AddText(ImVec2(badge_min.x + badge_padding.x,
 			badge_min.y + badge_padding.y), theme::kTextStrong, mode_badge);
 		ImGui::Dummy(band);

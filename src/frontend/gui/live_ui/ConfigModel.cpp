@@ -154,7 +154,7 @@ std::vector<OptionDesc> BuildTable()
 		[](const Configuration& c) { return c.height != Defaults().height; },
 		[](const Configuration& c) { return Num(c.height); });
 	add("filter", "filter", "Resize filter",
-		"Filter used to rescale the source to the Atari's 160-pixel width.",
+		"Filter used to rescale the source to the selected Atari display width.",
 		Category::Source, Tier::Restart, false,
 		[](const Configuration& c) { return c.rescale_filter != Defaults().rescale_filter; },
 		[](const Configuration& c) { return kFilterTokens[FilterIndex(c.rescale_filter)]; });
