@@ -385,6 +385,14 @@ else()
 endif()
 
 if(BUILD_TESTING)
+    # ConfigModel includes config.h, whose public types include FreeImage's
+    # rescale-filter enum. Imported targets carry that include directory; the
+    # fallback path is supplied explicitly for Homebrew and other installations.
+    target_include_directories(ConfigModelTests PRIVATE
+        ${RESOLVED_FREEIMAGE_INCLUDES}
+    )
+    target_link_libraries(ConfigModelTests PRIVATE ${RESOLVED_FREEIMAGE_LIBS})
+
     add_executable(CommandLineParserTests
         tests/CommandLineParserTests.cpp
         src/app/CommandLineParser.cpp
