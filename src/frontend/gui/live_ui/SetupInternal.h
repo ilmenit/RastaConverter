@@ -19,6 +19,7 @@
 #include "ConfigModel.h"
 #include "FileDialog.h"
 #include "LiveTheme.h"
+#include "UiPreferences.h"
 #include "config.h"
 
 struct SDL_Window;
@@ -68,6 +69,8 @@ struct SetupState {
 	int solutions = 1;
 
 	bool output_touched = false; // user typed a name, stop deriving it
+
+	UiPreferences preferences;
 
 	// The form keeps the smaller share; the image is the point of the screen.
 	float form_width = 560.0f;

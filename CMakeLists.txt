@@ -160,6 +160,7 @@ if(ENABLE_LIVE_UI AND NOT BUILD_NO_GUI)
     list(APPEND GUI_SOURCE_FILES
         src/frontend/gui/live_ui/LiveUI.cpp
         src/frontend/gui/live_ui/LiveTheme.cpp
+        src/frontend/gui/live_ui/UiPreferences.cpp
         src/frontend/gui/live_ui/FileDialog.cpp
         src/frontend/gui/live_ui/ConfigModel.cpp
         src/frontend/gui/live_ui/TargetPreview.cpp
@@ -263,6 +264,7 @@ set(HEADER_FILES
     src/core/Program.h
     src/frontend/console/RastaConsole.h
     src/frontend/gui/RastaSDL.h
+    src/frontend/gui/live_ui/UiPreferences.h
     src/core/RasterInstruction.h
     src/core/RegisterState.h
     src/core/StructuredSolver.h
@@ -793,6 +795,19 @@ if(RESOLVED_SDL_INCLUDES)
     if(BUILD_NO_GUI)
         target_include_directories(RastaConverter-NO_GUI PRIVATE ${RESOLVED_SDL_INCLUDES})
     endif()
+endif()
+
+if(BUILD_TESTING AND NOT BUILD_NO_GUI)
+    add_executable(UiPreferencesTests
+        tests/UiPreferencesTests.cpp
+        src/frontend/gui/live_ui/UiPreferences.cpp
+    )
+    target_include_directories(UiPreferencesTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/frontend/gui/live_ui
+        ${RESOLVED_SDL_INCLUDES}
+    )
+    target_link_libraries(UiPreferencesTests PRIVATE ${RESOLVED_SDL_LIBS})
+    add_test(NAME UiPreferencesTests COMMAND UiPreferencesTests)
 endif()
 
 # Link libraries

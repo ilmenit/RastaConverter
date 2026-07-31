@@ -1,28 +1,38 @@
 ChangeLog
 =========
 
-RastaConverter1.0-RC3      2026-07-30 [RELEASE CANDIDATE]
-* Added experimental ANTIC 4 character-mode output. Select it in the Live UI
-  or with `/graphics_mode=antic4`; ANTIC E remains the default.
-* ANTIC 4 uses a 168-colour-clock wide playfield and optimizes all five
-  playfield colours, with each 4x8 cell selecting COLPF2 or COLPF3 for its
-  fourth colour. Heights are complete 8-scanline character rows from 8 to 240.
-* Added hardware-aware ANTIC 4 scheduling for LMS badlines, ordinary badlines,
-  continuation lines, deferred refresh, and CHBASE transitions. The timing
-  model and randomized five-seed differential suite reproduce Altirra output
-  exactly.
-* Added complete ANTIC 4 export: padded screen data, packed character sets,
-  PMG data, raster programs, optimizer state, and a dedicated MADS template.
-  The Recent view recognizes text-mode runs and its XEX action assembles them.
+RastaConverter1.0-RC4      2026-07-31 [RELEASE CANDIDATE]
+* Added ANTIC 4 character-mode output. Select it in the Live UI or with
+  `/graphics_mode=antic4`; ANTIC E remains the default.
+* Added Normal and Wide playfield selection to both ANTIC E and ANTIC 4.
+  Normal is the default; use `/playfield=wide` when the extra horizontal image
+  area is preferred.
+* Corrected the ANTIC/GTIA model and generated XEX timing for both playfield
+  widths, including display-list DMA, LMS and character-fetch badlines,
+  refresh deferral, CHBASE transitions, and horizontal register changes.
+* Fixed blinking ANTIC 4 executables, incorrect colours at the left edge of a
+  wide playfield, and differences between optimizer output and Altirra.
+* Normal-width executables cover the unused side regions with missiles. ANTIC 4
+  uses fifth-player priority conflicts to produce black independently of
+  COLPF3, while ANTIC E uses its corresponding missile border schedule.
+* Added complete ANTIC 4 export: screen and character data, PMG data, raster
+  programs, optimizer state, and a dedicated MADS template. Existing
+  width-less ANTIC 4 state remains compatible and is interpreted as Wide.
 * Added GUI support throughout setup, preview, copied command lines, recent-run
-  badges, and XEX freshness detection. Dual-frame controls are disabled because
-  ANTIC 4 is currently single-frame only.
+  badges, and XEX freshness detection. Dual-frame controls remain disabled for
+  ANTIC 4 because it is currently single-frame only.
+* Recent Conversion cards now identify both graphics mode (TEXT/GFX) and
+  playfield width (WIDE/NORM), with higher-contrast badge palettes tailored to
+  the Dark, High Contrast, and Light themes.
+* Editor preferences now survive restarts independently of conversion recipes:
+  theme, font size, setup window and splitter sizes, collapsed sections,
+  "Only changed", and whether new conversions use their own subfolder.
 * The in-conversion viewer now hides its Mask display controls when no details
   mask is active, while retaining the neutral layer needed to start live
   painting.
-* Preserved the ANTIC E code path and merged the RC2 portability fixes. Unit
-  tests, ANTIC E and ANTIC 4 conversion smoke tests, and ANTIC 4 XEX assembly
-  all pass after integration.
+* Expanded automated coverage for the four mode/width timing profiles, command
+  configuration, line-cache isolation, and persistent UI preferences. ANTIC E
+  and ANTIC 4 output was also checked against Altirra.
 * Removed an accidentally committed Python bytecode cache and corrected the
   ANTIC 4 proof tool to use the released wide-playfield timing schedule.
 

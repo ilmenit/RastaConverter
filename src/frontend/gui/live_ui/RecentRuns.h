@@ -34,6 +34,7 @@ struct RunSummary {
 	bool has_score = false;
 	bool mask_edited = false;
 	bool text_mode = false; // ANTIC 4; false is ANTIC E (including old runs).
+	bool wide_playfield = false; // false is Normal for new and legacy ANTIC E runs.
 	unsigned snapshots = 0;
 	std::int64_t modified_time = 0; // for ordering, seconds
 

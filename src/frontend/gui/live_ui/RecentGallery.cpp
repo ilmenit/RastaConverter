@@ -370,19 +370,25 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 			draw->AddText(ImVec2(band_min.x + (band.x - text.x) * 0.5f,
 				band_min.y + (band.y - text.y) * 0.5f), theme::kTextFaint, missing);
 		}
-		const char* mode_badge = run.text_mode ? "TEXT" : "GFX";
-		const ImVec2 badge_text = ImGui::CalcTextSize(mode_badge);
 		const ImVec2 badge_padding(7.0f, 3.0f);
-		const ImVec2 badge_max(
-			band_min.x + band.x - 7.0f, band_min.y + 7.0f
-				+ badge_text.y + badge_padding.y * 2.0f);
-		const ImVec2 badge_min(
-			badge_max.x - badge_text.x - badge_padding.x * 2.0f,
-			band_min.y + 7.0f);
-		draw->AddRectFilled(badge_min, badge_max,
-			run.text_mode ? theme::kBadgeText : theme::kBadgeGfx, 5.0f);
-		draw->AddText(ImVec2(badge_min.x + badge_padding.x,
-			badge_min.y + badge_padding.y), theme::kTextStrong, mode_badge);
+		const float badge_right = band_min.x + band.x - 7.0f;
+		float badge_top = band_min.y + 7.0f;
+		auto draw_badge = [&](const char* label, ImU32 background) {
+			const ImVec2 text_size = ImGui::CalcTextSize(label);
+			const ImVec2 badge_min(
+				badge_right - text_size.x - badge_padding.x * 2.0f,
+				badge_top);
+			const ImVec2 badge_max(badge_right,
+				badge_top + text_size.y + badge_padding.y * 2.0f);
+			draw->AddRectFilled(badge_min, badge_max, background, 5.0f);
+			draw->AddText(ImVec2(badge_min.x + badge_padding.x,
+				badge_min.y + badge_padding.y), theme::kBadgeLabel, label);
+			badge_top = badge_max.y + 4.0f;
+		};
+		draw_badge(run.text_mode ? "TEXT" : "GFX",
+			run.text_mode ? theme::kBadgeText : theme::kBadgeGfx);
+		draw_badge(run.wide_playfield ? "WIDE" : "NORM",
+			run.wide_playfield ? theme::kBadgeWide : theme::kBadgeNormal);
 		ImGui::Dummy(band);
 		// The picture is the natural thing to point at when asking "what were
 		// the settings here?", and the whole recipe is one line of text.

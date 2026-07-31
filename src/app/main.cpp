@@ -27,6 +27,7 @@
 #include <SDL3/SDL_main.h>
 #if defined(RASTA_ENABLE_LIVE_UI)
 #include "frontend/gui/live_ui/LiveUI.h"
+#include "frontend/gui/live_ui/UiPreferences.h"
 #endif
 #endif
 
@@ -181,6 +182,10 @@ int main(int argc, char *argv[])
 
 	Configuration cfg;
 	cfg.Process(argc, argv);
+#if defined(RASTA_ENABLE_LIVE_UI) && !defined(NO_GUI)
+	if (cfg.live_gui && !cfg.parser.valueProvided("subfolder"))
+		cfg.run_subfolder = rc_live_ui::LoadUiPreferences().run_subfolder;
+#endif
 	DBG_PRINT("[MAIN] Args parsed. input='%s' dual=%d threads=%d quiet=%d", cfg.input_file.c_str(), (int)cfg.dual_mode, cfg.threads, (int)cfg.quiet);
 
 	// CLI help / usage handling

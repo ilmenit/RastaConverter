@@ -99,6 +99,10 @@ anywhere on the window - and every conversion option is available beside it in
 one grouped, searchable form. "Only changed" lists just what differs from the
 defaults, and "Copy command line" produces the exact command line for the
 settings on screen, so a GUI experiment can be scripted or shared verbatim.
+Application preferences survive restarts: colour theme, font scale, setup
+window and splitter sizes, collapsed sections, the "Only changed" view, and
+whether new runs use their own subfolder. Conversion settings remain attached
+to individual run recipes.
 
 The preview shows what the optimizer will actually aim at, rebuilt as options
 change: the resized source, the colour-corrected image, the palette-quantized

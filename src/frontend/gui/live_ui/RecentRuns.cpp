@@ -365,6 +365,7 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 
 		const std::string opt = FindOptFile(folder + "/");
 		if (!opt.empty()) {
+			bool playfield_recorded = false;
 			summary.resumable = true;
 			// /o was the .opt path without its extension.
 			summary.output_base = opt.substr(0, opt.size() - 4);
@@ -387,11 +388,25 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 						if (value.find("/graphics_mode=antic4")
 							!= std::string::npos)
 							summary.text_mode = true;
+						if (value.find("/playfield=wide") != std::string::npos) {
+							summary.wide_playfield = true;
+							playfield_recorded = true;
+						} else if (value.find("/playfield=normal")
+							!= std::string::npos) {
+							summary.wide_playfield = false;
+							playfield_recorded = true;
+						}
 					}
 				}
 				if (line.find("; Graphics Mode: ANTIC 4")
 					!= std::string::npos)
 					summary.text_mode = true;
+				const std::string playfield =
+					ValueAfter(line, "; Playfield Width:");
+				if (playfield == "WIDE" || playfield == "NORMAL") {
+					summary.wide_playfield = playfield == "WIDE";
+					playfield_recorded = true;
+				}
 				const std::string evaluations = ValueAfter(line, "; Evaluations:");
 				if (!evaluations.empty())
 					summary.evaluations = std::strtoull(evaluations.c_str(), nullptr, 10);
@@ -412,6 +427,10 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 					summary.snapshots = static_cast<unsigned>(
 						std::strtoul(snapshots.c_str(), nullptr, 10));
 			}
+			// Before width selection existed, ANTIC 4 always emitted the wide
+			// 168-clock layout. ANTIC E's historical default was Normal.
+			if (!playfield_recorded && summary.text_mode)
+				summary.wide_playfield = true;
 		}
 
 		if (load_thumbnails) {

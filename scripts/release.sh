@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Cuts a release.
 #
-#   ./scripts/release.sh 1.0-RC2            # tag, push, wait for CI, report
-#   ./scripts/release.sh 1.0-RC2 --dry-run  # say what it would do, change nothing
+#   ./scripts/release.sh 1.0-RC4            # tag, push, wait for CI, report
+#   ./scripts/release.sh 1.0-RC4 --dry-run  # say what it would do, change nothing
 #   ./scripts/release.sh --local           # build and package here, publish nothing
 #
 # The build itself happens in GitHub Actions, on the three platforms it targets;
@@ -50,7 +50,7 @@ if [[ $local_only -eq 1 ]]; then
 	exit 0
 fi
 
-[[ -n "$version" ]] || fail "which version? e.g. $0 1.0-RC2"
+[[ -n "$version" ]] || fail "which version? e.g. $0 1.0-RC4"
 
 echo "Releasing ${version}:"
 

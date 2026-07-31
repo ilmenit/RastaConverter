@@ -530,6 +530,8 @@ void DrawBottomBar(SetupState& state, FileDialogs& dialogs, SDL_Window* window,
 	// output name on the spot, unless the name was typed by hand - that is a
 	// deliberate choice and outranks this one.
 	if (ImGui::Checkbox("Own folder", &cfg.run_subfolder)) {
+		state.preferences.run_subfolder = cfg.run_subfolder;
+		SaveUiPreferences(state.preferences);
 		if (!state.output_touched && !cfg.input_file.empty()) {
 			cfg.output_file = AllocateRunOutputPath(cfg.input_file,
 				cfg.run_subfolder);
@@ -686,11 +688,13 @@ void DrawTitleBar(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
 		const std::string input = cfg.input_file;
 		const std::string output = cfg.output_file;
 		const int threads = cfg.threads;
+		const bool run_subfolder = cfg.run_subfolder;
 		Configuration fresh = DefaultConfiguration();
 		fresh.parser = cfg.parser;
 		fresh.input_file = input;
 		fresh.output_file = output;
 		fresh.threads = threads;
+		fresh.run_subfolder = run_subfolder;
 		fresh.command_line = cfg.command_line;
 		cfg = fresh;
 		SetSolutions(1);
@@ -706,7 +710,9 @@ void DrawTitleBar(SetupState& state, FileDialogs& dialogs, SDL_Window* window)
 		state.onoff.Set(cfg.on_off_file);
 	}
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Return every option to its default, keeping the file paths.");
+		ImGui::SetTooltip(
+			"Return conversion options to their defaults, keeping file paths "
+			"and editor preferences.");
 
 	ImGui::SameLine();
 	if (ImGui::Button("Style"))
@@ -856,7 +862,8 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		if (remaining-- <= 0 || cfg.input_file.empty())
 			return false;
 		if (cfg.output_file == DefaultConfiguration().output_file)
-			cfg.output_file = AllocateRunOutputPath(cfg.input_file);
+			cfg.output_file = AllocateRunOutputPath(
+				cfg.input_file, cfg.run_subfolder);
 		AbsolutizeJobPaths(cfg);
 		std::string error;
 		if (!CreateRunFolder(cfg.output_file, &error)) {
@@ -876,7 +883,10 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 	if (!SDL_Init(SDL_INIT_VIDEO))
 		return false;
 
-	SDL_Window* window = SDL_CreateWindow("RastaConverter", 1420, 900,
+	UiPreferences preferences = LoadUiPreferences();
+	preferences.run_subfolder = cfg.run_subfolder;
+	SDL_Window* window = SDL_CreateWindow("RastaConverter",
+		preferences.setup_window_width, preferences.setup_window_height,
 		SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 	SDL_Renderer* renderer = window != nullptr ? SDL_CreateRenderer(window, nullptr) : nullptr;
 	if (window == nullptr || renderer == nullptr) {
@@ -907,6 +917,9 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 
 	SetupState state;
 	state.cfg = &cfg;
+	state.preferences = preferences;
+	state.form_width = preferences.setup_form_width;
+	state.only_modified = preferences.setup_only_modified;
 
 	// A seed of "random" arrives here already resolved to a clock value; the
 	// UI wants it back as the word "random" unless it was given explicitly.
@@ -928,12 +941,8 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 	SyncStateFromConfig(state);
 
 	for (int i = 0; i < kCategoryCount; ++i) {
-		// The sections that shape the picture open; Algorithm and the details
-		// mask start collapsed behind their summaries (§7.1c). Both are expert
-		// territory, and both say what they are set to without being opened.
-		const Category category = static_cast<Category>(i);
-		state.section_open[i] = category == Category::Source
-			|| category == Category::Colour;
+		state.section_open[i] =
+			(preferences.setup_open_sections & (1u << i)) != 0;
 	}
 
 	FileDialogs dialogs;
@@ -1089,8 +1098,8 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		} else if (choice.action == RecentGallery::Action::UseSettings) {
 			// The stored command line is the run's full recipe; re-parsing it
 			// is the same path a pasted command line would take. It resets
-			// every option to its default first, so nothing from the current
-			// form leaks into the reused settings.
+			// every conversion option to its default first. Editor preferences
+			// such as output-folder policy remain owned by this UI session.
 			if (!choice.run.command_line.empty()) {
 				// ProcessCmdLine rebuilds the parser from the stored tokens,
 				// which decide live_gui by looking for /livegui - absent from a
@@ -1098,15 +1107,18 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 				// three-blit display. It is a property of this session, not of
 				// the recipe.
 				const bool live_gui = cfg.live_gui;
+				const bool run_subfolder = cfg.run_subfolder;
 				cfg.command_line = choice.run.command_line;
 				cfg.ProcessCmdLine();
 				cfg.live_gui = live_gui;
+				cfg.run_subfolder = run_subfolder;
 			}
 			if (!choice.run.input_file.empty())
 				cfg.input_file = choice.run.input_file;
 			cfg.continue_processing = false;
 			// A reused recipe gets its own folder; the old run stays intact.
-			cfg.output_file = AllocateRunOutputPath(cfg.input_file);
+			cfg.output_file = AllocateRunOutputPath(
+				cfg.input_file, cfg.run_subfolder);
 			state.output_touched = false;
 			SyncStateFromConfig(state);
 			state.show_recent = false;
@@ -1152,6 +1164,20 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 	// The preview owns the process-global palette and distance function while
 	// it runs; stop it before the conversion configures them for real.
 	preview.Shutdown();
+
+	int window_width = state.preferences.setup_window_width;
+	int window_height = state.preferences.setup_window_height;
+	SDL_GetWindowSize(window, &window_width, &window_height);
+	state.preferences.run_subfolder = cfg.run_subfolder;
+	state.preferences.setup_window_width = window_width;
+	state.preferences.setup_window_height = window_height;
+	state.preferences.setup_form_width = state.form_width;
+	state.preferences.setup_only_modified = state.only_modified;
+	state.preferences.setup_open_sections = 0;
+	for (int i = 0; i < kCategoryCount; ++i)
+		if (state.section_open[i])
+			state.preferences.setup_open_sections |= 1u << i;
+	SaveUiPreferences(state.preferences);
 
 	// Paths are pinned down only once the job is accepted, so the form can keep
 	// showing the tidy relative default for the bundled palette while it is
