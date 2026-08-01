@@ -1,6 +1,12 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC5      2026-08-01 [RELEASE CANDIDATE]
+* Fixed a cross-platform crash when Continue was selected for some conversions
+  in Recent. Resumed runs with saved optimizer state now rebuild their rendered
+  picture before the UI can display it, including runs whose first evaluation
+  ties the restored best score instead of publishing an improvement.
+
 RastaConverter1.0-RC4      2026-07-31 [RELEASE CANDIDATE]
 * Added ANTIC 4 character-mode output. Select it in the Live UI or with
   `/graphics_mode=antic4`; ANTIC E remains the default.

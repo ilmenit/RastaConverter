@@ -3161,11 +3161,18 @@ void RastaConverter::MainLoop()
 	Init();
 	ApplyInternalStructuredInitializer();
 
+	// A resumed optimizer state already has a finite best score. Its first
+	// evaluation therefore commonly ties (rather than improves) that score, so
+	// the worker announces initialization without publishing rendered rows.
+	// Seed the display/export buffers from the loaded program before any worker
+	// can wake the UI; otherwise ShowLastCreatedPicture indexes an empty frame.
+	if (cfg.continue_processing && !cfg.dual_mode)
+		RenderCreatedPicture(m_eval_gstate.m_best_pic);
+
 	// Mark optimization start time for statistics (seconds since start)
 	m_eval_gstate.m_time_start = time(NULL);
 	m_previous_save_time = std::chrono::steady_clock::now();
 
-	bool clean_first_evaluation = cfg.continue_processing;
 	auto last_rate_check_tp = std::chrono::steady_clock::now();
 	auto last_ui_frame_tp = last_rate_check_tp;
 
