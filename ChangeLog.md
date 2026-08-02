@@ -1,6 +1,13 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC6      2026-08-02 [RELEASE CANDIDATE]
+* Fixed dual-frame executables showing garbage below images shorter than 240
+  scanlines. Their ANTIC display lists now stop at the configured picture
+  height while preserving the required screen-memory alignment at scanline 204.
+* Dual-frame executables now initialize each optimized raster program from its
+  matching `.opt.ini` data instead of mixing optimized code with `.rp.ini`.
+
 RastaConverter1.0-RC5      2026-08-01 [RELEASE CANDIDATE]
 * Fixed a cross-platform crash when Continue was selected for some conversions
   in Recent. Resumed runs with saved optimizer state now rebuild their rendered

@@ -164,7 +164,7 @@ LOOP
 	mva <ant_A dlptr
 	mva >ant_A dlptr+1
 
-  icl "out_dual_A.rp.ini"
+  icl "out_dual_A.opt.ini"
 
 ;--- wait 18 cycles
 	jsr _rts
@@ -201,7 +201,7 @@ LOOP
 	mva <ant_B dlptr
 	mva >ant_B dlptr+1
 
-  icl "out_dual_B.rp.ini"
+  icl "out_dual_B.opt.ini"
 
 ;--- wait 18 cycles
 	jsr _rts
@@ -263,78 +263,16 @@ s0	lda #$03
 
 
 .MACRO	ANTIC_PROGRAM
-	:+8 dta $4e,a(:1+$0000+#*40)
-	:+8 dta $4e,a(:1+$0140+#*40)
-	:+8 dta $4e,a(:1+$0280+#*40)
-	:+8 dta $4e,a(:1+$03C0+#*40)
-	:+8 dta $4e,a(:1+$0500+#*40)
-	:+8 dta $4e,a(:1+$0640+#*40)
-	:+8 dta $4e,a(:1+$0780+#*40)
-	:+8 dta $4e,a(:1+$08C0+#*40)
-	:+8 dta $4e,a(:1+$0A00+#*40)
-	:+8 dta $4e,a(:1+$0B40+#*40)
-	:+8 dta $4e,a(:1+$0C80+#*40)
-	:+8 dta $4e,a(:1+$0DC0+#*40)
-	:+8 dta $4e,a(:1+$0F00+#*40)
-	:+8 dta $4e,a(:1+$1040+#*40)
-	:+8 dta $4e,a(:1+$1180+#*40)
-	:+8 dta $4e,a(:1+$12C0+#*40)
-	:+8 dta $4e,a(:1+$1400+#*40)
-	:+8 dta $4e,a(:1+$1540+#*40)
-	:+8 dta $4e,a(:1+$1680+#*40)
-	:+8 dta $4e,a(:1+$17C0+#*40)
-	:+8 dta $4e,a(:1+$1900+#*40)
-	:+8 dta $4e,a(:1+$1A40+#*40)
-	:+8 dta $4e,a(:1+$1B80+#*40)
-	:+8 dta $4e,a(:1+$1CC0+#*40)
-	:+8 dta $4e,a(:1+$1E00+#*40)
-	:+4 dta $4e,a(:1+$1F40+#*40)
-	:+4 dta $4e,a(:1+$1FF0+#*40)
-	:+8 dta $4e,a(:1+$2090+#*40)
-	:+8 dta $4e,a(:1+$21D0+#*40)
-	:+8 dta $4e,a(:1+$2310+#*40)
-	:+8 dta $4e,a(:1+$2450+#*40)
+	* Emit only the visible picture lines. A fixed 240-line list makes ANTIC
+	* fetch whatever follows a shorter .mic file and displays it as garbage.
+	* Rows from 204 onward account for the 16-byte pad inserted above so no
+	* 40-byte mode-E row crosses the $2000 boundary within the screen buffer.
+	.rept PIC_HEIGHT
+	?screen_offset = #*40 + 16*(# >= 204)
+	dta $4e,a(:1+?screen_offset)
+	.endr
 	dta $41,a(:2)
 .ENDM
-
-// .MACRO	ANTIC_PROGRAM
-// .rept 25
-	// ?y=#
-	// .rept 8
-		// ?x=#
-		// ?line_number=?y*8+?x
-		// ift ?line_number<PIC_HEIGHT
-			// dta $4e,a(:1+?y*8*40+?x*40)
-		// eif
-	// .endr
-// .endr
-	
-// .rept 2
-	// ?y=#
-	// .rept 4
-		// ?x=#
-		// ?offset=25*8*40 ; 1F40
-		// ?line_number=?y*4+?x + 25*8
-		// ift ?line_number<PIC_HEIGHT
-			// dta $4e,a(:1+?offset+?y*40*4+?x*40)
-		// eif
-	// .endr
-// .endr
-
-// .rept 4
-	// ?y=#
-	// .rept 8
-		// ?x=#
-		// ?offset=$2090
-		// ?line_number=?y*8+?x + 25*8 + 4*2
-		// ift ?line_number<PIC_HEIGHT
-			// dta $4e,a(:1+?offset+?y*40*8+?x*40)
-		// eif
-	// .endr
-// .endr
-
-	// dta $41,a(:2)
-// .ENDM
 
 
 CL
@@ -351,4 +289,3 @@ CL
 .MACRO	SPRITES_B
 	icl "out_dual_B.pmg"
 .ENDM
-
