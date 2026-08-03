@@ -41,11 +41,12 @@ public:
 	struct Point {
 		unsigned long long evaluations;
 		double rate;               // evaluations per second
+		double sampled_at_ms;      // monotonic time, for the recent window
 	};
 
 	enum class View { WholeRun, Recent };
 
-	void Sample(unsigned long long evaluations, double rate);
+	void Sample(unsigned long long evaluations, double rate, double sampled_at_ms);
 	void MarkEvent(unsigned long long evaluations);
 	void Clear();
 
@@ -54,6 +55,7 @@ public:
 	const std::deque<Point>& points(View view) const {
 		return view == View::WholeRun ? whole_ : recent_;
 	}
+	bool has_distinct_recent_view() const;
 	const std::vector<unsigned long long>& events() const { return events_; }
 
 private:

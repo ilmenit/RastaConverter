@@ -18,8 +18,9 @@ namespace {
 // Enough history for a long run without unbounded growth; older samples are
 // dropped from the front.
 constexpr size_t kMaxSamples = 600;
-// The full-resolution tail, at kSampleIntervalMs each: about four minutes.
-constexpr size_t kRecentSamples = 480;
+// A short enough tail for "Zoom to recent" to reveal current behaviour. Time,
+// rather than a sample count, defines it so delayed UI frames do not stretch it.
+constexpr double kRecentWindowMs = 2.0 * 60.0 * 1000.0;
 constexpr size_t kMaxUndoStrokes = 128;
 
 
@@ -120,7 +121,8 @@ void StatLine(const char* label, const std::string& value, ImU32 value_color)
 
 } // namespace
 
-void ProgressTrace::Sample(unsigned long long evaluations, double rate)
+void ProgressTrace::Sample(unsigned long long evaluations, double rate,
+	double sampled_at_ms)
 {
 	if (!(rate > 0.0))
 		return;
@@ -128,10 +130,11 @@ void ProgressTrace::Sample(unsigned long long evaluations, double rate)
 		return;
 	last_sample_evaluations_ = evaluations;
 
-	const Point point{evaluations, rate};
+	const Point point{evaluations, rate, sampled_at_ms};
 
 	recent_.push_back(point);
-	while (recent_.size() > kRecentSamples)
+	while (recent_.size() > 1
+		&& point.sampled_at_ms - recent_.front().sampled_at_ms > kRecentWindowMs)
 		recent_.pop_front();
 
 	// The whole-run buffer takes one sample in `stride_`, and the last one
@@ -156,6 +159,12 @@ void ProgressTrace::Sample(unsigned long long evaluations, double rate)
 
 	while (!events_.empty() && events_.front() < whole_.front().evaluations)
 		events_.erase(events_.begin());
+}
+
+bool ProgressTrace::has_distinct_recent_view() const
+{
+	return recent_.size() >= 2 && !whole_.empty()
+		&& recent_.front().sampled_at_ms > whole_.front().sampled_at_ms;
 }
 
 void ProgressTrace::MarkEvent(unsigned long long evaluations)
@@ -203,7 +212,7 @@ void Dashboard::SetStats(const LiveStats& stats)
 	const double now = NowMs();
 	if (now - last_sample_ms_ >= kSampleIntervalMs) {
 		last_sample_ms_ = now;
-		trace_.Sample(stats.evaluations, stats.rate);
+		trace_.Sample(stats.evaluations, stats.rate, now);
 	}
 }
 
@@ -278,13 +287,17 @@ void Dashboard::DrawRateChart()
 	polyline.reserve(points.size() + 2);
 	for (const ProgressTrace::Point& point : points)
 		polyline.push_back(ImVec2(x_of(point.evaluations), y_of(point.rate)));
-	// Filled under the line: throughput is a quantity, and the area reads as
-	// one where a bare stroke reads as a signal.
-	std::vector<ImVec2> area = polyline;
-	area.push_back(ImVec2(polyline.back().x, max.y - 1.0f));
-	area.push_back(ImVec2(polyline.front().x, max.y - 1.0f));
-	draw->AddConvexPolyFilled(area.data(), static_cast<int>(area.size()),
-		IM_COL32(0xF0, 0xA8, 0x3C, 0x24));
+	// Fill the non-convex curve as adjacent convex strips. Passing the entire
+	// area to AddConvexPolyFilled made ImGui draw fan diagonals from the first
+	// sample through the rate line.
+	for (size_t i = 1; i < polyline.size(); ++i) {
+		const ImVec2 strip[4] = {
+			polyline[i - 1], polyline[i],
+			ImVec2(polyline[i].x, max.y - 1.0f),
+			ImVec2(polyline[i - 1].x, max.y - 1.0f),
+		};
+		draw->AddConvexPolyFilled(strip, 4, IM_COL32(0xF0, 0xA8, 0x3C, 0x24));
+	}
 	draw->AddPolyline(polyline.data(), static_cast<int>(polyline.size()),
 		theme::kAccent, 0, 1.6f);
 
@@ -329,7 +342,7 @@ void Dashboard::DrawRateChart()
 	}
 
 	ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kTextFaint));
-	ImGui::TextUnformatted(chart_whole_run_ ? "whole run" : "last few minutes");
+	ImGui::TextUnformatted(chart_whole_run_ ? "whole run" : "last 2 minutes");
 	ImGui::PopStyleColor();
 	const char* toggle = chart_whole_run_ ? "Zoom to recent" : "Show whole run";
 	const float toggle_width = ImGui::CalcTextSize(toggle).x
@@ -340,12 +353,18 @@ void Dashboard::DrawRateChart()
 		ImGui::SameLine(right);
 	else
 		ImGui::SameLine();
+	const bool recent_available = trace_.has_distinct_recent_view();
+	ImGui::BeginDisabled(chart_whole_run_ && !recent_available);
 	if (ImGui::SmallButton(toggle))
 		chart_whole_run_ = !chart_whole_run_;
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip(chart_whole_run_
-			? "The last few minutes at full resolution."
-			: "Every sample since the run started, thinned to fit.");
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+		if (chart_whole_run_ && !recent_available)
+			ImGui::SetTooltip("The whole run already fits inside the last two minutes.");
+		else
+			ImGui::SetTooltip(chart_whole_run_
+				? "The last two minutes at full resolution."
+				: "Every sample since the run started, thinned to fit.");
 	}
 }
 

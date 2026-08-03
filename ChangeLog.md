@@ -1,6 +1,19 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC8      2026-08-03 [RELEASE CANDIDATE]
+* Fixed the in-conversion rate graph drawing semi-transparent diagonal lines
+  across its data. The area below the non-convex curve is now rendered as
+  adjacent strips instead of an invalid convex polygon.
+* Made Zoom to recent show a distinct, full-resolution two-minute window. The
+  control remains disabled while the whole run already fits in that window,
+  instead of changing only its label without changing the graph.
+* Recent Conversions cards now have an `x` action for removing one conversion
+  from the library. Its confirmation can optionally delete the output folder,
+  retaining the existing `rc-...` folder-name safeguard used by Clear all.
+* Moved the GFX/TEXT, NORM/WIDE and DUAL badges to a left-aligned stack in the
+  top-left of each Recent Conversions thumbnail, opposite the removal action.
+
 RastaConverter1.0-RC7      2026-08-03 [RELEASE CANDIDATE]
 * Fixed the RC6 dual-XEX regression that shifted cycle-timed colour writes and
   produced horizontal streaks. Dual display lists retain one LMS per scanline,

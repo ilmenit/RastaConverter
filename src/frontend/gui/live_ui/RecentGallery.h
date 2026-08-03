@@ -61,6 +61,7 @@ public:
 private:
 	SDL_Texture* TextureFor(size_t index);
 	void DrawClearPopup();
+	void DrawRemovePopup();
 	void StartXexBuild(size_t index);
 	void PollXexBuild();
 	void Open(const std::string& path, bool folder);
@@ -74,6 +75,10 @@ private:
 	std::vector<char> xex_current_;
 	bool loaded_ = false;
 	bool clear_folders_ = false;   // the destructive half of "Clear all"
+	bool remove_folder_ = false;
+	bool open_remove_popup_ = false;
+	std::string remove_folder_path_;
+	std::string remove_label_;
 
 	// Assembling runs off the UI thread - MADS takes long enough to drop frames.
 	// One at a time: it is a deliberate act on one run, not a batch.

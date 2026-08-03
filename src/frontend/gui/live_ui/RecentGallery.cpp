@@ -237,6 +237,58 @@ void RecentGallery::DrawClearPopup()
 	ImGui::EndPopup();
 }
 
+void RecentGallery::DrawRemovePopup()
+{
+	ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 27.0f, 0.0f));
+	if (!ImGui::BeginPopupModal("remove_recent", nullptr,
+			ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove))
+		return;
+
+	ImGui::PushTextWrapPos(0.0f);
+	ImGui::TextUnformatted("Do you want to remove this conversion?");
+	ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kTextMuted));
+	ImGui::TextUnformatted(remove_label_.c_str());
+	ImGui::TextUnformatted("Without the option below, its files stay on disk.");
+	ImGui::PopStyleColor();
+	ImGui::Spacing();
+	ImGui::Checkbox("Remove also output folder", &remove_folder_);
+	if (remove_folder_) {
+		ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kDanger));
+		ImGui::TextUnformatted("This deletes the rc-... folder and everything in it. "
+			"It cannot be undone.");
+		ImGui::PopStyleColor();
+	}
+	ImGui::PopTextWrapPos();
+	ImGui::Spacing();
+
+	const float width = (ImGui::GetContentRegionAvail().x
+		- ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+	if (ImGui::Button("Cancel", ImVec2(width, 0.0f)))
+		ImGui::CloseCurrentPopup();
+	ImGui::SameLine();
+	if (remove_folder_) {
+		ImGui::PushStyleColor(ImGuiCol_Button, theme::ToVec4(theme::kDanger));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, theme::ToVec4(theme::kDanger));
+	}
+	const char* confirm = remove_folder_ ? "Delete folder" : "Remove";
+	if (ImGui::Button(confirm, ImVec2(width, 0.0f))) {
+		const bool removed = RemoveRecentRun(remove_folder_path_, remove_folder_);
+		if (remove_folder_ && !removed) {
+			xex_failed_ = true;
+			xex_message_ = "Removed the conversion from the list, but left its folder.";
+			xex_detail_ = "Only output folders named rc-... may be deleted. The folder "
+				"may also have already been removed or could not be deleted.";
+		}
+		remove_folder_path_.clear();
+		remove_label_.clear();
+		Refresh();
+		ImGui::CloseCurrentPopup();
+	}
+	if (remove_folder_)
+		ImGui::PopStyleColor(2);
+	ImGui::EndPopup();
+}
+
 RecentGallery::Result RecentGallery::Draw(bool closable)
 {
 	Result result;
@@ -353,6 +405,8 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 		SDL_Texture* texture = TextureFor(i);
 		const ImVec2 band(ImGui::GetContentRegionAvail().x, kThumbHeight);
 		const ImVec2 band_min = ImGui::GetCursorScreenPos();
+		const bool building_this = xex_future_.valid() && xex_folder_ == run.folder;
+		const float remove_size = ImGui::GetFrameHeight();
 		ImDrawList* draw = ImGui::GetWindowDrawList();
 		draw->AddRectFilled(band_min, ImVec2(band_min.x + band.x, band_min.y + band.y),
 			theme::kSurfaceLow, 4.0f);
@@ -371,14 +425,13 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 				band_min.y + (band.y - text.y) * 0.5f), theme::kTextFaint, missing);
 		}
 		const ImVec2 badge_padding(7.0f, 3.0f);
-		const float badge_right = band_min.x + band.x - 7.0f;
+		const float badge_left = band_min.x + 7.0f;
 		float badge_top = band_min.y + 7.0f;
 		auto draw_badge = [&](const char* label, ImU32 background) {
 			const ImVec2 text_size = ImGui::CalcTextSize(label);
-			const ImVec2 badge_min(
-				badge_right - text_size.x - badge_padding.x * 2.0f,
-				badge_top);
-			const ImVec2 badge_max(badge_right,
+			const ImVec2 badge_min(badge_left, badge_top);
+			const ImVec2 badge_max(
+				badge_left + text_size.x + badge_padding.x * 2.0f,
 				badge_top + text_size.y + badge_padding.y * 2.0f);
 			draw->AddRectFilled(badge_min, badge_max, background, 5.0f);
 			draw->AddText(ImVec2(badge_min.x + badge_padding.x,
@@ -391,10 +444,32 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 			run.wide_playfield ? theme::kBadgeWide : theme::kBadgeNormal);
 		if (run.dual_mode)
 			draw_badge("DUAL", theme::kBadgeDual);
+		// Draw the interactive control after the thumbnail so the image cannot
+		// cover it in ImGui's command order.
+		ImGui::SetCursorScreenPos(ImVec2(
+			band_min.x + band.x - remove_size, band_min.y));
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.05f, 0.06f, 0.08f, 0.82f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, theme::ToVec4(theme::kDanger));
+		ImGui::BeginDisabled(building_this);
+		if (ImGui::Button("x##remove", ImVec2(remove_size, remove_size))) {
+			remove_folder_ = false;
+			remove_folder_path_ = run.folder;
+			remove_label_ = run.label;
+			open_remove_popup_ = true;
+		}
+		ImGui::EndDisabled();
+		ImGui::PopStyleColor(2);
+		const bool remove_hovered =
+			ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
+		if (remove_hovered)
+			ImGui::SetTooltip(building_this
+				? "Wait for this conversion's executable build to finish."
+				: "Remove this conversion from the library.");
+		ImGui::SetCursorScreenPos(band_min);
 		ImGui::Dummy(band);
 		// The picture is the natural thing to point at when asking "what were
 		// the settings here?", and the whole recipe is one line of text.
-		if (ImGui::IsItemHovered()) {
+		if (ImGui::IsItemHovered() && !remove_hovered) {
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 			if (!run.picture_path.empty()
 				&& ImGui::IsMouseClicked(ImGuiMouseButton_Left))
@@ -595,6 +670,11 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 	}
 
 	ImGui::EndChild();
+	if (open_remove_popup_) {
+		open_remove_popup_ = false;
+		ImGui::OpenPopup("remove_recent");
+	}
+	DrawRemovePopup();
 	return result;
 }
 

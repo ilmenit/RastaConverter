@@ -307,6 +307,23 @@ void ForgetRecentRun(const std::string& folder)
 		WriteIndex(folders);
 }
 
+bool RemoveRecentRun(const std::string& folder, bool delete_folder)
+{
+	const std::string normalized = NormalizeFolder(folder);
+	bool deleted = !delete_folder;
+	if (delete_folder) {
+		const std::string name = FileName(normalized);
+		if (name.rfind("rc-", 0) == 0) {
+			std::error_code ec;
+			const uintmax_t count = std::filesystem::remove_all(
+				Utf8Path(normalized), ec);
+			deleted = !ec && count > 0;
+		}
+	}
+	ForgetRecentRun(normalized);
+	return deleted;
+}
+
 size_t ClearRecentRuns(bool delete_folders, size_t* skipped)
 {
 	std::vector<std::string> folders = ReadIndex();

@@ -70,6 +70,12 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit = 60);
 // Forgets a run folder (used when its directory has been removed).
 void ForgetRecentRun(const std::string& folder);
 
+// Forgets one run and, when requested, removes its output directory. The same
+// rc-... name guard as ClearRecentRuns protects unrelated directories. Returns
+// false only when folder deletion was requested but refused or failed; the
+// history entry is forgotten in either case.
+bool RemoveRecentRun(const std::string& folder, bool delete_folder);
+
 // Empties the history. `delete_folders` also removes the run directories from
 // disk - permanently, which is why it is a separate argument and why the caller
 // is expected to have asked first.
