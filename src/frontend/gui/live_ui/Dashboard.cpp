@@ -537,17 +537,15 @@ void Dashboard::DrawDualPanel()
 	StatLine("Optimizing", std::string(stats_.dual_focus_b ? "frame B" : "frame A"),
 		theme::kText);
 	if (stats_.dual_block_steps > 0) {
-		const float fraction = std::min(1.0f,
-			static_cast<float>(static_cast<double>(stats_.dual_block_progress)
-				/ static_cast<double>(stats_.dual_block_steps)));
-		char overlay[64];
-		std::snprintf(overlay, sizeof(overlay), "%s / %s",
-			Magnitude(stats_.dual_block_progress).c_str(),
-			Magnitude(stats_.dual_block_steps).c_str());
-		ImGui::ProgressBar(fraction, ImVec2(-FLT_MIN, 0.0f), overlay);
+		const std::string position = WithCommas(stats_.dual_block_progress)
+			+ " / " + WithCommas(stats_.dual_block_steps);
+		StatLine("Block position", position, theme::kText);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Position within the current bootstrap or alternation block.");
 	}
+	const char* preview = stats_.dual_display == 'A' ? "frame A"
+		: stats_.dual_display == 'B' ? "frame B" : "blended A+B";
+	StatLine("Preview", preview, theme::kText);
 }
 
 void Dashboard::DrawDiagnosticsPanel()

@@ -10,6 +10,14 @@ void RastaConverter::ShowLastCreatedPictureDual()
 #endif
 	if (!cfg.dual_mode) { ShowLastCreatedPicture(); return; }
 
+	ShowCreatedPicturesDual(m_eval_gstate.m_created_picture,
+		m_created_picture_B);
+}
+
+void RastaConverter::ShowCreatedPicturesDual(
+	const std::vector<color_index_line>& createdA,
+	const std::vector<color_index_line>& createdB)
+{
 	// Ensure bitmaps exist
 	if (!output_bitmap_A) output_bitmap_A = FreeImage_Allocate(cfg.width, cfg.height, 24);
 	if (!output_bitmap_B) output_bitmap_B = FreeImage_Allocate(cfg.width, cfg.height, 24);
@@ -20,8 +28,8 @@ void RastaConverter::ShowLastCreatedPictureDual()
 	{
 		for (int x = 0; x < m_width; ++x)
 		{
-			unsigned char idxA = (y < (int)m_eval_gstate.m_created_picture.size() && x < (int)m_eval_gstate.m_created_picture[y].size()) ? m_eval_gstate.m_created_picture[y][x] : 0;
-			unsigned char idxB = (y < (int)m_created_picture_B.size() && x < (int)m_created_picture_B[y].size()) ? m_created_picture_B[y][x] : 0;
+			unsigned char idxA = (y < (int)createdA.size() && x < (int)createdA[y].size()) ? createdA[y][x] : 0;
+			unsigned char idxB = (y < (int)createdB.size() && x < (int)createdB[y].size()) ? createdB[y][x] : 0;
 			rgb colA = atari_palette[idxA];
 			rgb colB = atari_palette[idxB];
 			RGBQUAD qa = { colA.b, colA.g, colA.r, 0 };
@@ -50,11 +58,20 @@ void RastaConverter::ShowLastCreatedPictureDual()
 
 	// Display according to current dual display mode
 	int w = FreeImage_GetWidth(input_bitmap);
+	FIBITMAP* published = output_bitmap_blended;
 	switch (m_dual_display) {
-		case DualDisplayMode::A: gui.DisplayBitmap(w, 0, output_bitmap_A); break;
-		case DualDisplayMode::B: gui.DisplayBitmap(w, 0, output_bitmap_B); break;
-		case DualDisplayMode::MIX: default: gui.DisplayBitmap(w, 0, output_bitmap_blended); break;
+		case DualDisplayMode::A:
+			published = output_bitmap_A;
+			break;
+		case DualDisplayMode::B:
+			published = output_bitmap_B;
+			break;
+		case DualDisplayMode::MIX:
+		default:
+			break;
 	}
+	gui.DisplayBitmap(w, 0, published);
+	// DisplayBitmap updates the legacy conversion surface. The Live UI owns a
+	// separate image viewer and must receive the selected A/B/blended frame too.
+	gui.PublishImage(GuiImageSlot::Output, published);
 }
-
-

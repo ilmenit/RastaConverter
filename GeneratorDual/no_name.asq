@@ -27,81 +27,8 @@ ant_A_end:
 	.print "Antic A size: ",*-ant_A
 	.print "Antic A end: ",*
 
-; MAIN code, still in first $400 of SPRITE A 
-	.print "Main start: ", *
-main
-* ---	init PMG
-
-	ift USESPRITES
-	mva >pmg_A pmbase		;missiles and players data address
-	mva #$03 pmcntl		;enable players and missiles
-	eif
-
-	lda:cmp:req $14		;wait 1 frame
-
-	sei			;stop interrups
-	mva #$00 nmien		;stop all interrupts
-	mva #$fe portb		;switch off ROM to get 16k more ram
-	
-raster_program_end:
-	; switch to frame A sprites
-	ift USESPRITES
-	mva >pmg_A pmbase		;missiles and players data address
-	eif
-
-	RASTER_PROGRAM_END_MACRO
-
-; EXIT check
-exit_check:
-
-	lda trig0		; FIRE #0
-	beq stop
-
-	lda trig1		; FIRE #1
-	beq stop
-
-	lda consol		; START
-	and #1
-	beq stop
-
-	lda skctl		; ANY KEY
-	and #$04
-	bne skp
-
-stop	mva #$00 pmcntl		;PMG disabled
-	tax
-	sta:rne hposp0,x+
-
-	mva #$ff portb		;ROM switch on
-	mva #$40 nmien		;only NMI interrupts, DLI disabled
-	cli			;IRQ enabled
-
-	rts			;return to ... DOS
-skp
-	jmp LOOP
-
-; Extra sync code
-
-wait54cycle
-	:2 inc byt2
-wait44cycle
-	inc byt3
-	nop
-wait36cycle
-	inc byt3
-	jsr _rts
-wait18cycle
-	inc byt3
-_rts	rts
-
-byt3	brk
-	
-	.print "Main code end: ", *
-gap_used = *-ant_A
-	.print "Gap in SPRITE A used: ", gap_used 
-	
-	IFT gap_used >= $400
-		.error "Too much space tried to be used in SPRITE A gap: ", gap_used
+	IFT *-ant_A > $300
+		.error "ANTIC A display list overlaps missile data: ", *-ant_A
 	EIF
 
 ; SPRITES A	
@@ -224,6 +151,79 @@ LOOP
 	
 .print "End program addr: ", *
 
+; MAIN and shared sync code. The first $300 bytes of each PMG page are free,
+; but the cycle-exact display lists use almost all of that space. Keep code in
+; the alignment gap before screen B instead of overwriting missile DMA data.
+	.print "Main start: ", *
+main
+* ---	init PMG
+
+	ift USESPRITES
+	mva >pmg_A pmbase		;missiles and players data address
+	mva #$03 pmcntl		;enable players and missiles
+	eif
+
+	lda:cmp:req $14		;wait 1 frame
+
+	sei			;stop interrups
+	mva #$00 nmien		;stop all interrupts
+	mva #$fe portb		;switch off ROM to get 16k more ram
+
+raster_program_end:
+	; switch to frame A sprites
+	ift USESPRITES
+	mva >pmg_A pmbase		;missiles and players data address
+	eif
+
+	RASTER_PROGRAM_END_MACRO
+
+; EXIT check
+exit_check:
+
+	lda trig0		; FIRE #0
+	beq stop
+
+	lda trig1		; FIRE #1
+	beq stop
+
+	lda consol		; START
+	and #1
+	beq stop
+
+	lda skctl		; ANY KEY
+	and #$04
+	bne skp
+
+stop	mva #$00 pmcntl		;PMG disabled
+	tax
+	sta:rne hposp0,x+
+
+	mva #$ff portb		;ROM switch on
+	mva #$40 nmien		;only NMI interrupts, DLI disabled
+	cli			;IRQ enabled
+
+	rts			;return to ... DOS
+skp
+	jmp LOOP
+
+; Extra sync code
+
+wait54cycle
+	:2 inc byt2
+wait44cycle
+	inc byt3
+	nop
+wait36cycle
+	inc byt3
+	jsr _rts
+wait18cycle
+	inc byt3
+_rts	rts
+
+byt3	brk
+
+	.print "Main code end: ", *
+
 ; SCREEN B memory
 	.align $1000
 	org *+$10
@@ -263,10 +263,11 @@ s0	lda #$03
 
 
 .MACRO	ANTIC_PROGRAM
-	* Emit only the visible picture lines. A fixed 240-line list makes ANTIC
-	* fetch whatever follows a shorter .mic file and displays it as garbage.
+	* The evaluator's CPU schedule assumes an LMS instruction on every mode-E
+	* line. Replacing these with ordinary mode instructions changes ANTIC's DMA
+	* steals and shifts every timed colour write, producing horizontal streaks.
 	* Rows from 204 onward account for the 16-byte pad inserted above so no
-	* 40-byte mode-E row crosses the $2000 boundary within the screen buffer.
+	* 40-byte row crosses the screen buffer's $2000 boundary.
 	.rept PIC_HEIGHT
 	?screen_offset = #*40 + 16*(# >= 204)
 	dta $4e,a(:1+?screen_offset)

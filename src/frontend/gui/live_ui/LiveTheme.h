@@ -46,6 +46,7 @@ extern ImU32 kBadgeText;   // green - ANTIC 4
 extern ImU32 kBadgeGfx;    // blue - ANTIC E
 extern ImU32 kBadgeWide;   // violet - wide playfield
 extern ImU32 kBadgeNormal; // amber - normal playfield
+extern ImU32 kBadgeDual;   // red - alternating dual-frame output
 
 ImVec4 ToVec4(ImU32 packed);
 

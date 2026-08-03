@@ -2944,12 +2944,16 @@ void RastaConverter::PublishLiveStats(bool preprocessing, bool finished)
 				m_eval_gstate.m_dual_bootstrap_b_copied.load(std::memory_order_relaxed)
 					? "Bootstrap B (copied from A)" : "Bootstrap B (generated)";
 			stats.dual_block_steps = cfg.first_dual_steps;
+			if (cfg.first_dual_steps > 0)
+				stats.dual_block_progress = stats.evaluations % cfg.first_dual_steps;
 			break;
 		case EvalGlobalState::DUAL_PHASE_ALTERNATING:
 			stats.dual_phase = "Alternating";
 			stats.dual_block_steps = cfg.altering_dual_steps;
 			if (cfg.altering_dual_steps > 0)
-				stats.dual_block_progress = stats.evaluations % cfg.altering_dual_steps;
+				stats.dual_block_progress = std::min(
+					m_eval_gstate.m_dual_stage_counter.load(std::memory_order_relaxed),
+					cfg.altering_dual_steps);
 			break;
 		default:
 			stats.dual_phase = "-";
@@ -3065,8 +3069,6 @@ void RastaConverter::SaveBestSolution()
 	if (!init_finished)
 		return;
 
-	// Note that we are assuming that we have exclusive access to global state.
-
 	if (!cfg.dual_mode) {
 		SaveEditedMaskArtifact();
 		SaveEditedTargetArtifact();
@@ -3097,9 +3099,6 @@ void RastaConverter::SaveBestSolution()
 		return;
 	}
 
-	// Dual-mode saving: save A, B, and blended
-	ShowLastCreatedPictureDual();
-
 	// Build directory prefix from cfg.output_file so dual outputs go to the same folder
 	std::string __out_dir_prefix;
 	{
@@ -3108,33 +3107,59 @@ void RastaConverter::SaveBestSolution()
 		__out_dir_prefix = (__pos == std::string::npos) ? std::string() : __of.substr(0, __pos + 1);
 	}
 
-	// A
+	// Optimize both programs first, then render all derived files from those exact
+	// optimized programs. The old dual path saved .opt after optimization but
+	// kept .mic, .pmg and PNG data from the pre-optimization worker caches, so
+	// the preview and executable could describe different pictures.
+	raster_picture picA;
+	raster_picture picB;
 	{
-		raster_picture picA = m_eval_gstate.m_best_pic;
-		SaveRasterProgram(__out_dir_prefix + string("out_dual_A.rp"), &picA);
-		OptimizeRasterProgram(&picA);
-		SaveRasterProgram(__out_dir_prefix + string("out_dual_A.opt"), &picA);
-		SavePMGWithSprites(__out_dir_prefix + string("out_dual_A.pmg"), m_eval_gstate.m_sprites_memory);
-		SaveScreenDataFromTargets((__out_dir_prefix + string("out_dual_A.mic")).c_str(), m_eval_gstate.m_created_picture_targets);
-		if (output_bitmap_A) SavePicture(__out_dir_prefix + string("out_dual_A.png"), output_bitmap_A);
+		// Dual autosave can run while optimizer threads are publishing a new
+		// pair. Snapshot both programs under the same lock so A and B always
+		// belong to one coherent best state.
+		std::unique_lock<std::mutex> stateLock{m_eval_gstate.m_mutex};
+		picA = m_eval_gstate.m_best_pic;
+		picB = m_best_pic_B.raster_lines.empty()
+			? m_eval_gstate.m_best_pic : m_best_pic_B;
 	}
-	// B
-	{
-		raster_picture picB = m_best_pic_B.raster_lines.empty() ? m_eval_gstate.m_best_pic : m_best_pic_B;
-		SaveRasterProgram(__out_dir_prefix + string("out_dual_B.rp"), &picB);
-		OptimizeRasterProgram(&picB);
-		SaveRasterProgram(__out_dir_prefix + string("out_dual_B.opt"), &picB);
-		SavePMGWithSprites(__out_dir_prefix + string("out_dual_B.pmg"), m_sprites_memory_B);
-		if (m_created_picture_targets_B.empty()) m_created_picture_targets_B = m_eval_gstate.m_created_picture_targets; // fallback
-		SaveScreenDataFromTargets  ((__out_dir_prefix + string("out_dual_B.mic")).c_str(), m_created_picture_targets_B);
-		if (output_bitmap_B) SavePicture(__out_dir_prefix + string("out_dual_B.png"), output_bitmap_B);
-	}
+	SaveRasterProgram(__out_dir_prefix + string("out_dual_A.rp"), &picA);
+	SaveRasterProgram(__out_dir_prefix + string("out_dual_B.rp"), &picB);
+	OptimizeRasterProgram(&picA);
+	OptimizeRasterProgram(&picB);
+
+	std::vector<color_index_line> createdA, createdB;
+	std::vector<line_target> targetsA, targetsB;
+	sprites_memory_t spritesA{};
+	sprites_memory_t spritesB{};
+	// Save/report rendering uses its own evaluator and local buffers. Never put
+	// these optimized snapshots into the live worker buffers: autosave may run
+	// while a newer pair is being published there.
+	RenderCreatedPictureInto(picA, createdA, targetsA, spritesA);
+	RenderCreatedPictureInto(picB, createdB, targetsB, spritesB);
+	ShowCreatedPicturesDual(createdA, createdB);
+
+	SaveRasterProgram(__out_dir_prefix + string("out_dual_A.opt"), &picA);
+	SavePMGWithSprites(__out_dir_prefix + string("out_dual_A.pmg"), spritesA);
+	SaveScreenDataFromTargets((__out_dir_prefix + string("out_dual_A.mic")).c_str(),
+		targetsA);
+	if (output_bitmap_A)
+		SavePicture(__out_dir_prefix + string("out_dual_A.png"), output_bitmap_A);
+
+	SaveRasterProgram(__out_dir_prefix + string("out_dual_B.opt"), &picB);
+	SavePMGWithSprites(__out_dir_prefix + string("out_dual_B.pmg"),
+		spritesB);
+	SaveScreenDataFromTargets((__out_dir_prefix + string("out_dual_B.mic")).c_str(),
+		targetsB);
+	if (output_bitmap_B)
+		SavePicture(__out_dir_prefix + string("out_dual_B.png"), output_bitmap_B);
 	// Blended
 	if (output_bitmap_blended) SavePicture(__out_dir_prefix + string("out_dual_blended.png"), output_bitmap_blended);
 
 	// Stats
 	SaveStatistics((cfg.output_file+".csv").c_str());
 	SaveOptimizerState((cfg.output_file+".optstate").c_str());
+	m_ever_saved = true;
+	m_last_save_time = std::chrono::steady_clock::now();
 }
 
 RastaConverter::RastaConverter()
@@ -3387,6 +3412,14 @@ void RastaConverter::MainLoop()
 
 void RastaConverter::RenderCreatedPicture(raster_picture& picture)
 {
+	RenderCreatedPictureInto(picture, m_eval_gstate.m_created_picture,
+		m_eval_gstate.m_created_picture_targets, m_eval_gstate.m_sprites_memory);
+}
+
+void RastaConverter::RenderCreatedPictureInto(raster_picture& picture,
+	std::vector<color_index_line>& created,
+	std::vector<line_target>& targets, sprites_memory_t& sprites)
+{
 	if (!m_reporting_evaluator)
 		return;
 	std::vector<const line_cache_result*> results(m_height, nullptr);
@@ -3396,20 +3429,19 @@ void RastaConverter::RenderCreatedPicture(raster_picture& picture)
 	// rendering so saving never reads worker cache storage.
 	evaluator.RecachePicture(&picture, true);
 	evaluator.EvaluateSingle(&picture, results.data());
-	m_eval_gstate.m_created_picture.resize(m_height);
-	m_eval_gstate.m_created_picture_targets.resize(m_height);
+	created.resize(m_height);
+	targets.resize(m_height);
 	for (int y = 0; y < m_height; ++y) {
 		if (results[y] == nullptr)
 			continue;
 		const line_cache_result& result = *results[y];
-		m_eval_gstate.m_created_picture[y].assign(
+		created[y].assign(
 			result.color_row, result.color_row + m_width);
-		m_eval_gstate.m_created_picture_targets[y].resize(m_width);
+		targets[y].resize(m_width);
 		result.copy_target_row(
-			m_eval_gstate.m_created_picture_targets[y].data(), m_width);
+			targets[y].data(), m_width);
 	}
-	memcpy(&m_eval_gstate.m_sprites_memory, &evaluator.GetSpritesMemory(),
-		sizeof m_eval_gstate.m_sprites_memory);
+	memcpy(&sprites, &evaluator.GetSpritesMemory(), sizeof sprites);
 }
 
 void RastaConverter::ShowLastCreatedPicture()

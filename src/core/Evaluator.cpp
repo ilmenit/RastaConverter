@@ -109,6 +109,25 @@ struct PmgHposEvent
 	int check_x;
 };
 
+class ActiveRasterPictureScope
+{
+public:
+	ActiveRasterPictureScope(const raster_picture*& slot,
+		const raster_picture* picture) : m_slot(slot)
+	{
+		assert(m_slot == nullptr);
+		m_slot = picture;
+	}
+
+	~ActiveRasterPictureScope()
+	{
+		m_slot = nullptr;
+	}
+
+private:
+	const raster_picture*& m_slot;
+};
+
 int StoredRegisterValue(const SRasterInstruction& instruction,
 	unsigned char reg_a, unsigned char reg_x, unsigned char reg_y)
 {
@@ -847,6 +866,10 @@ distance_accum_t Evaluator::ExecuteRasterProgramDual(raster_picture *pic, const 
     assert(m_dual_targetY && m_dual_targetU && m_dual_targetV);
     assert((int)other_rows.size() == (int)m_height);
 #endif
+	// Shared PMG helpers inspect the active picture. Dual candidates are often
+	// moved or destroyed immediately after evaluation, so never retain this
+	// non-owning pointer beyond the call.
+	ActiveRasterPictureScope activePicture(m_active_raster_picture, pic);
     // Ensure dual cache storage exists
     if ((int)m_line_caches_dual.size() != (int)m_height) {
         m_line_caches_dual.clear();
@@ -2260,7 +2283,7 @@ distance_accum_t Evaluator::ExecuteRasterProgram(raster_picture *pic, const line
 	}
 
 	// Single-frame path: keep hot; picture should have been recached by caller (m_best_pic.recache_insns).
-	m_active_raster_picture = pic;
+	ActiveRasterPictureScope activePicture(m_active_raster_picture, pic);
 
 	int cycle;
 	int next_instr_offset;
@@ -2908,7 +2931,7 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 		{
 			x = m_mem_regs[prog.instructions[i1].loose.target]
 				- SpriteScreenColorCycleStart(
-					ActiveGraphicsMode(), ActivePlayfieldWidth());
+					pic.graphics_mode, pic.playfield_width);
 			x += Random(sprite_size);
 		}
 		else
@@ -2957,7 +2980,7 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 				{
 					xx = m_mem_regs[prog.instructions[i1].loose.target]
 						- SpriteScreenColorCycleStart(
-							ActiveGraphicsMode(), ActivePlayfieldWidth());
+							pic.graphics_mode, pic.playfield_width);
 					xx += Random(sprite_size);
 				}
 				else
@@ -2991,7 +3014,7 @@ void Evaluator::MutateOnce(raster_line& prog, raster_picture& pic)
 			{
 				x = m_mem_regs[prog.instructions[i1].loose.target]
 					- SpriteScreenColorCycleStart(
-						ActiveGraphicsMode(), ActivePlayfieldWidth());
+						pic.graphics_mode, pic.playfield_width);
 				x += Random(sprite_size);
 			}
 			else
@@ -3096,6 +3119,10 @@ void Evaluator::RestoreMutationTransaction(RasterMutationTransaction& transactio
 
 void Evaluator::MutateRasterProgram(raster_picture* pic, RasterMutationTransaction* transaction)
 {
+	// Evaluation owns m_active_raster_picture only while its stack frame is
+	// live. Mutation must use the candidate passed here, never stale context
+	// from a prior candidate that may already have been moved or destroyed.
+	assert(m_active_raster_picture == nullptr);
 	memset(m_current_mutations, 0, sizeof m_current_mutations);
 
 	// Determine if we are stuck based on /unstuck_after

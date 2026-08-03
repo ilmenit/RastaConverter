@@ -328,7 +328,7 @@ void RastaConverter::MainLoopDual()
 				case GUI_command::SHOW_A: m_dual_display = DualDisplayMode::A; ShowLastCreatedPictureDual(); break;
 				case GUI_command::SHOW_B: m_dual_display = DualDisplayMode::B; ShowLastCreatedPictureDual(); break;
 				case GUI_command::SHOW_MIX: m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); break;
-				case GUI_command::REDRAW: ShowInputBitmap(); ShowLastCreatedPictureDual(); ShowMutationStats(); break;
+				case GUI_command::REDRAW: ShowInputBitmap(); ShowLastCreatedPictureDual(); ShowMutationStats(); PublishLiveStats(false, false); break;
 				default: break;
 			}
 		}
@@ -364,7 +364,10 @@ void RastaConverter::MainLoopDual()
 				}
 				ShowLastCreatedPictureDual();
 			}
-			if (!quiet) ShowMutationStats();
+			if (!quiet) {
+				ShowMutationStats();
+				PublishLiveStats(false, false);
+			}
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
@@ -513,7 +516,7 @@ void RastaConverter::MainLoopDual()
 					case GUI_command::SHOW_A: m_dual_display = DualDisplayMode::A; ShowLastCreatedPictureDual(); break;
 					case GUI_command::SHOW_B: m_dual_display = DualDisplayMode::B; ShowLastCreatedPictureDual(); break;
 					case GUI_command::SHOW_MIX: m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); break;
-					case GUI_command::REDRAW: ShowInputBitmap(); ShowLastCreatedPictureDual(); ShowMutationStats(); gui.Present(); break;
+					case GUI_command::REDRAW: ShowInputBitmap(); ShowLastCreatedPictureDual(); ShowMutationStats(); PublishLiveStats(false, false); gui.Present(); break;
 					default: break;
 				}
 			}
@@ -549,7 +552,10 @@ void RastaConverter::MainLoopDual()
 					}
 					ShowLastCreatedPictureDual();
 				}
-				if (!quiet) ShowMutationStats();
+				if (!quiet) {
+					ShowMutationStats();
+					PublishLiveStats(false, false);
+				}
 			}
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
@@ -1106,7 +1112,7 @@ void RastaConverter::MainLoopDual()
 				case GUI_command::SHOW_A: m_dual_display = DualDisplayMode::A; ShowLastCreatedPictureDual(); break;
 				case GUI_command::SHOW_B: m_dual_display = DualDisplayMode::B; ShowLastCreatedPictureDual(); break;
 				case GUI_command::SHOW_MIX: m_dual_display = DualDisplayMode::MIX; ShowLastCreatedPictureDual(); break;
-				case GUI_command::REDRAW: ShowInputBitmap(); ShowLastCreatedPictureDual(); ShowMutationStats(); gui.Present(); break;
+				case GUI_command::REDRAW: ShowInputBitmap(); ShowLastCreatedPictureDual(); ShowMutationStats(); PublishLiveStats(false, false); gui.Present(); break;
 				default: if (m_dual_display == DualDisplayMode::MIX) ShowLastCreatedPictureDual(); break;
 			}
 		}
@@ -1126,7 +1132,10 @@ void RastaConverter::MainLoopDual()
 				m_eval_gstate.m_update_autosave = false;
 				SaveBestSolution();
 			}
-			if (!quiet) ShowMutationStats();
+			if (!quiet) {
+				ShowMutationStats();
+				PublishLiveStats(false, false);
+			}
 		}
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(30));

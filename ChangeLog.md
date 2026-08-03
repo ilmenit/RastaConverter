@@ -1,6 +1,23 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC7      2026-08-03 [RELEASE CANDIDATE]
+* Fixed the RC6 dual-XEX regression that shifted cycle-timed colour writes and
+  produced horizontal streaks. Dual display lists retain one LMS per scanline,
+  as required by the evaluator's ANTIC DMA schedule, while shared code is moved
+  out of the PMG missile-data area instead of overlapping it.
+* Dual saves now render `.mic`, `.pmg`, A/B PNGs and `out_dual_blended.png`
+  from the same optimized programs written to the A/B `.opt` files. Autosave
+  snapshots both frames coherently and uses private render buffers so it cannot
+  race or overwrite the live optimizer state.
+* Fixed a dual-mode use-after-lifetime crash in raster mutation and evaluation.
+* Fixed Stop and Save and live A/B/blended previews publishing no output image,
+  and replaced the rapidly moving dual block progress bar with a stable
+  `position / maximum` readout.
+* Recent Conversions now opens `out_dual_blended.png` for a dual run and marks
+  dual cards with a DUAL badge while retaining the A `.opt` base for Continue
+  and XEX assembly.
+
 RastaConverter1.0-RC6      2026-08-02 [RELEASE CANDIDATE]
 * Fixed dual-frame executables showing garbage below images shorter than 240
   scanlines. Their ANTIC display lists now stop at the configured picture

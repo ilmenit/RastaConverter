@@ -433,19 +433,29 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 				summary.wide_playfield = true;
 		}
 
-		if (load_thumbnails) {
-			// Prefer the converted picture; fall back to the target, which
-			// exists even if a run was stopped during preprocessing.
-			const std::string candidates[] = {
-				summary.output_base,
-				summary.output_base + "-dst.png",
-				summary.output_base + "-src.png",
-			};
-			for (const std::string& candidate : candidates) {
-				if (!candidate.empty() && PathExists(candidate)
-					&& LoadThumbnail(candidate, &summary.thumbnail)) {
-					break;
-				}
+		// Prefer the converted picture; fall back to the target, which exists
+		// even if a run was stopped during preprocessing. Dual runs deliberately
+		// use fixed A/B names, so their result is not the basename inferred from
+		// out_dual_A.opt. Keep the picture path separate: output_base must remain
+		// the .opt base used for resume and XEX assembly.
+		summary.dual_mode = PathExists(folder + "/out_dual_A.opt");
+		std::vector<std::string> candidates;
+		if (summary.dual_mode) {
+			candidates.push_back(folder + "/out_dual_blended.png");
+			candidates.push_back(folder + "/out_dual_A.png");
+			candidates.push_back(folder + "/out_dual_B.png");
+		}
+		candidates.push_back(summary.output_base);
+		candidates.push_back(summary.output_base + "-dst.png");
+		candidates.push_back(summary.output_base + "-src.png");
+		for (const std::string& candidate : candidates) {
+			if (candidate.empty() || !PathExists(candidate))
+				continue;
+			if (summary.picture_path.empty())
+				summary.picture_path = candidate;
+			if (load_thumbnails && LoadThumbnail(candidate, &summary.thumbnail)) {
+				summary.picture_path = candidate;
+				break;
 			}
 		}
 

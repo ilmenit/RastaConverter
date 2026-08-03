@@ -389,13 +389,16 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 			run.text_mode ? theme::kBadgeText : theme::kBadgeGfx);
 		draw_badge(run.wide_playfield ? "WIDE" : "NORM",
 			run.wide_playfield ? theme::kBadgeWide : theme::kBadgeNormal);
+		if (run.dual_mode)
+			draw_badge("DUAL", theme::kBadgeDual);
 		ImGui::Dummy(band);
 		// The picture is the natural thing to point at when asking "what were
 		// the settings here?", and the whole recipe is one line of text.
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-				Open(run.output_base, /*folder*/ false);
+			if (!run.picture_path.empty()
+				&& ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+				Open(run.picture_path, /*folder*/ false);
 			ImGui::BeginTooltip();
 			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 34.0f);
 			ImGui::PushStyleColor(ImGuiCol_Text, theme::ToVec4(theme::kTextMuted));
@@ -563,8 +566,8 @@ RecentGallery::Result RecentGallery::Draw(bool closable)
 			if (ImGui::MenuItem("Open run folder"))
 				Open(run.folder, /*folder*/ true);
 			if (ImGui::MenuItem("Open picture", nullptr, false,
-					!run.output_base.empty()))
-				Open(run.output_base, /*folder*/ false);
+					!run.picture_path.empty()))
+				Open(run.picture_path, /*folder*/ false);
 			if (ImGui::MenuItem("Open source image", nullptr, false,
 					!run.input_file.empty()))
 				Open(run.input_file, /*folder*/ false);

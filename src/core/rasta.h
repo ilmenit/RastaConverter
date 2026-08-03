@@ -151,6 +151,9 @@ private:
 	void BranchCurrentRun();
 	void SaveEditedTargetArtifact();
 	void RenderCreatedPicture(raster_picture& picture);
+	void RenderCreatedPictureInto(raster_picture& picture,
+		std::vector<color_index_line>& created,
+		std::vector<line_target>& targets, sprites_memory_t& sprites);
 
 	bool init_finished;
 	void Init();
@@ -260,6 +263,8 @@ public:
 	void UpdateTargetsFromResults(const std::vector<const line_cache_result*>& results,
 		std::vector< std::vector<unsigned char> >& out_targets);
 	void ShowLastCreatedPictureDual();
+	void ShowCreatedPicturesDual(const std::vector<color_index_line>& createdA,
+		const std::vector<color_index_line>& createdB);
 	bool SaveScreenDataFromTargets(const char *filename, const std::vector< std::vector<unsigned char> >& targets);
 	void SavePMGWithSprites(std::string name, const sprites_memory_t& sprites);
 
