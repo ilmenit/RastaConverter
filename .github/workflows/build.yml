@@ -130,6 +130,12 @@ jobs:
             --dither none --quiet --max_evals 20000 \
             --palette Palettes/laoo.act --output "smoke unicode ü.png"
           test -f "smoke unicode ü.png.opt"
+          ./RastaConverter-NO_GUI.exe test.jpg --h 40 --dual --threads 2 \
+            --first_dual_steps 1 --after_dual_steps generate --altering_dual_steps 1 \
+            --dither none --quiet --max_evals 20000 \
+            --palette Palettes/laoo.act --output "smoke dual.png"
+          test -f out_dual_A.opt
+          test -f out_dual_B.opt
 
       - name: Verify install layout
         shell: bash

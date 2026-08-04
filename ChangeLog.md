@@ -1,6 +1,13 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC9      2026-08-04 [RELEASE CANDIDATE]
+* Fixed a Windows Dual Mode stack overflow (`0xc00000fd`). The temporary
+  evaluators that each carry a 32K-bucket instruction cache now use heap
+  ownership rather than consuming more than Windows' 1 MiB default stack.
+* Windows CI now runs an alternating A/B Dual Mode conversion, including the
+  generated-B path, and verifies both output programs.
+
 RastaConverter1.0-RC8      2026-08-03 [RELEASE CANDIDATE]
 * Fixed the in-conversion rate graph drawing semi-transparent diagonal lines
   across its data. The area below the non-convex curve is now rendered as

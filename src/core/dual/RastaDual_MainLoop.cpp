@@ -73,7 +73,14 @@ void RastaConverter::MainLoopDual()
 		}
 	}
 
-	Evaluator bootstrapEval; bootstrapEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed+101, cfg.cache_size);
+	// Evaluator owns a 32K-bucket instruction cache (~526 KiB).  Keeping this
+	// long-lived bootstrap instance on MainLoopDual's stack, alongside the
+	// scoped baseline evaluators below, made the function's frame exceed
+	// Windows' default 1 MiB stack reserve.  It is setup-only state, so heap
+	// ownership is both natural and keeps worker/main-thread stacks small.
+	auto bootstrapEvalOwner = std::make_unique<Evaluator>();
+	Evaluator& bootstrapEval = *bootstrapEvalOwner;
+	bootstrapEval.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed+101, cfg.cache_size);
 
 	// Prepare common UI rate tracking variables (used in both paths)
 	auto last_rate_check_tp = std::chrono::steady_clock::now();
@@ -120,7 +127,8 @@ void RastaConverter::MainLoopDual()
 		// Two-pass baseline reseed: first B with A fixed, then A with B fixed
 		// Note: solutions is still 1 here (bootstrap mode), will be restored before alternating phase
 		{
-			Evaluator baseEvB;
+			auto baseEvBOwner = std::make_unique<Evaluator>();
+			Evaluator& baseEvB = *baseEvBOwner;
 			baseEvB.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed + 2222, cfg.cache_size);
 			baseEvB.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
@@ -143,7 +151,8 @@ void RastaConverter::MainLoopDual()
 
 		// Second pass: A with B fixed, seed baseline
 		{
-			Evaluator baseEv;
+			auto baseEvOwner = std::make_unique<Evaluator>();
+			Evaluator& baseEv = *baseEvOwner;
 			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed + 1337, cfg.cache_size);
 			baseEv.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
@@ -565,7 +574,8 @@ void RastaConverter::MainLoopDual()
 
 		// Two-pass baseline reseed after bootstrap
 		{
-			Evaluator baseEvB;
+			auto baseEvBOwner = std::make_unique<Evaluator>();
+			Evaluator& baseEvB = *baseEvBOwner;
 			baseEvB.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed + 2222, cfg.cache_size);
 			baseEvB.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				 m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
@@ -588,7 +598,8 @@ void RastaConverter::MainLoopDual()
 
 		// Second pass: A with B fixed, seed baseline
 		{
-			Evaluator baseEv;
+			auto baseEvOwner = std::make_unique<Evaluator>();
+			Evaluator& baseEv = *baseEvOwner;
 			baseEv.Init(m_width, m_height, m_picture_all_errors_array, m_picture.data(), cfg.on_off_file.empty() ? NULL : &on_off, &m_eval_gstate, bootstrap_solutions, cfg.initial_seed + 1337, cfg.cache_size);
 			baseEv.SetDualTables(m_palette_y, m_palette_u, m_palette_v,
 				m_pair_Ysum.data(), m_pair_Usum.data(), m_pair_Vsum.data(),
