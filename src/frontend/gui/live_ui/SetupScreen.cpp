@@ -24,6 +24,7 @@
 #include "RecentRuns.h"
 #include "TargetPreview.h"
 #include "Utf8Path.h"
+#include "../WindowSizing.h"
 
 namespace rc_live_ui {
 namespace setup {
@@ -888,6 +889,9 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 	SDL_Window* window = SDL_CreateWindow("RastaConverter",
 		preferences.setup_window_width, preferences.setup_window_height,
 		SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+	// Preferences can have been saved on a larger display.  A maximized window
+	// uses this display's usable work area, keeping the run bar accessible.
+	rc_gui::MaximizeIfOutsideUsableDisplay(window);
 	SDL_Renderer* renderer = window != nullptr ? SDL_CreateRenderer(window, nullptr) : nullptr;
 	if (window == nullptr || renderer == nullptr) {
 		if (renderer != nullptr) SDL_DestroyRenderer(renderer);

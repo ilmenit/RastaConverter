@@ -1,6 +1,13 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC10     2026-08-04 [RELEASE CANDIDATE]
+* Fixed the Live UI setup and conversion windows opening beyond smaller
+  desktops. A saved or default layout that exceeds the current display's
+  usable work area now starts maximized, keeping the bottom control bar
+  accessible. Native title-bar and border dimensions are included when
+  deciding whether the window fits.
+
 RastaConverter1.0-RC9      2026-08-04 [RELEASE CANDIDATE]
 * Fixed a Windows Dual Mode stack overflow (`0xc00000fd`). The temporary
   evaluators that each carry a 32K-bucket instruction cache now use heap

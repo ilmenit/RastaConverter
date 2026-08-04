@@ -2,6 +2,7 @@
 #include "RastaSDL.h"
 #include "debug_log.h"
 #include "WindowIconHelper.h"
+#include "WindowSizing.h"
 #if defined(RASTA_ENABLE_LIVE_UI)
 #include "live_ui/RecentRuns.h"
 #endif
@@ -64,6 +65,9 @@ bool RastaSDL::Init(std::string command_line, bool enable_live_ui)
 		return false;
 	}
 	SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+	// The live UI has a generous default.  Maximize rather than letting a
+	// 1420x900 window put the bottom control bar beyond a smaller desktop.
+	rc_gui::MaximizeIfOutsideUsableDisplay(window);
 	// Prefer accelerated renderer with vsync; gracefully fall back
 #ifdef __linux__
 	SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");

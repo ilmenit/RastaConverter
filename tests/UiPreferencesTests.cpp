@@ -1,4 +1,5 @@
 #include "UiPreferences.h"
+#include "../src/frontend/gui/WindowSizing.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -20,6 +21,13 @@ void Require(bool condition, const char* message)
 int main()
 {
 	using namespace rc_live_ui;
+	const SDL_Rect laptop_work_area{0, 0, 1366, 728};
+	Require(rc_gui::ExceedsUsableBounds(1420, 900, laptop_work_area),
+		"the live UI default must be recognized as too large for a 1366x768 desktop");
+	Require(!rc_gui::ExceedsUsableBounds(1366, 728, laptop_work_area),
+		"a window that fits the usable desktop must not be maximized");
+	Require(rc_gui::ExceedsUsableBounds(1366, 728, laptop_work_area, 16, 39),
+		"native decorations must count when fitting a client area to the desktop");
 
 	const UiPreferences defaults = ParseUiPreferences("");
 	Require(defaults.run_subfolder

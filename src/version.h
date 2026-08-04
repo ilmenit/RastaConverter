@@ -1,6 +1,6 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define RASTA_CONVERTER_VERSION "1.0-RC9"
+#define RASTA_CONVERTER_VERSION "1.0-RC10"
 
 #endif // VERSION_H
