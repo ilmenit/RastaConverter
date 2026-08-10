@@ -146,10 +146,13 @@ s0	lda #$03
 	IFT PLAYFIELD_WIDE=1
 	mva #$02 pmcntl
 	ELS
-	mva #$00 grafm
-	mva #$cc hposm2
-	mva #$28 hposm3
-	mva #$f0 sizem
+	* Two adjacent quadruple-width missiles on each side restore the wide
+	* ANTIC E border mask used by the original border-enabled template.
+	mva #$20 hposm0
+	mva #$28 hposm1
+	mva #$d0 hposm2
+	mva #$d8 hposm3
+	mva #$ff sizem
 	mva #$03 pmcntl
 	eif
 	lda #$14

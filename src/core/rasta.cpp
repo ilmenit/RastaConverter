@@ -3488,13 +3488,14 @@ void RastaConverter::SavePMG(string name)
 	}
 	else
 	{
-		// M2 and M3 are one quadruple-width bit at the right and left normal
-		// playfield edges. Mode E renders them through its unused black COLPF3;
-		// mode 4 overlaps each with a reserved player so PRIOR=$1F forces $00.
+		// Normal ANTIC E restores the original two-missiles-per-side border
+		// mask. Normal ANTIC 4 must retain only M2/M3: each overlaps a reserved
+		// player so PRIOR=$1F forces hardware black independently of COLPF3.
 		out << "\t.he 00 00 00 00 00 00 00 00";
 		for (y = 0; y < 240; ++y)
 		{
-			b = y < static_cast<size_t>(m_height) ? 0x50 : 0x00;
+			b = y < static_cast<size_t>(m_height)
+				? (normalAntic4 ? 0x50 : 0xff) : 0x00;
 			out << ' ' << std::uppercase << std::hex << std::setw(2)
 				<< std::setfill('0') << static_cast<int>(b);
 			out << std::nouppercase << std::dec;

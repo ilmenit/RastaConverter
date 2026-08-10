@@ -75,7 +75,9 @@ void RastaConverter::SavePMGWithSprites(std::string name, const sprites_memory_t
     out << "\t.he 00 00 00 00 00 00 00 00";
     for (y=0;y<240;++y)
     {
-        b = y < static_cast<size_t>(m_height) ? 0x50 : 0x00;
+        // Dual output is ANTIC E: keep all four missiles set so the template's
+        // two adjacent quadruple-width missiles cover each side border.
+        b = y < static_cast<size_t>(m_height) ? 0xff : 0x00;
         out << ' ' << std::uppercase << std::hex << std::setw(2)
             << std::setfill('0') << static_cast<int>(b);
         out << std::nouppercase << std::dec;

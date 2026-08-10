@@ -161,7 +161,7 @@ XexBuildResult BuildRunXex(const std::string& output_base)
 	const bool antic4 = !dual && Exists(output_base + ".a4.scr")
 		&& Exists(output_base + ".a4.fnt");
 	const std::string source = generator
-		+ (antic4 ? "/antic4.asq" : "/no_name.asq");
+		+ (antic4 ? "/antic4.asq" : "/anticE.asq");
 	if (!Exists(source)) {
 		result.log = "The bundled generator is missing: no " + source
 			+ ". It ships in the " + (dual ? std::string("GeneratorDual")

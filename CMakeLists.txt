@@ -864,6 +864,8 @@ if(NOT BUILD_NO_GUI)
     set(RC_RUNTIME_COPY_DIR "$<TARGET_FILE_DIR:RastaConverter>")
     add_custom_target(RastaConverterResources
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Palettes" "${RC_RUNTIME_COPY_DIR}/Palettes"
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${RC_RUNTIME_COPY_DIR}/Generator"
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${RC_RUNTIME_COPY_DIR}/GeneratorDual"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Generator" "${RC_RUNTIME_COPY_DIR}/Generator"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/GeneratorDual" "${RC_RUNTIME_COPY_DIR}/GeneratorDual"
         COMMENT "Synchronizing RastaConverter runtime resources"
@@ -886,6 +888,8 @@ if(BUILD_NO_GUI)
     set(RC_RUNTIME_COPY_DIR_NO_GUI "$<TARGET_FILE_DIR:RastaConverter-NO_GUI>")
     add_custom_target(RastaConverterNoGuiResources
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Palettes" "${RC_RUNTIME_COPY_DIR_NO_GUI}/Palettes"
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${RC_RUNTIME_COPY_DIR_NO_GUI}/Generator"
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${RC_RUNTIME_COPY_DIR_NO_GUI}/GeneratorDual"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/Generator" "${RC_RUNTIME_COPY_DIR_NO_GUI}/Generator"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/GeneratorDual" "${RC_RUNTIME_COPY_DIR_NO_GUI}/GeneratorDual"
         COMMENT "Synchronizing RastaConverter-NO_GUI runtime resources"

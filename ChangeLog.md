@@ -1,6 +1,16 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC11     2026-08-10 [RELEASE CANDIDATE]
+* Restored the original wide PMG side-border coverage for normal-width ANTIC E
+  output. Single- and dual-frame executables again use two adjacent
+  quadruple-width missiles on each side, while ANTIC 4 retains its calibrated
+  player/missile priority mask.
+* Renamed the single-frame ANTIC E assembly template from `no_name.asq` to
+  `anticE.asq`, matching the dedicated `antic4.asq` template, and updated the
+  bundled build scripts and Live UI XEX builder accordingly. Incremental builds
+  now remove obsolete generator resources before synchronizing replacements.
+
 RastaConverter1.0-RC10     2026-08-04 [RELEASE CANDIDATE]
 * Fixed the Live UI setup and conversion windows opening beyond smaller
   desktops. A saved or default layout that exceeds the current display's
