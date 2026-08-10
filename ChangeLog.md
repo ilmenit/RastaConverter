@@ -1,6 +1,21 @@
 ChangeLog
 =========
 
+RastaConverter1.0-RC12     2026-08-10 [RELEASE CANDIDATE]
+* Fixed Continue/Resume losing backslashes from quoted Windows details-mask
+  paths. Saved recipes now round-trip spaces, quotes, backslashes, Unicode and
+  control characters, while remaining compatible with recipes written by
+  affected older versions.
+* Made recipe updates and relocated snapshot paths operate on parsed options
+  instead of raw text, preventing output, details-mask and target paths from
+  being corrupted when a run is continued or edited.
+* Reworked portable path handling throughout the Live UI, Recent Conversions,
+  XEX building and ANTIC 4 exports. Native Windows drive and UNC paths are
+  handled correctly, while POSIX filenames may contain literal backslashes.
+* Added regression tests for Windows and POSIX recipe paths, snapshot
+  relocation, empty and escaped arguments, Unicode path joins and the original
+  reported details-mask path.
+
 RastaConverter1.0-RC11     2026-08-10 [RELEASE CANDIDATE]
 * Restored the original wide PMG side-border coverage for normal-width ANTIC E
   output. Single- and dual-frame executables again use two adjacent

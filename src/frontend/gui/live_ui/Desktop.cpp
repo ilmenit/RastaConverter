@@ -4,6 +4,8 @@
 
 #include <cstdio>
 
+#include "Utf8Path.h"
+
 namespace rc_live_ui {
 namespace {
 
@@ -12,29 +14,17 @@ namespace {
 // and pictures live in folders people named themselves.
 std::string FileUrl(const std::string& path)
 {
-	std::string absolute = path;
-	const bool rooted = !path.empty() && (path[0] == '/' || path[0] == '\\'
+	const std::string absolute = Utf8AbsolutePath(path);
+	const std::string generic = Utf8Path(absolute).generic_u8string();
+	std::string url;
 #if defined(_WIN32)
-		|| (path.size() >= 2 && path[1] == ':')
+	// generic UNC paths begin with //server/share. Prefixing only "file:"
+	// preserves the authority; drive paths need the conventional third slash.
+	url = generic.rfind("//", 0) == 0 ? "file:" : "file:///";
+#else
+	url = "file://";
 #endif
-		);
-	if (!rooted) {
-		char* cwd = SDL_GetCurrentDirectory();
-		if (cwd != nullptr) {
-			absolute = std::string(cwd) + path; // SDL leaves the separator on
-			SDL_free(cwd);
-		}
-	}
-
-	std::string url = "file://";
-#if defined(_WIN32)
-	url += '/';
-#endif
-	for (char c : absolute) {
-		if (c == '\\') {
-			url += '/';
-			continue;
-		}
+	for (char c : generic) {
 		const unsigned char u = static_cast<unsigned char>(c);
 		const bool safe = (u >= 'A' && u <= 'Z') || (u >= 'a' && u <= 'z')
 			|| (u >= '0' && u <= '9') || c == '/' || c == '-' || c == '_'
@@ -95,13 +85,13 @@ bool ShowInFileManager(const std::string& path, std::string* error)
 		&& info.type == SDL_PATHTYPE_DIRECTORY)
 		return OpenWithDesktop(path, error);
 
-	const size_t slash = path.find_last_of("/\\");
-	if (slash == std::string::npos) {
+	const std::string parent = Utf8ParentPath(path);
+	if (parent.empty()) {
 		if (error != nullptr)
 			*error = "no folder to show";
 		return false;
 	}
-	return OpenWithDesktop(path.substr(0, slash), error);
+	return OpenWithDesktop(parent, error);
 }
 
 } // namespace rc_live_ui

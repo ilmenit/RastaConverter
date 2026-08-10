@@ -15,14 +15,13 @@ namespace {
 
 std::string DirectoryOf(const std::string& path)
 {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? std::string(".") : path.substr(0, slash);
+	const std::string parent = Utf8ParentPath(path);
+	return parent.empty() ? std::string(".") : parent;
 }
 
 std::string FileName(const std::string& path)
 {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? path : path.substr(slash + 1);
+	return Utf8FileName(path);
 }
 
 std::string WithoutExtension(const std::string& name)
@@ -50,7 +49,7 @@ std::int64_t ModifiedTime(const std::string& path)
 // the recorded command line, which old runs may not have.
 bool IsDualRun(const std::string& folder)
 {
-	return Exists(folder + "/out_dual_A.opt");
+	return Exists(Utf8JoinPath(folder, "out_dual_A.opt"));
 }
 
 // The bundled assembler for this host. The Generator folder also ships a `mads`
@@ -69,11 +68,11 @@ std::string AssemblerPath(const std::string& generator_dir)
 	const char* preferred = nullptr;
 #endif
 	if (preferred != nullptr) {
-		const std::string candidate = generator_dir + preferred;
+		const std::string candidate = Utf8JoinPath(generator_dir, preferred + 1);
 		if (Exists(candidate))
 			return candidate;
 	}
-	const std::string launcher = generator_dir + "/mads";
+	const std::string launcher = Utf8JoinPath(generator_dir, "mads");
 	return Exists(launcher) ? launcher : std::string();
 }
 
@@ -128,8 +127,9 @@ std::string RunXexPath(const std::string& output_base)
 		return std::string();
 	const std::string folder = DirectoryOf(output_base);
 	if (IsDualRun(folder))
-		return folder + "/out_dual.xex";
-	return folder + "/" + WithoutExtension(FileName(output_base)) + ".xex";
+		return Utf8JoinPath(folder, "out_dual.xex");
+	return Utf8JoinPath(folder,
+		WithoutExtension(FileName(output_base)) + ".xex");
 }
 
 bool RunXexIsCurrent(const std::string& output_base)
@@ -141,7 +141,7 @@ bool RunXexIsCurrent(const std::string& output_base)
 	// The optimized raster program is the last thing a save writes that the
 	// generator reads, so it is the honest "is this stale" comparison.
 	const std::string program = IsDualRun(folder)
-		? folder + "/out_dual_A.opt" : output_base + ".opt";
+		? Utf8JoinPath(folder, "out_dual_A.opt") : output_base + ".opt";
 	if (!Exists(program))
 		return true;
 	return ModifiedTime(xex) >= ModifiedTime(program);
@@ -160,8 +160,8 @@ XexBuildResult BuildRunXex(const std::string& output_base)
 	const std::string generator = BundledPath(dual ? "GeneratorDual" : "Generator");
 	const bool antic4 = !dual && Exists(output_base + ".a4.scr")
 		&& Exists(output_base + ".a4.fnt");
-	const std::string source = generator
-		+ (antic4 ? "/antic4.asq" : "/anticE.asq");
+	const std::string source = Utf8JoinPath(generator,
+		antic4 ? "antic4.asq" : "anticE.asq");
 	if (!Exists(source)) {
 		result.log = "The bundled generator is missing: no " + source
 			+ ". It ships in the " + (dual ? std::string("GeneratorDual")
@@ -196,7 +196,7 @@ XexBuildResult BuildRunXex(const std::string& output_base)
 			text.replace(at, placeholder.size(), base);
 	}
 
-	const std::string script = folder + "/.rasta-xex.asq";
+	const std::string script = Utf8JoinPath(folder, ".rasta-xex.asq");
 	{
 		std::ofstream out(Utf8Path(script), std::ios::binary);
 		if (!out) {

@@ -4,6 +4,8 @@
 
 #include <cstring>
 
+#include "Utf8Path.h"
+
 #if defined(SDL_VERSION_ATLEAST) && SDL_VERSION_ATLEAST(3, 1, 3)
 #define RC_HAVE_SDL_DIALOGS 1
 #include <SDL3/SDL_dialog.h>
@@ -63,12 +65,9 @@ std::string StartLocation(const std::string& current)
 {
 	if (current.empty())
 		return std::string();
-	const size_t slash = current.find_last_of("/\\");
-	if (slash == std::string::npos)
-		return std::string();
-	std::string directory = current.substr(0, slash);
+	std::string directory = Utf8ParentPath(current);
 	if (directory.empty())
-		return std::string("/");
+		return std::string();
 	if (!SDL_GetPathInfo(directory.c_str(), nullptr))
 		return std::string();
 	return directory;

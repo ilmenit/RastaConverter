@@ -17,6 +17,7 @@
 #include "LiveTheme.h"
 #include "RecentRuns.h"
 #include "TargetPicture.h"
+#include "Utf8Path.h"
 #include "rgb.h"
 
 namespace rc_live_ui {
@@ -51,16 +52,15 @@ const char* const kToolHints[] = {
 
 std::string FileName(const std::string& path)
 {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? path : path.substr(slash + 1);
+	return Utf8FileName(path);
 }
 
 std::string FolderName(const std::string& output_path)
 {
-	const size_t slash = output_path.find_last_of("/\\");
-	if (slash == std::string::npos)
+	const std::string parent = Utf8ParentPath(output_path);
+	if (parent.empty())
 		return std::string(".");
-	return FileName(output_path.substr(0, slash));
+	return Utf8FileName(parent);
 }
 
 // Tool icons are drawn rather than typed: the UI font is loaded with the

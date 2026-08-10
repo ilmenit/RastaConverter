@@ -17,6 +17,31 @@ std::string Utf8String(const std::filesystem::path& path)
 	return path.u8string();
 }
 
+std::string Utf8FileName(const std::string& path)
+{
+	return Utf8String(Utf8Path(path).filename());
+}
+
+std::string Utf8ParentPath(const std::string& path)
+{
+	return Utf8String(Utf8Path(path).parent_path());
+}
+
+std::string Utf8JoinPath(const std::string& parent, const std::string& child)
+{
+	return Utf8String(Utf8Path(parent) / Utf8Path(child));
+}
+
+std::string Utf8AbsolutePath(const std::string& path)
+{
+	if (path.empty())
+		return path;
+	std::error_code error;
+	const std::filesystem::path absolute =
+		std::filesystem::absolute(Utf8Path(path), error).lexically_normal();
+	return error ? path : Utf8String(absolute);
+}
+
 FILE* FopenUtf8(const std::string& path, const char* mode)
 {
 #if defined(_WIN32)

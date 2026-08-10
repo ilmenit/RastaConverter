@@ -9,6 +9,7 @@
 
 #include "Desktop.h"
 #include "LiveTheme.h"
+#include "Utf8Path.h"
 
 namespace rc_live_ui {
 
@@ -20,8 +21,7 @@ constexpr float kThumbHeight = 116.0f;
 
 std::string FileName(const std::string& path)
 {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? path : path.substr(slash + 1);
+	return Utf8FileName(path);
 }
 
 std::string WhenText(std::int64_t seconds)

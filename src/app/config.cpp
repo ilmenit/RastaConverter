@@ -18,57 +18,8 @@ extern int solutions;
 
 void Configuration::ProcessCmdLine(const std::vector<std::string>& extraTokens)
 {
-	auto tokenize = [](const std::string& line) {
-		std::vector<std::string> result;
-		std::string current;
-		bool in_quotes = false;
-		char quote_char = '\0';
-		bool escape = false;
-		auto flush = [&]() {
-			if (!current.empty()) {
-				result.push_back(current);
-				current.clear();
-			}
-		};
-		for (char ch : line) {
-			if (escape) {
-				current.push_back(ch);
-				escape = false;
-				continue;
-			}
-			if (in_quotes) {
-				if (ch == '\\') {
-					escape = true;
-					continue;
-				}
-				if (ch == quote_char) {
-					in_quotes = false;
-					quote_char = '\0';
-					continue;
-				}
-				current.push_back(ch);
-				continue;
-			}
-			if (std::isspace(static_cast<unsigned char>(ch))) {
-				flush();
-				continue;
-			}
-			if (ch == '"' || ch == '\'') {
-				in_quotes = true;
-				quote_char = ch;
-				continue;
-			}
-			current.push_back(ch);
-		}
-		if (escape) {
-			current.push_back('\\');
-			escape = false;
-		}
-		flush();
-		return result;
-	};
-
-	std::vector<std::string> baseTokens = tokenize(command_line);
+	std::vector<std::string> baseTokens =
+		CommandLineParser::tokenizeCommandLine(command_line);
 
 	auto parseTokens = [&](const std::vector<std::string>& tokens) {
 		if (tokens.empty()) return;

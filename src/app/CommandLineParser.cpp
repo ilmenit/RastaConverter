@@ -72,6 +72,18 @@ static std::string quoteIfNeeded(const std::string& token) {
 	out.reserve(token.size() + 2);
 	out.push_back('"');
 	for (char c : token) {
+		if (c == '\n') {
+			out += "\\u000A";
+			continue;
+		}
+		if (c == '\r') {
+			out += "\\u000D";
+			continue;
+		}
+		if (c == '\t') {
+			out += "\\u0009";
+			continue;
+		}
 		if (c == '"' || c == '\\') {
 			out.push_back('\\');
 		}
@@ -79,6 +91,72 @@ static std::string quoteIfNeeded(const std::string& token) {
 	}
 	out.push_back('"');
 	return out;
+}
+
+std::vector<std::string> CommandLineParser::tokenizeCommandLine(
+	const std::string& line)
+{
+	std::vector<std::string> result;
+	std::string current;
+	bool inQuotes = false;
+	char quote = '\0';
+	bool tokenStarted = false;
+	auto flush = [&]() {
+		if (tokenStarted) {
+			result.push_back(current);
+			current.clear();
+			tokenStarted = false;
+		}
+	};
+	for (size_t index = 0; index < line.size(); ++index) {
+		const char ch = line[index];
+		if (inQuotes) {
+			if (ch == '\\') {
+				if (index + 1 < line.size()
+					&& (line[index + 1] == '\\' || line[index + 1] == quote)) {
+					current.push_back(line[++index]);
+				} else if (line.compare(index, 6, "\\u000A") == 0) {
+					current.push_back('\n');
+					index += 5;
+				} else if (line.compare(index, 6, "\\u000D") == 0) {
+					current.push_back('\r');
+					index += 5;
+				} else if (line.compare(index, 6, "\\u0009") == 0) {
+					current.push_back('\t');
+					index += 5;
+				} else {
+					// Compatibility with recipes that quoted raw Windows paths:
+					// an unknown escape is a literal path separator, not a request
+					// to discard it.
+					current.push_back('\\');
+				}
+				tokenStarted = true;
+				continue;
+			}
+			if (ch == quote) {
+				inQuotes = false;
+				quote = '\0';
+				continue;
+			}
+			current.push_back(ch);
+			tokenStarted = true;
+			continue;
+		}
+		if (std::isspace(static_cast<unsigned char>(ch))) {
+			flush();
+			continue;
+		}
+		if (ch == '"' || ch == '\'') {
+			inQuotes = true;
+			quote = ch;
+			tokenStarted = true;
+			continue;
+		}
+		current.push_back(ch);
+		tokenStarted = true;
+	}
+	flush();
+	return result;
 }
 
 std::string CommandLineParser::toLower(const std::string &s) {

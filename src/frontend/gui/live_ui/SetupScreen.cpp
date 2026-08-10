@@ -35,14 +35,12 @@ constexpr float kOverlayViewerBreakpoint = 850.0f;
 
 std::string FileName(const std::string& path)
 {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? path : path.substr(slash + 1);
+	return Utf8FileName(path);
 }
 
 std::string DirectoryOf(const std::string& path)
 {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+	return Utf8ParentPath(path);
 }
 
 // Bundled resources are addressed relative to the working directory, which is
@@ -67,18 +65,7 @@ std::string ResolveResourcePath(const std::string& path)
 // relative /details or /pal would silently fail to load later.
 std::string AbsolutePath(const std::string& path)
 {
-	if (path.empty() || path[0] == '/' || path[0] == '\\')
-		return path;
-#if defined(_WIN32)
-	if (path.size() >= 2 && path[1] == ':')
-		return path;
-#endif
-	char* cwd = SDL_GetCurrentDirectory();
-	if (cwd == nullptr)
-		return path;
-	std::string result = std::string(cwd) + path; // SDL terminates it with a separator
-	SDL_free(cwd);
-	return result;
+	return Utf8AbsolutePath(path);
 }
 
 // Fixes every path of an accepted job to an absolute one, so the run folder,
@@ -876,7 +863,8 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		if (cfg.details_layer)
 			cfg.command_line += " /details_layer=on";
 		if (!cfg.target_file.empty())
-			cfg.command_line += " /target=\"" + cfg.target_file + "\"";
+			cfg.command_line += " " + CommandLineParser::joinTokens(
+				{"/target=" + cfg.target_file});
 		return true;
 	}
 
@@ -1229,7 +1217,8 @@ bool RunSetupScreen(Configuration& cfg, bool show_recent)
 		if (cfg.details_layer)
 			cfg.command_line += " /details_layer=on";
 		if (!cfg.target_file.empty())
-			cfg.command_line += " /target=\"" + cfg.target_file + "\"";
+			cfg.command_line += " " + CommandLineParser::joinTokens(
+				{"/target=" + cfg.target_file});
 	}
 
 	ImGui_ImplSDLRenderer3_Shutdown();

@@ -122,6 +122,7 @@ endif()
 # Source files (now prefixed with src/)
 set(COMMON_SOURCE_FILES
     src/app/CommandLineParser.cpp
+    src/app/RecipeUtils.cpp
     src/app/config.cpp
     src/color/Distance.cpp
     src/color/ColorCorrection.cpp
@@ -253,6 +254,7 @@ endif()
 
 set(HEADER_FILES
     src/app/CommandLineParser.h
+    src/app/RecipeUtils.h
     src/app/config.h
     src/color/Distance.h
     src/color/ColorCorrection.h
@@ -401,6 +403,18 @@ if(BUILD_TESTING)
     )
     target_include_directories(CommandLineParserTests PRIVATE ${CMAKE_SOURCE_DIR}/src/app)
     add_test(NAME CommandLineParserTests COMMAND CommandLineParserTests)
+
+    add_executable(RecipeUtilsTests
+        tests/RecipeUtilsTests.cpp
+        src/app/CommandLineParser.cpp
+        src/app/RecipeUtils.cpp
+        src/utils/Utf8Path.cpp
+    )
+    target_include_directories(RecipeUtilsTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/app
+        ${CMAKE_SOURCE_DIR}/src/utils
+    )
+    add_test(NAME RecipeUtilsTests COMMAND RecipeUtilsTests)
 
     add_executable(DetailsMaskTests
         tests/DetailsMaskTests.cpp

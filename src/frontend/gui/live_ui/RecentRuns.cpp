@@ -23,6 +23,7 @@
 #undef FREEIMAGE_H_BOOL_OVERRIDE
 #endif
 
+#include "CommandLineParser.h"
 #include "FreeImageIO.h"
 #include "Utf8Path.h"
 
@@ -39,14 +40,12 @@ constexpr int kThumbnailSize = 256;
 
 std::string FileName(const std::string& path)
 {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? path : path.substr(slash + 1);
+	return Utf8FileName(path);
 }
 
 std::string DirectoryOf(const std::string& path)
 {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+	return Utf8ParentPath(path);
 }
 
 std::string StripExtension(const std::string& name)
@@ -98,11 +97,26 @@ std::vector<std::string> ReadIndex()
 		return folders;
 	std::ifstream in(Utf8Path(path));
 	std::string line;
+	bool encoded = false;
+	bool firstLine = true;
 	while (std::getline(in, line)) {
 		while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
 			line.pop_back();
-		if (!line.empty())
-			folders.push_back(line);
+		if (firstLine) {
+			firstLine = false;
+			if (line == "RastaConverter recent runs v2") {
+				encoded = true;
+				continue;
+			}
+		}
+		if (encoded) {
+			const std::vector<std::string> decoded =
+				CommandLineParser::tokenizeCommandLine(line);
+			if (decoded.size() == 1 && !decoded.front().empty())
+				folders.push_back(decoded.front());
+		} else if (!line.empty()) {
+			folders.push_back(line); // legacy index: one unescaped path per line
+		}
 	}
 	return folders;
 }
@@ -115,8 +129,9 @@ void WriteIndex(const std::vector<std::string>& folders)
 	// Written whole each time; the list is short and this keeps a partial
 	// write from corrupting the order.
 	std::ofstream out(Utf8Path(path), std::ios::trunc);
+	out << "RastaConverter recent runs v2\n";
 	for (const std::string& folder : folders)
-		out << folder << '\n';
+		out << CommandLineParser::joinTokens({folder}) << '\n';
 }
 
 struct BitmapDeleter {
@@ -181,11 +196,8 @@ bool LoadThumbnail(const std::string& path, PreviewImage* out)
 // Trims a trailing separator so folder paths compare equal.
 std::string NormalizeFolder(std::string folder)
 {
-	while (folder.size() > 1
-		&& (folder.back() == '/' || folder.back() == '\\')) {
-		folder.pop_back();
-	}
-	return folder;
+	return folder.empty() ? folder
+		: Utf8String(Utf8Path(folder).lexically_normal());
 }
 
 std::string ValueAfter(const std::string& line, const char* key)
@@ -237,28 +249,31 @@ std::string AllocateRunOutputPath(const std::string& input_path, bool subfolder)
 		// which is the common case and would mean writing the output over the
 		// input. Otherwise the numbering starts at 001, so the sequence reads
 		// as one rather than starting at two for no visible reason.
-		const std::string plain = directory + base + ".png";
+		const std::string plain = Utf8JoinPath(directory, base + ".png");
 		if (!PathExists(plain))
 			return plain;
 		for (int index = 1; index <= kMaxRunIndex; ++index) {
 			char suffix[8];
 			std::snprintf(suffix, sizeof(suffix), "%03d", index);
-			const std::string candidate = directory + base + "-" + suffix + ".png";
+			const std::string candidate = Utf8JoinPath(
+				directory, base + "-" + suffix + ".png");
 			if (!PathExists(candidate))
 				return candidate;
 		}
-		return directory + base + "-999.png";
+		return Utf8JoinPath(directory, base + "-999.png");
 	}
 
 	for (int index = 1; index <= kMaxRunIndex; ++index) {
 		char suffix[8];
 		std::snprintf(suffix, sizeof(suffix), "%03d", index);
-		const std::string folder = directory + "rc-" + base + "-" + suffix;
+		const std::string folder = Utf8JoinPath(
+			directory, "rc-" + base + "-" + suffix);
 		if (!PathExists(folder))
-			return folder + "/" + base + ".png";
+			return Utf8JoinPath(folder, base + ".png");
 	}
 	// Every name taken: fall back to the last one rather than refusing to run.
-	return directory + "rc-" + base + "-999/" + base + ".png";
+	return Utf8JoinPath(Utf8JoinPath(directory, "rc-" + base + "-999"),
+		base + ".png");
 }
 
 bool CreateRunFolder(const std::string& output_path, std::string* error)
@@ -380,7 +395,7 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 		if (SDL_GetPathInfo(folder.c_str(), &info))
 			summary.modified_time = static_cast<std::int64_t>(info.modify_time / 1000000000);
 
-		const std::string opt = FindOptFile(folder + "/");
+		const std::string opt = FindOptFile(folder);
 		if (!opt.empty()) {
 			bool playfield_recorded = false;
 			summary.resumable = true;
@@ -455,12 +470,12 @@ std::vector<RunSummary> LoadRecentRuns(bool load_thumbnails, size_t limit)
 		// use fixed A/B names, so their result is not the basename inferred from
 		// out_dual_A.opt. Keep the picture path separate: output_base must remain
 		// the .opt base used for resume and XEX assembly.
-		summary.dual_mode = PathExists(folder + "/out_dual_A.opt");
+		summary.dual_mode = PathExists(Utf8JoinPath(folder, "out_dual_A.opt"));
 		std::vector<std::string> candidates;
 		if (summary.dual_mode) {
-			candidates.push_back(folder + "/out_dual_blended.png");
-			candidates.push_back(folder + "/out_dual_A.png");
-			candidates.push_back(folder + "/out_dual_B.png");
+			candidates.push_back(Utf8JoinPath(folder, "out_dual_blended.png"));
+			candidates.push_back(Utf8JoinPath(folder, "out_dual_A.png"));
+			candidates.push_back(Utf8JoinPath(folder, "out_dual_B.png"));
 		}
 		candidates.push_back(summary.output_base);
 		candidates.push_back(summary.output_base + "-dst.png");

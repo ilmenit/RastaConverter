@@ -68,6 +68,11 @@ public:
 	void mergeFrom(const CommandLineParser& overrides, bool replacePositionals);
 	std::string rebuildCommandLine() const;
 	std::vector<std::string> getNormalizedTokens() const;
+	// Saved recipes use the same quoting grammar as reconstructed command
+	// lines. Keeping both directions here makes paths round-trip identically on
+	// Windows and POSIX instead of teaching each caller its own escape rules.
+	static std::vector<std::string> tokenizeCommandLine(const std::string& line);
+	static std::string joinTokens(const std::vector<std::string>& tokens);
 	bool verifyCompulsory(const std::vector<std::string> &pairs = {},
 					  const std::vector<std::string> &switches = {},
 					  const std::vector<std::string> &nonInterpreted = {});
@@ -106,7 +111,5 @@ private:
 	std::vector<std::string> missingValueOptions; // canonical names missing required values
 	std::vector<std::string> buildNormalizedTokens() const;
 
-	static std::string joinTokens(const std::vector<std::string>& tokens);
 };
-
 

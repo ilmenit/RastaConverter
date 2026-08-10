@@ -3,6 +3,7 @@
 #include "debug_log.h"
 #include "WindowIconHelper.h"
 #include "WindowSizing.h"
+#include "Utf8Path.h"
 #if defined(RASTA_ENABLE_LIVE_UI)
 #include "live_ui/RecentRuns.h"
 #endif
@@ -343,9 +344,8 @@ bool RastaSDL::CreateBranchOutput(const std::string& input_file,
 	output_file = rc_live_ui::AllocateRunOutputPath(input_file);
 	if (!rc_live_ui::CreateRunFolder(output_file, &error))
 		return false;
-	const size_t slash = output_file.find_last_of("/\\");
-	rc_live_ui::RegisterRecentRun(slash == std::string::npos
-		? std::string(".") : output_file.substr(0, slash));
+	const std::string parent = Utf8ParentPath(output_file);
+	rc_live_ui::RegisterRecentRun(parent.empty() ? std::string(".") : parent);
 	return true;
 #else
 	(void)input_file;

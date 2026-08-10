@@ -93,22 +93,6 @@ std::string ToLower(std::string text)
 	return text;
 }
 
-// Quotes a path only when it needs it, so the copied command line stays
-// readable in the common case.
-std::string QuoteIfNeeded(const std::string& text)
-{
-	if (text.find_first_of(" \t\"'") == std::string::npos)
-		return text;
-	std::string quoted = "\"";
-	for (char c : text) {
-		if (c == '"' || c == '\\')
-			quoted.push_back('\\');
-		quoted.push_back(c);
-	}
-	quoted.push_back('"');
-	return quoted;
-}
-
 const Configuration& Defaults()
 {
 	static const Configuration defaults = DefaultConfiguration();
@@ -636,21 +620,18 @@ bool MatchesQuery(const OptionDesc& option, const std::string& query)
 
 std::string BuildCommandLineArgs(const Configuration& cfg)
 {
-	std::ostringstream line;
+	std::vector<std::string> tokens;
 	// The input path is positional-friendly but emitted explicitly so the
 	// command survives being pasted anywhere.
-	bool first = true;
 	for (const OptionDesc& option : AllOptions()) {
 		if (!option.modified(cfg))
 			continue;
-		if (!first)
-			line << ' ';
-		first = false;
-		line << '/' << option.cli;
+		std::string token = "/" + option.cli;
 		if (!option.is_flag)
-			line << '=' << QuoteIfNeeded(option.value(cfg));
+			token += "=" + option.value(cfg);
+		tokens.push_back(std::move(token));
 	}
-	return line.str();
+	return CommandLineParser::joinTokens(tokens);
 }
 
 std::string BuildCommandLine(const Configuration& cfg, const char* executable)

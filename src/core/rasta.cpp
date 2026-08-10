@@ -65,6 +65,7 @@ const char* program_version = RASTA_CONVERTER_VERSION;
 #include "debug_log.h"
 #include "FreeImageIO.h"
 #include "Utf8Path.h"
+#include "RecipeUtils.h"
 
 #ifndef _MSC_EXTENSIONS
 #define __timeb64 timeb
@@ -147,64 +148,7 @@ static std::string HashPicture(const std::vector<screen_line>& picture,
 	return stream.str();
 }
 
-static std::string SetRecipeOption(const std::string& recipe,
-	const std::string& name, const std::string& value,
-	std::initializer_list<std::string> aliases = {})
-{
-	std::vector<std::string> tokens;
-	bool skipOptionValue = false;
-	for (size_t i = 0; i < recipe.size();) {
-		while (i < recipe.size() && std::isspace(
-			static_cast<unsigned char>(recipe[i]))) ++i;
-		if (i == recipe.size()) break;
-		const size_t begin = i;
-		bool quoted = false;
-		for (; i < recipe.size(); ++i) {
-			if (recipe[i] == '"') quoted = !quoted;
-			else if (!quoted && std::isspace(
-				static_cast<unsigned char>(recipe[i]))) break;
-		}
-		const std::string token = recipe.substr(begin, i - begin);
-		if (skipOptionValue) {
-			skipOptionValue = false;
-			continue;
-		}
-		auto isOption = [&token](const std::string& option) {
-			const std::string longPrefix = "--" + option + "=";
-			const std::string dashPrefix = "-" + option + "=";
-			const std::string shortPrefix = "/" + option + "=";
-			return token.compare(0, longPrefix.size(), longPrefix) == 0
-				|| token.compare(0, dashPrefix.size(), dashPrefix) == 0
-				|| token.compare(0, shortPrefix.size(), shortPrefix) == 0;
-		};
-		auto isBareOption = [&token](const std::string& option) {
-			return token == "--" + option || token == "-" + option
-				|| token == "/" + option;
-		};
-		bool replace = isOption(name);
-		bool replaceBare = isBareOption(name);
-		for (const std::string& alias : aliases) {
-			replace = replace || isOption(alias);
-			replaceBare = replaceBare || isBareOption(alias);
-		}
-		if (replaceBare)
-			skipOptionValue = true;
-		if (!replace && !replaceBare)
-			tokens.push_back(token);
-	}
-	std::ostringstream result;
-	bool first = true;
-	for (const std::string& token : tokens) {
-		if (!first) result << ' ';
-		result << token;
-		first = false;
-	}
-	if (!first) result << ' ';
-	result << "/" << name << "=" << value;
-	return result.str();
-}
-
-static bool ReplaceTextInFile(const std::filesystem::path& path,
+static bool RelocateRecipePathsInFile(const std::filesystem::path& path,
 	const std::string& from, const std::string& to)
 {
 	if (from.empty() || from == to)
@@ -212,17 +156,32 @@ static bool ReplaceTextInFile(const std::filesystem::path& path,
 	std::ifstream input(path, std::ios::binary);
 	if (!input)
 		return false;
-	std::string content((std::istreambuf_iterator<char>(input)),
-		std::istreambuf_iterator<char>());
-	input.close();
-	size_t offset = 0;
-	while ((offset = content.find(from, offset)) != std::string::npos) {
-		content.replace(offset, from.size(), to);
-		offset += to.size();
+	std::ostringstream rewritten;
+	std::string line;
+	bool relocated = false;
+	while (std::getline(input, line)) {
+		if (!line.empty() && line.back() == '\r')
+			line.pop_back();
+		const std::string marker = "; CmdLine:";
+		const size_t markerAt = line.find(marker);
+		if (markerAt != std::string::npos) {
+			const std::string recipe = line.substr(markerAt + marker.size());
+			bool lineRelocated = false;
+			const std::string relocatedRecipe = RelocateRecipePathPrefix(
+				recipe, from, to, &lineRelocated);
+			relocated = relocated || lineRelocated;
+			line = line.substr(0, markerAt + marker.size()) + " "
+				+ relocatedRecipe;
+		}
+		rewritten << line << '\n';
 	}
+	input.close();
+	if (!relocated)
+		return false;
 	std::ofstream output(path, std::ios::binary | std::ios::trunc);
 	if (!output)
 		return false;
+	const std::string content = rewritten.str();
 	output.write(content.data(), static_cast<std::streamsize>(content.size()));
 	return static_cast<bool>(output);
 }
@@ -898,7 +857,7 @@ bool RastaConverter::SnapshotBeforeMaskEdit()
 			snapshotError = "missing saved recipe " + Utf8String(recipeFile);
 			break;
 		}
-		if (!ReplaceTextInFile(recipeFile, cfg.output_file, snapshotPrefix)) {
+		if (!RelocateRecipePathsInFile(recipeFile, cfg.output_file, snapshotPrefix)) {
 			snapshotComplete = false;
 			snapshotError =
 				"could not make the saved recipe self-contained";
@@ -934,7 +893,7 @@ void RastaConverter::SaveEditedMaskArtifact()
 		std::ostringstream strength;
 		strength << std::setprecision(17) << cfg.details_strength;
 		cfg.command_line = SetRecipeOption(cfg.command_line, "details",
-			"\"" + artifact + "\"");
+			artifact);
 		cfg.command_line = SetRecipeOption(cfg.command_line, "details_mode",
 			cfg.details_mode);
 		cfg.command_line = SetRecipeOption(cfg.command_line, "details_val",
@@ -1273,7 +1232,7 @@ void RastaConverter::BranchCurrentRun()
 	const std::string previousOutput = cfg.output_file;
 	cfg.output_file = nextOutput;
 	cfg.command_line = SetRecipeOption(cfg.command_line, "output",
-		"\"" + cfg.output_file + "\"", {"o"});
+		cfg.output_file, {"o"});
 	m_snapshot_count = 0;
 	m_mask_edited_since_save = true; // force the mask artifact into the branch
 	if (input_bitmap)
@@ -1308,7 +1267,7 @@ void RastaConverter::SaveEditedTargetArtifact()
 	}
 	cfg.target_file = artifact;
 	cfg.command_line = SetRecipeOption(cfg.command_line, "target",
-		"\"" + artifact + "\"");
+		artifact);
 }
 
 bool RastaConverter::OtherDithering()
@@ -1931,9 +1890,9 @@ bool RastaConverter::SaveAntic4Data(const std::string& screenFilename,
 		}
 	}
 
-	std::ofstream screenOut(screenFilename,
+	std::ofstream screenOut(Utf8Path(screenFilename),
 		std::ios::out | std::ios::binary | std::ios::trunc);
-	std::ofstream fontOut(fontFilename,
+	std::ofstream fontOut(Utf8Path(fontFilename),
 		std::ios::out | std::ios::binary | std::ios::trunc);
 	if (!screenOut || !fontOut)
 		Error("Unable to create ANTIC 4 screen/font output");
@@ -3099,13 +3058,12 @@ void RastaConverter::SaveBestSolution()
 		return;
 	}
 
-	// Build directory prefix from cfg.output_file so dual outputs go to the same folder
-	std::string __out_dir_prefix;
-	{
-		std::string __of = cfg.output_file;
-		size_t __pos = __of.find_last_of("/\\");
-		__out_dir_prefix = (__pos == std::string::npos) ? std::string() : __of.substr(0, __pos + 1);
-	}
+	// Build dual outputs in the same native directory as the configured output.
+	const std::string dualOutputDirectory = Utf8ParentPath(cfg.output_file);
+	auto dualPath = [&dualOutputDirectory](const std::string& name) {
+		return dualOutputDirectory.empty()
+			? name : Utf8JoinPath(dualOutputDirectory, name);
+	};
 
 	// Optimize both programs first, then render all derived files from those exact
 	// optimized programs. The old dual path saved .opt after optimization but
@@ -3122,8 +3080,8 @@ void RastaConverter::SaveBestSolution()
 		picB = m_best_pic_B.raster_lines.empty()
 			? m_eval_gstate.m_best_pic : m_best_pic_B;
 	}
-	SaveRasterProgram(__out_dir_prefix + string("out_dual_A.rp"), &picA);
-	SaveRasterProgram(__out_dir_prefix + string("out_dual_B.rp"), &picB);
+	SaveRasterProgram(dualPath("out_dual_A.rp"), &picA);
+	SaveRasterProgram(dualPath("out_dual_B.rp"), &picB);
 	OptimizeRasterProgram(&picA);
 	OptimizeRasterProgram(&picB);
 
@@ -3138,22 +3096,23 @@ void RastaConverter::SaveBestSolution()
 	RenderCreatedPictureInto(picB, createdB, targetsB, spritesB);
 	ShowCreatedPicturesDual(createdA, createdB);
 
-	SaveRasterProgram(__out_dir_prefix + string("out_dual_A.opt"), &picA);
-	SavePMGWithSprites(__out_dir_prefix + string("out_dual_A.pmg"), spritesA);
-	SaveScreenDataFromTargets((__out_dir_prefix + string("out_dual_A.mic")).c_str(),
+	SaveRasterProgram(dualPath("out_dual_A.opt"), &picA);
+	SavePMGWithSprites(dualPath("out_dual_A.pmg"), spritesA);
+	SaveScreenDataFromTargets(dualPath("out_dual_A.mic").c_str(),
 		targetsA);
 	if (output_bitmap_A)
-		SavePicture(__out_dir_prefix + string("out_dual_A.png"), output_bitmap_A);
+		SavePicture(dualPath("out_dual_A.png"), output_bitmap_A);
 
-	SaveRasterProgram(__out_dir_prefix + string("out_dual_B.opt"), &picB);
-	SavePMGWithSprites(__out_dir_prefix + string("out_dual_B.pmg"),
+	SaveRasterProgram(dualPath("out_dual_B.opt"), &picB);
+	SavePMGWithSprites(dualPath("out_dual_B.pmg"),
 		spritesB);
-	SaveScreenDataFromTargets((__out_dir_prefix + string("out_dual_B.mic")).c_str(),
+	SaveScreenDataFromTargets(dualPath("out_dual_B.mic").c_str(),
 		targetsB);
 	if (output_bitmap_B)
-		SavePicture(__out_dir_prefix + string("out_dual_B.png"), output_bitmap_B);
+		SavePicture(dualPath("out_dual_B.png"), output_bitmap_B);
 	// Blended
-	if (output_bitmap_blended) SavePicture(__out_dir_prefix + string("out_dual_blended.png"), output_bitmap_blended);
+	if (output_bitmap_blended)
+		SavePicture(dualPath("out_dual_blended.png"), output_bitmap_blended);
 
 	// Stats
 	SaveStatistics((cfg.output_file+".csv").c_str());
@@ -3876,21 +3835,19 @@ bool RastaConverter::Resume()
 {
 	// Derive base from cfg.output_file and directory
 	std::string base = cfg.output_file.empty() ? std::string("output.png") : cfg.output_file;
-	// Split dir and filename
-	std::string dir;
-	{
-		size_t pos = base.find_last_of("/\\");
-		if (pos != std::string::npos) { dir = base.substr(0, pos + 1); }
-	}
+	const std::string dir = Utf8ParentPath(base);
+	auto resumePath = [&dir](const std::string& name) {
+		return dir.empty() ? name : Utf8JoinPath(dir, name);
+	};
 	// Expected single-frame paths
 	std::string sf_rp = base + ".rp";
 	std::string sf_ini = base + ".rp.ini";
 	std::string sf_opt = base + ".optstate";
 	// Expected dual-frame paths
-	std::string df_a_rp = dir + "out_dual_A.rp";
-	std::string df_a_ini = dir + "out_dual_A.rp.ini";
-	std::string df_b_rp = dir + "out_dual_B.rp";
-	std::string df_b_ini = dir + "out_dual_B.rp.ini";
+	std::string df_a_rp = resumePath("out_dual_A.rp");
+	std::string df_a_ini = resumePath("out_dual_A.rp.ini");
+	std::string df_b_rp = resumePath("out_dual_B.rp");
+	std::string df_b_ini = resumePath("out_dual_B.rp.ini");
 
 	// Prefer dual if both A and B exist; fallback to single-frame
 	auto file_exists = [](const std::string& path) -> bool {
