@@ -29,6 +29,7 @@ Which build do you want?
 |---|---|---|
 | The normal program: setup screen, dashboard, editor | *(defaults)* | FreeImage, SDL3, SDL3_ttf; Dear ImGui is fetched automatically |
 | A headless binary for scripts, servers or CI | `-DBUILD_NO_GUI=ON` | FreeImage only |
+| A self-contained distributable | `-DBUILD_STATIC=ON` | Static third-party libraries; OS libraries remain dynamic |
 | The old three-thumbnail display, no Dear ImGui | `-DENABLE_LIVE_UI=OFF` | FreeImage, SDL3, SDL3_ttf |
 
 If CMake is unavailable, `src/Makefile` builds the headless target directly
@@ -92,6 +93,13 @@ A manifest `vcpkg.json` is provided. If you set `VCPKG_ROOT`, wrappers will use 
 cmake --preset x64-release -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake"
 ```
 On macOS/Linux, replace `%VCPKG_ROOT%` with `$VCPKG_ROOT`.
+
+For a release-style self-contained build, also pass `-DBUILD_STATIC=ON` and a
+static vcpkg triplet: `x64-windows-static`, `x64-linux`, or `arm64-osx`. Linux
+GUI builds additionally pass `-DVCPKG_MANIFEST_FEATURES=linux-desktop`. This
+embeds FreeImage, SDL3, SDL3_ttf, and their third-party dependencies. Standard
+operating-system libraries, compiler runtimes, and macOS frameworks remain
+dynamic by design.
 
 Build with scripts
 ------------------

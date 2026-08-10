@@ -40,14 +40,22 @@ if(NO_GUI)
     set(BUILD_NO_GUI ON)
 endif()
 
+# BUILD_STATIC means a self-contained distributable, not a fully static
+# operating-system binary.  The latter is unsupported by macOS and is fragile
+# with glibc/desktop integration on Linux.  Select static third-party libraries
+# before any find_package/FetchContent call, and use the static MSVC runtime.
+if(BUILD_STATIC)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build dependencies as static libraries" FORCE)
+    if(MSVC)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
+    message(STATUS "Self-contained build: static third-party libraries enabled")
+endif()
+
 # The C runtime every target links, decided in one place and before any target
 # is created. Per-target /MT is not enough: our ImGui library and everything
 # vcpkg builds would keep the dynamic default, and mixing the two fails to link
 # with unresolved __imp_ symbols.
-if(MSVC AND BUILD_STATIC)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-endif()
-
 # What CPU the Release build targets.
 #
 # This used to be -march=native unconditionally, which is right for a binary you
@@ -353,11 +361,18 @@ set(RESOLVED_FREEIMAGE_LIBS "")
 set(RESOLVED_FREEIMAGE_INCLUDES "")
 find_package(FreeImage CONFIG QUIET)
 if(NOT TARGET FreeImage::FreeImage)
+    # vcpkg's FreeImage port currently exports this lowercase namespace.
+    find_package(freeimage CONFIG QUIET)
+endif()
+if(NOT TARGET FreeImage::FreeImage)
     find_package(FreeImage QUIET)
 endif()
 if(TARGET FreeImage::FreeImage)
     set(RESOLVED_FREEIMAGE_LIBS FreeImage::FreeImage)
     message(STATUS "FreeImage: using imported target FreeImage::FreeImage")
+elseif(TARGET freeimage::FreeImage)
+    set(RESOLVED_FREEIMAGE_LIBS freeimage::FreeImage)
+    message(STATUS "FreeImage: using imported target freeimage::FreeImage")
 elseif(DEFINED FREEIMAGE_LIBRARIES OR DEFINED FreeImage_LIBRARIES)
     if(DEFINED FREEIMAGE_LIBRARIES)
         set(RESOLVED_FREEIMAGE_LIBS ${FREEIMAGE_LIBRARIES})
@@ -467,8 +482,13 @@ if(NOT BUILD_NO_GUI)
             message(STATUS "No usable system SDL3 found - fetching SDL3 ${_RASTA_SDL3_VERSION} from source")
             message(STATUS "  (to avoid this, install SDL3 and set SDL3_DIR or CMAKE_PREFIX_PATH)")
 
-            set(SDL_SHARED ON  CACHE BOOL "Build SDL3 shared library" FORCE)
-            set(SDL_STATIC OFF CACHE BOOL "Build SDL3 static library" FORCE)
+            if(BUILD_STATIC)
+                set(SDL_SHARED OFF CACHE BOOL "Build SDL3 shared library" FORCE)
+                set(SDL_STATIC ON  CACHE BOOL "Build SDL3 static library" FORCE)
+            else()
+                set(SDL_SHARED ON  CACHE BOOL "Build SDL3 shared library" FORCE)
+                set(SDL_STATIC OFF CACHE BOOL "Build SDL3 static library" FORCE)
+            endif()
             set(SDL_TEST_LIBRARY OFF CACHE BOOL "Build SDL3 test library" FORCE)
             set(SDL_TESTS         OFF CACHE BOOL "Build SDL3 tests" FORCE)
             set(SDL_EXAMPLES      OFF CACHE BOOL "Build SDL3 examples" FORCE)
@@ -573,32 +593,18 @@ if(ENABLE_LIVE_UI AND NOT BUILD_NO_GUI)
     endif()
 endif()
 
-# Static linking configuration
+# Self-contained linking configuration. Dependency selection has already been
+# made above; only compiler-runtime flags and required consumer definitions
+# belong here.
 if(BUILD_STATIC)
-    # Force static linking for all libraries
-    set(CMAKE_FIND_LIBRARY_SUFFIXES .a .lib)
-    set(BUILD_SHARED_LIBS OFF)
-    
-    # Add static linking flags
     if(WIN32)
-        # Windows static linking
-        if(MSVC)
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /NODEFAULTLIB:msvcrt")
-        endif()
         if(NOT BUILD_NO_GUI)
             target_compile_definitions(RastaConverter PRIVATE FREEIMAGE_LIB)
         endif()
         if(BUILD_NO_GUI)
             target_compile_definitions(RastaConverter-NO_GUI PRIVATE FREEIMAGE_LIB)
         endif()
-    else()
-        # Linux/macOS static linking
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
-        # Note: Full static linking on Linux requires static versions of all dependencies
-        message(STATUS "Static linking enabled - ensure static versions of FreeImage and SDL3 are available")
     endif()
-    
-    message(STATUS "Static linking enabled")
 else()
     message(STATUS "Dynamic linking (default)")
 endif()

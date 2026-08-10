@@ -28,33 +28,38 @@ jobs:
         include:
           - name: linux_x64
             os: ubuntu-latest
+            triplet: x64-linux
+            manifest_features: linux-desktop
           - name: macos_arm64
             os: macos-14
+            triplet: arm64-osx
+            manifest_features: ''
           - name: win_x64
             os: windows-latest
+            triplet: x64-windows-static
+            manifest_features: ''
 
     steps:
       - uses: actions/checkout@v4
 
-      # FreeImage is the one dependency with no from-source fallback in
-      # CMakeLists; SDL3 and SDL3_ttf are fetched automatically when a platform
-      # has no package for them, which is currently every platform here.
+      # SDL's static Linux backend still needs the platform development headers;
+      # the distributable does not link to SDL or FreeImage shared libraries.
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libfreeimage-dev \
+          sudo apt-get install -y ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev \
             libxinerama-dev libxkbcommon-dev libwayland-dev wayland-protocols \
             libegl1-mesa-dev libgl1-mesa-dev libasound2-dev libpulse-dev
 
-      - name: Install dependencies (macOS)
+      - name: Install build tools (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja freeimage
+        run: brew install ninja
 
-      # Windows dependencies come from the vcpkg manifest (vcpkg.json), which
-      # the toolchain file installs during configure. Naming packages here is an
-      # error in manifest mode.
+      # Third-party libraries on every platform come from the vcpkg manifest.
+      # The selected triplets make them static (and use the static CRT on
+      # Windows); naming packages here would be an error in manifest mode.
 
       # Windows uses MSVC through the default Visual Studio generator - that is
       # what BUILD.md recommends and what the released binaries are built with.
@@ -66,9 +71,16 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             cmake -S . -B build \
+              -DBUILD_STATIC=ON \
+              -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} \
+              -DVCPKG_MANIFEST_FEATURES="${{ matrix.manifest_features }}" \
               -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           else
-            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_STATIC=ON \
+              -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} \
+              -DVCPKG_MANIFEST_FEATURES="${{ matrix.manifest_features }}" \
+              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           fi
 
       - name: Build
@@ -77,6 +89,30 @@ jobs:
       - name: Test
         working-directory: build
         run: ctest --output-on-failure -C Release
+
+      - name: Verify self-contained dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          deps=$(ldd build/Release/RastaConverter)
+          echo "$deps"
+          ! grep -Eqi 'SDL|freeimage' <<< "$deps"
+
+      - name: Verify self-contained dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          deps=$(otool -L build/Release/RastaConverter)
+          echo "$deps"
+          ! grep -Eqi 'SDL|freeimage|homebrew|/opt/' <<< "$deps"
+
+      - name: Verify self-contained dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dlls = Get-ChildItem build/Release -Filter *.dll
+          $dlls | Format-Table -AutoSize
+          if ($dlls) { throw 'Static Windows build unexpectedly produced runtime DLLs' }
 
       # A binary that cannot convert a picture is not worth shipping. Two
       # belts: the offscreen video driver gives SDL something to open, and
@@ -114,6 +150,9 @@ jobs:
         shell: bash
         run: |
           cmake -S . -B build-console -DBUILD_NO_GUI=ON \
+            -DBUILD_STATIC=ON \
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} \
+            -DVCPKG_MANIFEST_FEATURES="${{ matrix.manifest_features }}" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
 
       - name: Build console smoke binary (Windows)

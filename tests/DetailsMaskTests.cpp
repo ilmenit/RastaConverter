@@ -31,6 +31,9 @@ int main(int argc, char** argv)
 {
 	Require(argc == 2 || argc == 3,
 		"test requires a temporary output path and optional real mask");
+	// Static FreeImage builds do not have a shared-library loader hook to do
+	// this implicitly. Mirror the application's explicit initialization.
+	FreeImage_Initialise(TRUE);
 	DetailsMask neutral;
 	neutral.InitializeNeutral(4, 3);
 	Require(!neutral.Empty(), "a neutral live mask must still own its pixels");
@@ -182,5 +185,6 @@ int main(int argc, char** argv)
 	}
 
 	std::cout << "DetailsMaskTests passed\n";
+	FreeImage_DeInitialise();
 	return 0;
 }

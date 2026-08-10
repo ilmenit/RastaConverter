@@ -1,9 +1,28 @@
 {
   "name": "rasta-converter",
-  "version-string": "1.0-RC4",
+  "version-string": "1.0-RC12",
   "dependencies": [
     "freeimage",
-    "sdl3",
+    {
+      "name": "sdl3",
+      "default-features": false
+    },
     "sdl3-ttf"
-  ]
+  ],
+  "features": {
+    "linux-desktop": {
+      "description": "Build SDL3 with the Linux X11 and Wayland backends",
+      "supports": "linux",
+      "dependencies": [
+        {
+          "name": "sdl3",
+          "default-features": false,
+          "features": [
+            "wayland",
+            "x11"
+          ]
+        }
+      ]
+    }
+  }
 }

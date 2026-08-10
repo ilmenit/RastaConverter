@@ -2,6 +2,9 @@ ChangeLog
 =========
 
 RastaConverter1.0-RC12     2026-08-10 [RELEASE CANDIDATE]
+* Release packages are now self-contained builds on Linux, macOS and Windows.
+  FreeImage, SDL3, SDL3_ttf and their third-party dependencies are linked
+  statically, so users no longer need SDL3 or FreeImage installed.
 * Fixed Continue/Resume losing backslashes from quoted Windows details-mask
   paths. Saved recipes now round-trip spaces, quotes, backslashes, Unicode and
   control characters, while remaining compatible with recipes written by
